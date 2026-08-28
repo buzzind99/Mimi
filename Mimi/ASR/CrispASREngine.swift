@@ -9,11 +9,12 @@ import Foundation
 ///
 ///   - `push` appends 160 ms chunks to a rolling utterance buffer (bounded by
 ///     a forced-final cap) plus a 10 s window used for partial decodes.
-///   - FireRedVAD (via `crispasr_vad_slices`) runs on the decode queue every
-///     500 ms and is the authoritative speech signal: it separates speech
-///     from BGM, gates partial decodes, and finalizes an utterance once it
-///     has confirmed `endpointSamples` of silence after the last speech span.
-///     Buffers the VAD finds speechless are discarded without decoding.
+///   - FireRedVAD (via `crispasr_vad_slices`) runs on a dedicated VAD queue
+///     every 500 ms and is the authoritative speech signal: it separates
+///     speech from BGM, gates partial decodes, and finalizes an utterance
+///     once it has confirmed `endpointSamples` of silence after the last
+///     speech span. Buffers the VAD finds speechless are discarded without
+///     decoding.
 ///   - A cheap per-chunk RMS check (`utteranceHasLoudAudio`) is only a
 ///     backstop so truly silent audio is never decoded — including in
 ///     degraded mode (VAD model unavailable: cap-only finals, no partials).
@@ -22,10 +23,13 @@ import Foundation
 ///     "redecode" final mode) and posts one clean `.final`.
 ///
 /// Threading: pushes land on the caller's audio thread but only take the
-/// state lock; actual decoding (and VAD analysis) runs on a dedicated serial
-/// queue so the main thread's 60 ms `poll()` loop never blocks behind a
-/// multi-second decode. The session itself is only ever touched by one
-/// decode at a time.
+/// state lock; actual decoding runs on a dedicated serial queue so the main
+/// thread's 60 ms `poll()` loop never blocks behind a multi-second decode.
+/// VAD analysis runs on its own serial queue: a qwen3 decode takes seconds,
+/// and endpointing must never wait behind one (a starved VAD freezes both
+/// the partial gate and silence detection). The two job types interlock
+/// only through the state lock; the C library serializes VAD access to the
+/// cached model internally.
 final class CrispASREngine: Transcriber {
     let isMock = false
 
@@ -61,7 +65,7 @@ final class CrispASREngine: Transcriber {
     private static let vadThreshold: Float = 0.5
     private static let vadMinSpeechMS = 250
     /// Must equal `endpointSamples` — see the comment there.
-    private static let vadMinSilenceMS = 800
+    private static let vadMinSilenceMS = 600
     private static let vadPadMS = 30
     /// Don't discard a short speechless buffer on a single VAD pass — onsets
     /// can be missed on very short windows; wait until the buffer is at
@@ -209,9 +213,10 @@ final class CrispASREngine: Transcriber {
 
     private let lock = NSLock()
     private let decodeQueue = DispatchQueue(label: "dev.mimi.asr.decode", qos: .userInitiated)
-    /// Signaled after every decode completion so `finish` can wait out an
-    /// in-flight decode. Never waited on by the decode path itself.
-    private let decodeFinished = DispatchSemaphore(value: 0)
+    private let vadQueue = DispatchQueue(label: "dev.mimi.asr.vad", qos: .userInitiated)
+    /// Signaled after every decode or VAD completion so `finish` can wait
+    /// out in-flight work. Never waited on by the job paths themselves.
+    private let jobFinished = DispatchSemaphore(value: 0)
 
     private var session: OpaquePointer?
 
@@ -230,6 +235,7 @@ final class CrispASREngine: Transcriber {
     private var lastPartialSpeechEndSample = 0
     private var processedCount = 0
     private var decodeInFlight = false
+    private var vadInFlight = false
     private var finishing = false
     private var inbox: [ASREvent] = []
     private var consecutiveDecodeFailures = 0
@@ -301,6 +307,7 @@ final class CrispASREngine: Transcriber {
         lastPartialSpeechEndSample = 0
         processedCount = 0
         decodeInFlight = false
+        vadInFlight = false
         finishing = false
         inbox = []
         lastVADDispatchSample = 0
@@ -340,14 +347,16 @@ final class CrispASREngine: Transcriber {
         lock.unlock()
     }
 
-    /// Caller holds `lock`. Dispatches exactly one job: an endpoint (final)
-    /// decode first, then a due VAD pass, then a step-spaced window (partial)
-    /// decode. VAD outranks partials: a decode that runs longer than the 1 s
-    /// step would otherwise chain partials forever and starve endpointing.
+    /// Caller holds `lock`. Dispatches any due VAD pass (on its own queue)
+    /// plus at most one decode job: an endpoint (final) decode first, else a
+    /// step-spaced window (partial) decode. VAD and decode jobs run
+    /// concurrently — the VAD is what feeds the endpoint and partial gates,
+    /// so it must keep flowing while a multi-second decode occupies the
+    /// decode queue.
     private func maybeScheduleWorkLocked() {
-        guard session != nil, !finishing, !decodeInFlight else { return }
+        guard session != nil, !finishing else { return }
+        maybeScheduleVADLocked()
         if maybeScheduleFinalLocked() { return }
-        if maybeScheduleVADLocked() { return }
         maybeSchedulePartialLocked()
     }
 
@@ -401,15 +410,15 @@ final class CrispASREngine: Transcriber {
     /// `vadCheckIntervalSamples` of new audio. Returns true if dispatched.
     @discardableResult
     private func maybeScheduleVADLocked() -> Bool {
-        guard vadActive, !utterance.isEmpty,
+        guard vadActive, !vadInFlight, !utterance.isEmpty,
             totalSamples - lastVADDispatchSample >= Self.vadCheckIntervalSamples
         else { return false }
         lastVADDispatchSample = totalSamples
         let pcm = utterance
         let start = utteranceStartSample
         let generation = utteranceGeneration
-        decodeInFlight = true
-        decodeQueue.async { [weak self] in
+        vadInFlight = true
+        vadQueue.async { [weak self] in
             self?.runVADJob(pcm: pcm, utteranceStart: start, generation: generation)
         }
         return true
@@ -418,8 +427,8 @@ final class CrispASREngine: Transcriber {
     /// Caller holds `lock`. Dispatches the step-spaced partial decode, gated
     /// on VAD-confirmed speech (BGM-only stretches must not put hallucinated
     /// drafts on the HUD) and on the VAD having found new speech since the
-    /// last partial — a pause must not re-decode an unchanged window, which
-    /// both freezes the HUD draft and starves the VAD needed for endpointing.
+    /// last partial — a pause must not re-decode an unchanged window (which
+    /// would just freeze the HUD draft on identical text).
     private func maybeSchedulePartialLocked() {
         guard session != nil, !finishing, !decodeInFlight, !utterance.isEmpty,
             utteranceHasSpeech,
@@ -445,14 +454,15 @@ final class CrispASREngine: Transcriber {
         }
     }
 
-    /// Runs on `decodeQueue`. One job at a time (guarded by `decodeInFlight`
-    /// and the serial queue). Updates speech state under `lock`; the
-    /// `crispasr_vad_slices` call itself is lock-free.
+    /// Runs on `vadQueue`. One job at a time (guarded by `vadInFlight` and
+    /// the serial queue). Updates speech state under `lock`; the
+    /// `crispasr_vad_slices` call itself is lock-free (the C library
+    /// serializes access to the cached model internally).
     private func runVADJob(pcm: [Float], utteranceStart: Int, generation: Int) {
         defer {
-            decodeFinished.signal()
+            jobFinished.signal()
             lock.lock()
-            decodeInFlight = false
+            vadInFlight = false
             // The VAD verdict may make an endpoint (or a decode step) due.
             maybeScheduleWorkLocked()
             lock.unlock()
@@ -498,12 +508,21 @@ final class CrispASREngine: Transcriber {
         defer { fnVadFree(spansPtr) }
 
         // Spans are float pairs [start_s, end_s] relative to the snapshot.
+        // Every pass re-analyzes the whole utterance, so the latest pass's
+        // last span end supersedes earlier ones. This matters during the
+        // first `vadMinSilenceMS` of a pause: the VAD still reports the
+        // open segment flushed at the analyzed-buffer end (firered closes a
+        // span only after `min_silence_ms` of silence), which lies *inside*
+        // the silence. Keeping a max() would ratchet speechEnd forward and
+        // blind the endpoint until `speechEnd + endpointSamples` — merging
+        // any sentence gap shorter than that. The closed span from the
+        // confirming pass must therefore replace the flushed value.
         let firstStart = utteranceStart
             + Int(spansPtr.pointee * Float(Self.sampleRate))
         let lastEnd = utteranceStart
             + Int(spansPtr[2 * (Int(count) - 1) + 1] * Float(Self.sampleRate))
         vadFirstSpeechStartSample = vadFirstSpeechStartSample ?? firstStart
-        vadLastSpeechEndSample = max(vadLastSpeechEndSample ?? 0, lastEnd)
+        vadLastSpeechEndSample = lastEnd
         utteranceHasSpeech = true
     }
 
@@ -554,7 +573,7 @@ final class CrispASREngine: Transcriber {
         let decodeStart = ContinuousClock.now
         #endif
         defer {
-            decodeFinished.signal()
+            jobFinished.signal()
             lock.lock()
             decodeInFlight = false
             // A decode finishing may mean the next step (or a due VAD pass)
@@ -656,13 +675,13 @@ final class CrispASREngine: Transcriber {
         lock.lock()
         finishing = true
         lock.unlock()
-        // Wait (bounded) for any in-flight decode to post its result.
+        // Wait (bounded) for any in-flight decode or VAD pass to finish.
         while true {
             lock.lock()
-            let inFlight = decodeInFlight
+            let inFlight = decodeInFlight || vadInFlight
             lock.unlock()
             if !inFlight { break }
-            _ = decodeFinished.wait(timeout: .now() + 30)
+            _ = jobFinished.wait(timeout: .now() + 30)
         }
 
         // Flush any open utterance synchronously — capture has already
