@@ -113,13 +113,25 @@ cp -f "${SDK_DIR}/include/crispasr/crispasr.h" \
       "${SDK_DIR}/include/crispasr/crispasr_session.h" \
       "${REPO_ROOT}/Mimi/native/include/crispasr/"
 
-# 6. Ad-hoc sign everything so the app loads it locally.
+# 6. Fetch the FireRedVAD model used for speech endpointing (2.4 MB). The
+#    dylib dispatches on the basename, so it must keep this exact name;
+#    package.sh bundles it along with the dylibs.
+VAD_MODEL="${FRAMEWORKS_DIR}/firered-vad.gguf"
+VAD_URL="https://huggingface.co/cstr/firered-vad-GGUF/resolve/main/firered-vad.gguf"
+if [[ ! -f "${VAD_MODEL}" ]]; then
+  echo "==> Fetching FireRedVAD model"
+  curl -fL --retry 3 -o "${VAD_MODEL}" "${VAD_URL}"
+else
+  echo "==> FireRedVAD model already present at ${VAD_MODEL}"
+fi
+
+# 7. Ad-hoc sign everything so the app loads it locally.
 echo "==> Ad-hoc signing"
 find "${FRAMEWORKS_DIR}" -name "*.dylib" -o -name crispasr | while read -r f; do
   codesign --force --sign - "${f}"
 done
 
-# 7. Smoke test: transcribe a short file against the JA anime fine-tune.
+# 8. Smoke test: transcribe a short file against the JA anime fine-tune.
 if [[ -f "${MODEL}" ]]; then
   echo "==> Smoke test (file mode, backend qwen3)"
   "${FRAMEWORKS_DIR}/crispasr" --backend qwen3 -m "${MODEL}" -l ja -t 4 \
