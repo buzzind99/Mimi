@@ -50,6 +50,35 @@ final class RingBuffer {
         return true
     }
 
+    /// Reads up to `count` bytes into `dest` without consuming them.
+    /// Returns the number of bytes peeked.
+    func peek(into dest: UnsafeMutableRawPointer, count: Int) -> Int {
+        let avail = min(count, availableBytes)
+        guard avail > 0 else { return 0 }
+        let t = tail.value & mask
+        let first = min(avail, capacity - t)
+        dest.copyMemory(from: storage.advanced(by: t), byteCount: first)
+        if avail > first {
+            dest.advanced(by: first).copyMemory(from: storage, byteCount: avail - first)
+        }
+        return avail
+    }
+
+    /// Consumes `count` bytes previously inspected via `peek`.
+    func skip(_ count: Int) {
+        tail.add(min(count, availableBytes))
+    }
+
+    /// Writer-side accounting for a block dropped before any write.
+    func noteDropped(_ byteCount: Int) {
+        droppedBytes &+= byteCount
+    }
+
+    /// Consumer-side recovery: discard everything currently buffered.
+    func dropBuffered() {
+        tail.store(head.value)
+    }
+
     /// Reads up to `count` bytes into `dest`; returns number actually read.
     func read(into dest: UnsafeMutableRawPointer, count: Int) -> Int {
         let avail = min(count, availableBytes)
