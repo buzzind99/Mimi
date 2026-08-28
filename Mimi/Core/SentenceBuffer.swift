@@ -19,6 +19,25 @@ final class SentenceBuffer {
     /// Clause-boundary candidates for tier-3 splits, longest match first.
     private static let clauseBoundaries = ["けど", "から", "ので", "って", "、", ","]
 
+    /// True if the string contains at least one "content" character
+    /// (kana, kanji, Latin letter, or digit). Punctuation/symbols only
+    /// (e.g. "...", "...?") return false.
+    private static func hasContent(_ s: String) -> Bool {
+        s.unicodeScalars.contains { scalar in
+            switch scalar.value {
+            case 0x3040...0x309F, // hiragana
+                 0x30A0...0x30FF, // katakana (incl. long-vowel mark ー)
+                 0x4E00...0x9FFF, // CJK unified ideographs
+                 0x30...0x39:     // ASCII digits
+                return true
+            case 0x41...0x5A, 0x61...0x7A: // Latin letters
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
     let config = Config()
 
     private(set) var nextIndex = 0
@@ -36,6 +55,10 @@ final class SentenceBuffer {
     func append(finalText piece: String, startSample: Int, endSample: Int) {
         let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Drop symbol-only finals (e.g. "...", "...?") when they would
+        // start a new sentence; keep them as trailing punctuation when
+        // the buffer already has content.
+        if isEmpty && !Self.hasContent(trimmed) { return }
         if isEmpty {
             self.startSample = startSample
             isEmpty = false
@@ -103,6 +126,13 @@ final class SentenceBuffer {
 
     private func close() {
         guard !isEmpty else { return }
+        // Never emit a symbol-only sentence (e.g. a split tail that is
+        // just punctuation).
+        guard Self.hasContent(text) else {
+            text = ""
+            isEmpty = true
+            return
+        }
         emit()
     }
 
