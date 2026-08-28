@@ -101,10 +101,20 @@ final class NativeASREngine: Transcriber {
     private var pushedSamples = 0
     private var lastFinalEndSample = 0
     private var processedCount = 0
+    private var consecutivePushFailures = 0
 
     var processedSamples: Int {
         queue.sync { processedCount }
     }
+
+    /// Silence length that closes a streaming utterance (mid-stream finals).
+    /// Matches SentenceBuffer's 1 s silence tier with headroom.
+    static let endpointSilenceMS = 800
+
+    /// Called on the ASR queue when a push fails. Throttled to the first
+    /// failure and then once every 32 consecutive failures; `count` is the
+    /// current consecutive-failure tally.
+    var onPushError: ((Int, String) -> Void)?
 
     /// Bounded in-flight pushes so the worker never outruns ASR indefinitely.
     private let inFlight = DispatchSemaphore(value: 16)
@@ -119,6 +129,8 @@ final class NativeASREngine: Transcriber {
     // MARK: - Library binding
 
     private static let dylibCandidates: [String?] = [
+        // Test/CI override (absolute path).
+        ProcessInfo.processInfo.environment["MIMI_ASR_DYLIB"],
         // Bare name: resolved via the app's LC_RPATH (covers the dev
         // checkout via $(SRCROOT)/local/frameworks and the bundle via
         // @executable_path/../Frameworks).
@@ -189,6 +201,14 @@ final class NativeASREngine: Transcriber {
             backend.gpu = 0 // Metal backend (metal-asr preset), device 0
             var model = nemo_speech_asr_model_config()
             model.size = MemoryLayout<nemo_speech_asr_model_config>.size
+            // Mid-stream finals: without endpointing the stream only emits
+            // partials until finish(); SentenceBuffer and the latency readout
+            // are both driven by finals.
+            var endpointing = nemo_speech_asr_endpointing_config()
+            endpointing.size = MemoryLayout<nemo_speech_asr_endpointing_config>.size
+            endpointing.enable = true
+            endpointing.vad_based = false
+            endpointing.stop_history_eou_ms = Int32(Self.endpointSilenceMS)
             let pathStorage = modelPath.utf8CString
             var out: OpaquePointer?
             let status = pathStorage.withUnsafeBufferPointer { path -> nemo_speech_asr_status in
@@ -198,9 +218,12 @@ final class NativeASREngine: Transcriber {
                 config.size = MemoryLayout<nemo_speech_asr_recognizer_config>.size
                 return withUnsafePointer(to: &backend) { backendPtr in
                     withUnsafePointer(to: &model) { modelPtr in
-                        config.backend = backendPtr
-                        config.model = modelPtr
-                        return fnCreate(&config, &out)
+                        withUnsafePointer(to: &endpointing) { endpointingPtr in
+                            config.backend = backendPtr
+                            config.model = modelPtr
+                            config.endpointing = endpointingPtr
+                            return fnCreate(&config, &out)
+                        }
                     }
                 }
             }
@@ -237,13 +260,33 @@ final class NativeASREngine: Transcriber {
     func push(_ samples: [Float]) {
         inFlight.wait()
         queue.async { [weak self] in
-            defer { self?.inFlight.signal() }
-            guard let self, let stream = self.stream else { return }
+            guard let self else { return }
+            defer { self.inFlight.signal() }
+            guard let stream = self.stream else { return }
+            var status = NEMO_SPEECH_ASR_OK
             samples.withUnsafeBufferPointer { buf in
-                _ = self.fnPush(stream, buf.baseAddress, samples.count, 16_000)
+                status = self.fnPush(stream, buf.baseAddress, samples.count, 16_000)
             }
-            self.pushedSamples += samples.count
+            if status == NEMO_SPEECH_ASR_OK {
+                self.consecutivePushFailures = 0
+                self.pushedSamples += samples.count
+            } else {
+                // A failed push silently starves the decoder (next() keeps
+                // returning "need more audio" forever) — never ignore it.
+                self.consecutivePushFailures += 1
+                self.reportPushFailure()
+            }
         }
+    }
+
+    private func reportPushFailure() {
+        let n = consecutivePushFailures
+        guard n == 1 || n % 32 == 0 else { return }
+        let message = "ASR stream push failed (×\(n)): \(lastErrorText())"
+        #if DEBUG
+        print("[asr] \(message)")
+        #endif
+        onPushError?(n, message)
     }
 
     func poll() -> ASREvent? {
@@ -251,19 +294,30 @@ final class NativeASREngine: Transcriber {
             guard let stream else { return nil }
             var out: OpaquePointer?
             let status = fnNext(stream, &out)
-            guard status == NEMO_SPEECH_ASR_OK, let result = out else { return nil }
+            guard status == NEMO_SPEECH_ASR_OK else {
+                #if DEBUG
+                print("[asr] stream next failed: \(lastErrorText())")
+                #endif
+                return nil
+            }
+            guard let result = out else { return nil }
             defer { fnResultDestroy(result) }
             return makeEvent(result: result)
         }
     }
 
     private func makeEvent(result: OpaquePointer) -> ASREvent? {
+        // Track the decoder cursor on every result (partials included) so the
+        // latency readout advances continuously, not only at finals.
+        let processed = fnResultAudioProcessed?(result) ?? 0
+        let processedSample = Int(processed * Float(SessionClock.sampleRate))
+        processedCount = max(processedCount, processedSample)
+
         let isFinal = fnResultIsFinal(result)
         let text = fnResultTranscript(result, 0).map { String(cString: $0) } ?? ""
         guard !text.isEmpty else { return nil }
         if isFinal {
-            let processed = fnResultAudioProcessed?(result) ?? 0
-            let endSample = max(Int(processed * Float(SessionClock.sampleRate)), pushedSamples)
+            let endSample = max(processedSample, pushedSamples)
             processedCount = max(processedCount, endSample)
             let startSample = lastFinalEndSample
             lastFinalEndSample = endSample
