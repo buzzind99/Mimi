@@ -83,7 +83,6 @@ final class AppModel: ObservableObject {
                 try await self.beginSession()
             } catch {
                 self.phase = .failed(error.localizedDescription)
-                self.errorMessage = error.localizedDescription
             }
         }
     }
