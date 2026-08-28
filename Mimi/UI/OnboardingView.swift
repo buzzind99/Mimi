@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Lite-variant onboarding: explains screen-recording permission + system
+/// Onboarding: explains screen-recording permission + system
 /// audio capture, and runs the model download
 /// (progress / resume / retry). A manually dropped-in GGUF is picked up
 /// automatically by `ModelLocator.resolve()`.

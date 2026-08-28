@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 #
-# Phase 4 — package unsigned release DMGs:
-#   build/Mimi-lite.dmg   (~10–30 MB, model downloaded on first launch)
-#   build/Mimi-full.dmg   (~700 MB, model bundled in Contents/Resources/models via repo models/)
+# Phase 4 — package unsigned release DMG:
+#   build/pkg/Mimi.dmg   (~10–30 MB, model downloaded on first launch)
 #
-# Both signed with the local self-signed "Mimi Dev" certificate so TCC
+# Signed with the local self-signed "Mimi Dev" certificate so TCC
 # permission grants (Screen Recording) persist across rebuilds.
 # Launch locally after "Open Anyway" / xattr -cr.
-# Usage: scripts/package.sh [path/to/model.gguf]
+# Usage: scripts/package.sh
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/pkg"
-MODEL_PATH="${1:-${REPO_ROOT}/models/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf}"
 SIGN_IDENTITY="${SIGN_IDENTITY:-Mimi Dev}"
 
 cd "${REPO_ROOT}"
@@ -84,9 +82,9 @@ stage_runtime() {
 }
 
 stage_readme() {
-  local app="$1" variant="$2"
+  local app="$1"
   cat > "/tmp/mimi-launch-notes.txt" <<EOF
-Mimi (${variant}) — real-time JP livestream transcriber/translator
+Mimi — real-time JP livestream transcriber/translator
 
 This app is signed with a self-signed local certificate ("Mimi Dev").
 First launch may be blocked by macOS:
@@ -116,28 +114,11 @@ make_dmg() {
     -format UDZO -ov "${BUILD_DIR}/${name}.dmg"
 }
 
-# --- lite ---
-build_app Mimi Release "${BUILD_DIR}/Mimi-lite.app"
-# Both schemes share one derived-data product dir; a previous full build can
-# leave the bundled model in the product. The lite target must never ship it.
-rm -rf "${BUILD_DIR}/Mimi-lite.app/Contents/Resources/models"
-stage_runtime "${BUILD_DIR}/Mimi-lite.app"
-stage_readme "${BUILD_DIR}/Mimi-lite.app" "lite"
-make_dmg "${BUILD_DIR}/Mimi-lite.app" "Mimi-lite"
-
-# --- full ---
-if [[ -f "${MODEL_PATH}" ]]; then
-  build_app Mimi-full Release "${BUILD_DIR}/Mimi-full.app"
-  stage_runtime "${BUILD_DIR}/Mimi-full.app"
-  stage_readme "${BUILD_DIR}/Mimi-full.app" "full"
-  make_dmg "${BUILD_DIR}/Mimi-full.app" "Mimi-full"
-else
-  echo
-  echo "==> Skipping Mimi-full: no model at ${MODEL_PATH}"
-  echo "    Download it first:"
-  echo "    hf download nvidia/nemotron-3.5-asr-streaming-0.6b \\"
-  echo "      nemotron-3.5-asr-streaming-0.6b.q8_0.gguf --local-dir ${REPO_ROOT}/models"
-fi
+# --- app ---
+build_app Mimi Release "${BUILD_DIR}/Mimi.app"
+stage_runtime "${BUILD_DIR}/Mimi.app"
+stage_readme "${BUILD_DIR}/Mimi.app"
+make_dmg "${BUILD_DIR}/Mimi.app" "Mimi"
 
 echo
 echo "Artifacts in ${BUILD_DIR}:"

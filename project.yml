@@ -27,32 +27,11 @@ targets:
     settings:
       base:
         PRODUCT_NAME: Mimi
-        PRODUCT_BUNDLE_IDENTIFIER: dev.mimi.app.lite
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mimi.app
         SWIFT_OBJC_BRIDGING_HEADER: Mimi/Bridging/MimiBridging.h
         HEADER_SEARCH_PATHS: "$(SRCROOT)/Mimi/native/include"
         LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/local/frameworks @executable_path/../Frameworks"
         INFOPLIST_KEY_NSScreenCaptureUsageDescription: "Mimi captures your Mac's system audio (via ScreenCaptureKit) so it can transcribe and translate it locally on this Mac. Mimi never records or stores your screen. Audio never leaves your machine."
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
-        BUNDLED_MODEL: 0
     scheme:
       testTargets: []
-
-  Mimi-full:
-    type: application
-    platform: macOS
-    sources:
-      - path: Mimi
-      - path: models
-        type: folder
-        optional: true
-    settings:
-      base:
-        PRODUCT_NAME: Mimi
-        PRODUCT_BUNDLE_IDENTIFIER: dev.mimi.app.full
-        SWIFT_OBJC_BRIDGING_HEADER: Mimi/Bridging/MimiBridging.h
-        HEADER_SEARCH_PATHS: "$(SRCROOT)/Mimi/native/include"
-        LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/local/frameworks @executable_path/../Frameworks"
-        INFOPLIST_KEY_NSScreenCaptureUsageDescription: "Mimi captures your Mac's system audio (via ScreenCaptureKit) so it can transcribe and translate it locally on this Mac. Mimi never records or stores your screen. Audio never leaves your machine."
-        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
-        BUNDLED_MODEL: 1
-    scheme: {}

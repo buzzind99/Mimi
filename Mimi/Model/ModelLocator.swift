@@ -2,8 +2,8 @@ import CryptoKit
 import Foundation
 
 /// Resolves the ASR GGUF in priority order:
-///   1. Bundled: `Bundle.main` → `models/` (full build; downloader skipped)
-///   2. Downloaded: `~/Library/Application Support/Mimi/models/` (lite build)
+///   1. Bundled: `Bundle.main` → `models/` (downloader skipped)
+///   2. Downloaded: `~/Library/Application Support/Mimi/models/`
 enum ModelLocator {
     static let modelName = "nemotron-3.5-asr-streaming-0.6b.q8_0.gguf"
     static let modelID = "nemotron-3.5-asr-streaming-0.6b"
@@ -13,7 +13,7 @@ enum ModelLocator {
         return base.appendingPathComponent("Mimi/models", isDirectory: true)
     }
 
-    /// `true` when the GGUF ships inside the app bundle (full variant).
+    /// `true` when the GGUF ships inside the app bundle.
     static var isBundled: Bool {
         bundledURL != nil
     }
@@ -45,7 +45,7 @@ enum ModelLocator {
     }
 }
 
-/// Lite-variant first-launch downloader: progress, resume, SHA-256
+/// First-launch model downloader: progress, resume, SHA-256
 /// verification, retry. Also accepts a manually dropped-in GGUF (the locator
 /// checks the models folder before/without any download).
 final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
