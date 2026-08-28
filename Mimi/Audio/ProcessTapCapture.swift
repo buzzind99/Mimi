@@ -169,26 +169,40 @@ final class ProcessTapCapture {
         let nBuffers = Int(abl.mNumberBuffers)
         guard nBuffers > 0 else { return }
 
-        var header = RingFrameHeader(frames: 0, nBuffers: UInt32(nBuffers), sampleRate: 0, channels: 0)
         var buffers = [(UnsafeRawPointer, Int)]()
+        var frames = 0
+        var channels = 0
+        var payloadBytes = 0
         withUnsafePointer(to: abl.mBuffers) { ptr in
             ptr.withMemoryRebound(to: AudioBuffer.self, capacity: nBuffers) { typed in
                 let first = typed[0]
                 guard let data = first.mData else { return }
-                header.channels = first.mNumberChannels
-                header.frames = UInt32(Int(first.mDataByteSize) / MemoryLayout<Float>.size / max(1, Int(first.mNumberChannels)))
+                channels = Int(first.mNumberChannels)
+                frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / max(1, channels)
                 for i in 0..<nBuffers {
                     let buf = typed[i]
                     if let bufData = buf.mData {
                         buffers.append((UnsafeRawPointer(bufData), Int(buf.mDataByteSize)))
+                        payloadBytes += Int(buf.mDataByteSize)
                     }
                 }
             }
         }
-        guard header.frames > 0, header.channels > 0, !buffers.isEmpty else { return }
-        header.sampleRate = self.lockedDeviceSampleRate
+        guard frames > 0, channels > 0, payloadBytes > 0 else { return }
 
         let headerSize = MemoryLayout<RingFrameHeader>.size
+        let total = headerSize + payloadBytes
+        // Reserve the whole block up front so header and payload can never be
+        // split across an overflow (a dropped payload would desync the reader).
+        guard self.ring.freeBytes >= total else {
+            self.ring.noteDropped(total)
+            return
+        }
+
+        let header = RingFrameHeader(
+            frames: UInt32(frames), nBuffers: UInt32(nBuffers),
+            sampleRate: self.lockedDeviceSampleRate, channels: UInt32(channels),
+            payloadBytes: UInt32(payloadBytes), interleaved: nBuffers <= 1 ? 1 : 0)
         withUnsafePointer(to: header) { headerPtr in
             _ = self.ring.write(UnsafeRawPointer(headerPtr), count: headerSize)
         }
@@ -206,7 +220,9 @@ final class ProcessTapCapture {
 
     private func drainLoop() {
         let headerSize = MemoryLayout<RingFrameHeader>.size
-        var header = RingFrameHeader(frames: 0, nBuffers: 0, sampleRate: 0, channels: 0)
+        var scratch = RingFrameHeader(
+            frames: 0, nBuffers: 0, sampleRate: 0, channels: 0,
+            payloadBytes: 0, interleaved: 0)
         var payload = [Float]()
         let sleepUS: useconds_t = 2_000
 
@@ -215,52 +231,90 @@ final class ProcessTapCapture {
                 usleep(sleepUS)
                 continue
             }
-            var scratch = header
-            let got = withUnsafeMutableBytes(of: &scratch) { ring.read(into: $0.baseAddress!, count: headerSize) }
-            guard got == headerSize else { usleep(sleepUS); continue }
-            header = scratch
+            // Peek the header without consuming: only proceed once the whole
+            // frame (header + payload) is buffered, otherwise a payload still
+            // being written would desync the stream.
+            guard ring.peek(into: &scratch, count: headerSize) == headerSize else {
+                usleep(sleepUS)
+                continue
+            }
+            guard Self.isPlausibleHeader(scratch) else {
+                ring.dropBuffered()
+                continue
+            }
+            if ring.availableBytes < headerSize + Int(scratch.payloadBytes) {
+                usleep(sleepUS)
+                continue
+            }
+            ring.skip(headerSize)
 
-            let payloadFloats = Int(header.frames) * max(1, Int(header.channels))
-            let byteCount = payloadFloats * MemoryLayout<Float>.size
+            let payloadFloats = Int(scratch.payloadBytes) / MemoryLayout<Float>.size
             if payload.count < payloadFloats {
                 payload = [Float](repeating: 0, count: payloadFloats)
             }
             let read = payload.withUnsafeMutableBytes { raw -> Int in
-                guard raw.count >= byteCount, let base = raw.baseAddress else { return 0 }
-                return ring.read(into: base, count: byteCount)
+                guard raw.count >= Int(scratch.payloadBytes), let base = raw.baseAddress else { return 0 }
+                return ring.read(into: base, count: Int(scratch.payloadBytes))
             }
-            guard read == byteCount else { usleep(sleepUS); continue }
+            guard read == Int(scratch.payloadBytes) else {
+                ring.dropBuffered()
+                continue
+            }
 
             consume(
-                floats: payload, frames: Int(header.frames),
-                channels: max(1, Int(header.channels)),
-                nBuffers: Int(header.nBuffers), sampleRate: header.sampleRate)
+                floats: payload, frames: Int(scratch.frames),
+                channels: Int(scratch.channels),
+                nBuffers: Int(scratch.nBuffers), sampleRate: scratch.sampleRate,
+                interleaved: scratch.interleaved != 0)
         }
+    }
+
+    /// Sanity-check a peeked header. A mismatch means the ring is desynced
+    /// (garbage interpreted as a header); the buffered data is discarded.
+    private static func isPlausibleHeader(_ h: RingFrameHeader) -> Bool {
+        h.frames > 0 && h.frames <= 65_536
+            && h.channels > 0 && h.channels <= 8
+            && h.nBuffers > 0 && h.nBuffers <= 8
+            && h.sampleRate >= 8_000 && h.sampleRate <= 384_000
+            && h.payloadBytes > 0 && h.payloadBytes <= 65_536 * 8 * 4
+            && h.interleaved <= 1
     }
 
     /// Convert one delivered block to mono 16 kHz and emit fixed chunks.
     private func consume(
-        floats: [Float], frames: Int, channels: Int, nBuffers: Int, sampleRate: Double
+        floats: [Float], frames: Int, channels: Int, nBuffers: Int,
+        sampleRate: Double, interleaved: Bool
     ) {
         guard frames > 0, sampleRate > 0 else { return }
-        let interleaved = nBuffers <= 1
 
+        // Deinterleaved payloads are N mono buffers; the per-buffer channel
+        // count is in `channels`, so the format spans channels * nBuffers.
+        let totalChannels = interleaved ? channels : channels * max(1, nBuffers)
         guard let deviceFormat = makeFormat(
-            sampleRate: sampleRate, channels: channels, interleaved: interleaved)
-        else { return }
-        let converter = ensureConverter(from: deviceFormat)
+            sampleRate: sampleRate, channels: totalChannels, interleaved: interleaved)
+        else {
+            print("unsupported tap format: sr=\(sampleRate) ch=\(totalChannels) inter=\(interleaved)")
+            return
+        }
+        guard let converter = ensureConverter(from: deviceFormat) else {
+            onIOError?(.formatUnavailable)
+            return
+        }
 
         guard let inBuffer = AVAudioPCMBuffer(pcmFormat: deviceFormat, frameCapacity: AVAudioFrameCount(frames)) else { return }
         inBuffer.frameLength = AVAudioFrameCount(frames)
         let framesPerBuffer = interleaved ? 1 : frames
         if let floatChannels = inBuffer.floatChannelData {
-            for ch in 0..<min(channels, Int(inBuffer.format.channelCount)) {
+            for ch in 0..<min(totalChannels, Int(inBuffer.format.channelCount)) {
                 for f in 0..<frames {
                     let idx: Int
                     if interleaved {
                         idx = f * channels + ch
                     } else {
-                        idx = (ch % nBuffers) * framesPerBuffer + f
+                        let bufferIndex = ch / max(1, channels)
+                        let channelInBuffer = ch % max(1, channels)
+                        idx = bufferIndex * framesPerBuffer * max(1, channels)
+                            + channelInBuffer * framesPerBuffer + f
                     }
                     floatChannels[ch][f] = floats[idx]
                 }
@@ -300,12 +354,15 @@ final class ProcessTapCapture {
         standardFormatWithSampleRate: Self.outputSampleRate, channels: 1)!
 
     private var cachedConverterKey: String?
-    private func ensureConverter(from format: AVAudioFormat) -> AVAudioConverter {
+    private func ensureConverter(from format: AVAudioFormat) -> AVAudioConverter? {
         let key = format.description
         if let cachedConverterKey, cachedConverterKey == key, let converter {
             return converter
         }
-        let new = AVAudioConverter(from: format, to: outputFormat)!
+        guard let new = AVAudioConverter(from: format, to: outputFormat) else {
+            print("AVAudioConverter creation failed: from=\(format) to=\(outputFormat)")
+            return nil
+        }
         converter = new
         cachedConverterKey = key
         return new
@@ -386,21 +443,19 @@ final class ProcessTapCapture {
     // MARK: - Core Audio helpers
 
     static func processObjectID(for pid: pid_t) -> AudioObjectID {
-        var pidValue = Int32(pid)
         var objectID = AudioObjectID(0)
         var size = UInt32(MemoryLayout<AudioObjectID>.size)
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain)
+        var pidValue = pid
         let status = withUnsafeMutablePointer(to: &pidValue) { pidPtr in
             AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, pidPtr)
+                AudioObjectID(kAudioObjectSystemObject), &address,
+                UInt32(MemoryLayout<pid_t>.size), pidPtr, &size, &objectID)
         }
-        if status == noErr {
-            objectID = AudioObjectID(pidValue)
-        }
-        return objectID
+        return status == noErr ? objectID : 0
     }
 
     private static func queryInputFormat(_ device: AudioDeviceID) -> AVAudioFormat? {
@@ -421,9 +476,14 @@ final class ProcessTapCapture {
 }
 
 /// Wire format for one IO cycle copied into the ring buffer.
+/// `payloadBytes` is authoritative (sum of every buffer written after the
+/// header); `interleaved` is 1 when the payload is a single interleaved
+/// buffer, 0 when it is N mono buffers.
 struct RingFrameHeader {
     var frames: UInt32
     var nBuffers: UInt32
     var sampleRate: Float64
     var channels: UInt32
+    var payloadBytes: UInt32
+    var interleaved: UInt32
 }
