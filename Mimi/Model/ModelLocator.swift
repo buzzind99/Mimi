@@ -68,6 +68,7 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         "https://huggingface.co/nvidia/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
 
     private var task: URLSessionDownloadTask?
+    private var session: URLSession?
     private var resumeData: Data?
     private var receivedBytes: Int64 = 0
     private var expectedBytes: Int64?
@@ -91,20 +92,34 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
             return
         }
 
+        guard session == nil else { return } // already downloading
         receivedBytes = 0
         setState(.downloading(progress: 0, bytes: 0, total: expectedBytes))
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        self.session = session
         if let resumeData {
-            task = URLSession.shared.downloadTask(withResumeData: resumeData)
+            task = session.downloadTask(withResumeData: resumeData)
         } else {
-            task = URLSession.shared.downloadTask(with: Self.downloadURL)
+            task = session.downloadTask(with: Self.downloadURL)
         }
         task?.resume()
+    }
+
+    /// The session strongly retains its delegate; invalidate to break the
+    /// cycle once the download reaches a terminal state.
+    @MainActor
+    private func invalidateSession() {
+        session?.finishTasksAndInvalidate()
+        session = nil
     }
 
     func cancel() {
         task?.cancel(byProducingResumeData: { [weak self] data in
             guard let self else { return }
-            Task { @MainActor in self.resumeData = data }
+            Task { @MainActor in
+                self.resumeData = data
+                self.invalidateSession()
+            }
         })
         task = nil
         setState(.idle)
@@ -132,14 +147,24 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         _ session: URLSession, downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
+        // Move synchronously: the temp file is deleted once this delegate
+        // method returns.
+        let destination = ModelLocator.downloadedURL
+        let fm = FileManager.default
+        do {
+            try? fm.removeItem(at: destination)
+            try fm.moveItem(at: location, to: destination)
+        } catch {
+            Task { @MainActor in
+                self.task = nil
+                self.state = .failed("Download failed: \(error.localizedDescription)")
+            }
+            return
+        }
         Task { @MainActor in
             self.task = nil
-            let destination = ModelLocator.downloadedURL
-            let fm = FileManager.default
             self.state = .verifying
-            try? fm.removeItem(at: destination)
             do {
-                try fm.moveItem(at: location, to: destination)
                 try self.verify(destination)
                 self.resumeData = nil
                 self.state = .done(destination)
@@ -153,6 +178,7 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         Task { @MainActor in
             self.task = nil
+            self.invalidateSession()
             guard let error else { return } // success handled by didFinishDownloadingTo
             if (error as NSError).code == NSURLErrorCancelled { return }
             self.state = .failed(
