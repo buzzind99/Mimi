@@ -100,10 +100,8 @@ final class AppModel: ObservableObject {
         self.engine = engine
         self.modelURL = modelURL
         engineIsMock = engine.isMock
-        if let native = engine as? NativeASREngine {
-            native.onPushError = { [weak self] _, message in
-                Task { @MainActor in self?.errorMessage = message }
-            }
+        engine.onEngineError = { [weak self] message in
+            Task { @MainActor in self?.errorMessage = message }
         }
 
         entries.removeAll()

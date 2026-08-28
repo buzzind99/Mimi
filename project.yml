@@ -28,9 +28,8 @@ targets:
       base:
         PRODUCT_NAME: Mimi
         PRODUCT_BUNDLE_IDENTIFIER: dev.mimi.app
-        SWIFT_OBJC_BRIDGING_HEADER: Mimi/Bridging/MimiBridging.h
         HEADER_SEARCH_PATHS: "$(SRCROOT)/Mimi/native/include"
-        LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/local/frameworks @executable_path/../Frameworks"
+        LD_RUNPATH_SEARCH_PATHS: "$(SRCROOT)/local/frameworks @executable_path/../Frameworks $(SRCROOT)/local/frameworks/crispasr @executable_path/../Frameworks/crispasr"
         INFOPLIST_KEY_NSScreenCaptureUsageDescription: "Mimi captures your Mac's system audio (via ScreenCaptureKit) so it can transcribe and translate it locally on this Mac. Mimi never records or stores your screen. Audio never leaves your machine."
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
     scheme:
