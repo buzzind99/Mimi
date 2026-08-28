@@ -4,7 +4,6 @@ import SwiftUI
 struct MimiApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model: AppModel
-    @StateObject private var live = LivePartialState()
 
     init() {
         _model = StateObject(wrappedValue: AppModel())
@@ -12,10 +11,10 @@ struct MimiApp: App {
 
     var body: some Scene {
         WindowGroup("Mimi") {
-            ContentView(model: model, live: live)
+            ContentView(model: model, live: model.live)
                 .onChange(of: model.hudVisible) { _, visible in
                     if visible {
-                        appDelegate.hud.bind(model: model, live: live)
+                        appDelegate.hud.bind(model: model, live: model.live)
                     }
                     appDelegate.hud.setVisible(visible)
                 }
