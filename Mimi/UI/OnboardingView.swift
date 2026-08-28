@@ -45,6 +45,11 @@ struct OnboardingView: View {
         .onAppear {
             model.refreshModelAvailability()
         }
+        .onChange(of: downloader.state) { _, _ in
+            // Advance out of onboarding once the model lands (or a dropped-in
+            // GGUF appears while this screen is up).
+            model.refreshModelAvailability()
+        }
     }
 
     @ViewBuilder

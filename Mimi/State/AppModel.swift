@@ -63,7 +63,6 @@ final class AppModel: ObservableObject {
 
     func refreshModelAvailability() {
         modelURL = ModelLocator.resolve()
-        if case .needsModel = phase { return }
         if modelURL == nil && phase == .idle {
             phase = .needsModel
         } else if modelURL != nil, phase == .needsModel {
