@@ -123,6 +123,11 @@ final class AppModel: ObservableObject {
         self.engine = engine
         self.modelURL = modelURL
         engineIsMock = engine.isMock
+        if let native = engine as? NativeASREngine {
+            native.onPushError = { [weak self] _, message in
+                Task { @MainActor in self?.errorMessage = message }
+            }
+        }
 
         entries.removeAll()
         live.partial = ""
@@ -137,9 +142,25 @@ final class AppModel: ObservableObject {
         sentenceBuffer = buffer
 
         let capture = ProcessTapCapture()
+        #if DEBUG
+        var debugIngressChunks = 0
+        #endif
         capture.onChunk = { [weak self] chunk in
             guard let self, let engine = self.engine else { return }
             engine.push(chunk.samples)
+            #if DEBUG
+            // Every ~8 s of audio, print ASR-ingress energy so a dead
+            // pipeline (all-zero audio reaching the model) is obvious.
+            debugIngressChunks += 1
+            if debugIngressChunks % 50 == 0 {
+                var energy: Float = 0
+                for s in chunk.samples { energy += s * s }
+                let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
+                print(
+                    "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
+                    "silent=\(chunk.silent) t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))")
+            }
+            #endif
             let pushed = chunk.startSample + chunk.samples.count
             Task { @MainActor in
                 self.latencySeconds = max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate)
