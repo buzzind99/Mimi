@@ -5,8 +5,8 @@ import Foundation
 ///   1. Bundled: `Bundle.main` → `models/` (downloader skipped)
 ///   2. Downloaded: `~/Library/Application Support/Mimi/models/`
 enum ModelLocator {
-    static let modelName = "qwen3-asr-1.7b-ja-anime-q4_k.gguf"
-    static let modelID = "qwen3-asr-1.7b-ja-anime"
+    static let modelName = "qwen3-asr-0.6b-q8_0.gguf"
+    static let modelID = "qwen3-asr-0.6b-GGUF"
 
     static var modelsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -72,8 +72,8 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     private var resumeData: Data?
     private var receivedBytes: Int64 = 0
     private var expectedBytes: Int64?
-    /// Pinned SHA-256 of the q4_k GGUF (release-time integrity check).
-    private let expectedSHA256: String? = "da00cec556885a60d47234b4def0dbdd08394df4d4df13866d7cd9726c23ccd9"
+    /// Pinned SHA-256 of the q8_0 GGUF (release-time integrity check).
+    private let expectedSHA256: String? = "f547589d5ca582e093b2d3312ad9ff13b609b43d413f972c0e92b823dde70a00"
 
     func start() {
         Task { @MainActor in

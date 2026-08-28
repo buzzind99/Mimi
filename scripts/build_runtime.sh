@@ -26,7 +26,7 @@ SDK_DIR="${REPO_ROOT}/local/install/crispasr"
 FRAMEWORKS_DIR="${REPO_ROOT}/local/frameworks/crispasr"
 UPSTREAM="https://github.com/CrispStrobe/CrispASR.git"
 BUILD_DIR="build"
-MODEL="${REPO_ROOT}/models/qwen3-asr-1.7b-ja-anime-q4_k.gguf"
+MODEL="${REPO_ROOT}/models/qwen3-asr-0.6b-q8_0.gguf"
 
 GGML_METAL=ON
 if [[ "${1:-}" == "--cpu" ]]; then
@@ -139,8 +139,8 @@ if [[ -f "${MODEL}" ]]; then
 else
   echo "==> (Skipping smoke test: no model at ${MODEL})"
   echo "    Download with:"
-  echo "    hf download cstr/qwen3-asr-1.7b-ja-anime-GGUF \\"
-  echo "      qwen3-asr-1.7b-ja-anime-q4_k.gguf --local-dir ${REPO_ROOT}/models"
+  echo "    hf download cstr/qwen3-asr-0.6b-GGUF \\"
+  echo "      qwen3-asr-0.6b-q8_0.gguf --local-dir ${REPO_ROOT}/models"
 fi
 
 echo
