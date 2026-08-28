@@ -37,47 +37,18 @@ stage_runtime() {
   local app="$1"
   local fwdir="${app}/Contents/Frameworks"
   mkdir -p "${fwdir}"
-  if [[ ! -d "${REPO_ROOT}/local/frameworks" ]]; then
+  if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
     echo "WARNING: native runtime not built (scripts/build_runtime.sh); app will run in mock mode."
     return
   fi
-  cp -R "${REPO_ROOT}/local/frameworks/" "${fwdir}/"
+  # The CrispASR dylib set is self-contained (its dylibs resolve their own
+  # @rpath dependencies via a @loader_path RPATH), so it bundles as a plain
+  # subdirectory of Contents/Frameworks.
+  cp -R "${REPO_ROOT}/local/frameworks/crispasr" "${fwdir}/crispasr"
 
-  # The runtime links Homebrew abseil via absolute paths (dev-machine
-  # dependency); copy the abseil closure into the bundle and rewrite every
-  # load command to @rpath.
-  local prefix
-  prefix="$(brew --prefix 2>/dev/null || echo /opt/homebrew)"
-  local changed=1
-  while [[ "$changed" == 1 ]]; do
-    changed=0
-    for dylib in "${fwdir}"/*.dylib; do
-      for dep in $(otool -L "$dylib" | awk '/libabsl_/{print $1}'); do
-        case "$dep" in
-          /*) ;;
-          *) continue ;;
-        esac
-        local name
-        name="$(basename "$dep")"
-        if [[ ! -f "${fwdir}/${name}" && -f "${dep}" ]]; then
-          cp -L "$dep" "${fwdir}/${name}"
-          changed=1
-        fi
-      done
-    done
-  done
-  for dylib in "${fwdir}"/*.dylib; do
-    for dep in $(otool -L "$dylib" | awk '/libabsl_/{print $1}'); do
-      case "$dep" in
-        "${prefix}"/*) install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$dylib" ;;
-      esac
-    done
-  done
-
-  # Fix dependent dylibs to @rpath inside the bundle.
-  find "${fwdir}" -name "*.dylib" | while read -r dylib; do
-    install_name_tool -id "@rpath/$(basename "${dylib}")" "${dylib}" 2>/dev/null || true
-    codesign --force --sign "${SIGN_IDENTITY}" "${dylib}"
+  find "${fwdir}/crispasr" \( -name "*.dylib" -o -name crispasr \) | while read -r f; do
+    codesign --force --sign "${SIGN_IDENTITY}" "${f}" 2>/dev/null \
+      || codesign --force --sign - "${f}"
   done
 }
 
