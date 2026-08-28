@@ -1,0 +1,50 @@
+# macOS
+.DS_Store
+._*
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+project.xcworkspace/xcuserdata/
+DerivedData/
+build/
+*.xcodeproj
+!Mimi.xcodeproj
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# XcodeGen regenerates the project from project.yml
+Mimi.xcodeproj/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+.build/
+
+# Native runtime (Phase 1 build artifacts)
+Vendor/
+runtime/
+install/
+Frameworks/
+include/nemo_speech/
+!Sources/CNemoSpeech/include/
+
+# Models (large GGUF files — never commit)
+models/
+*.gguf
+
+# App support / downloads
+downloads/
+
+# Logs & temp
+*.log
+*.hprof
+vendor/
+local/
+build/
+models/
+DerivedData/
+*.xcodeproj
+
