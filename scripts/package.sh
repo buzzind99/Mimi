@@ -4,7 +4,9 @@
 #   build/Mimi-lite.dmg   (~10–30 MB, model downloaded on first launch)
 #   build/Mimi-full.dmg   (~700 MB, model bundled in Contents/Resources/models via repo models/)
 #
-# Both ad-hoc signed (launch locally after "Open Anyway" / xattr -cr).
+# Both signed with the local self-signed "Mimi Dev" certificate so TCC
+# permission grants (Screen Recording) persist across rebuilds.
+# Launch locally after "Open Anyway" / xattr -cr.
 # Usage: scripts/package.sh [path/to/model.gguf]
 
 set -euo pipefail
@@ -12,6 +14,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/pkg"
 MODEL_PATH="${1:-${REPO_ROOT}/models/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf}"
+SIGN_IDENTITY="${SIGN_IDENTITY:-Mimi Dev}"
 
 cd "${REPO_ROOT}"
 
@@ -29,7 +32,7 @@ build_app() {
   rm -rf "${out}"
   mkdir -p "$(dirname "${out}")"
   cp -R "${built}" "${out}"
-  codesign --force --deep --sign - "${out}"
+  codesign --force --deep --sign "${SIGN_IDENTITY}" "${out}"
 }
 
 stage_runtime() {
@@ -76,7 +79,7 @@ stage_runtime() {
   # Fix dependent dylibs to @rpath inside the bundle.
   find "${fwdir}" -name "*.dylib" | while read -r dylib; do
     install_name_tool -id "@rpath/$(basename "${dylib}")" "${dylib}" 2>/dev/null || true
-    codesign --force --sign - "${dylib}"
+    codesign --force --sign "${SIGN_IDENTITY}" "${dylib}"
   done
 }
 
@@ -85,13 +88,15 @@ stage_readme() {
   cat > "/tmp/mimi-launch-notes.txt" <<EOF
 Mimi (${variant}) — real-time JP livestream transcriber/translator
 
-This app is UNSIGNED (ad-hoc signed). First launch is blocked by macOS:
+This app is signed with a self-signed local certificate ("Mimi Dev").
+First launch may be blocked by macOS:
   1. Double-click Mimi.app once.
   2. Open System Settings → Privacy & Security → scroll to "Open Anyway".
   3. Or run:  xattr -cr /Applications/Mimi.app
 
 Compatibility: Apple Silicon, macOS 15+.
-First run: allow Microphone access (process audio capture); one-time
+First run: grant Screen Recording access (system audio capture via
+ScreenCaptureKit; no microphone is used); one-time
 translation language-pack download prompt.
 
 $(cat "${REPO_ROOT}/THIRD_PARTY_NOTICES.md" 2>/dev/null || true)
