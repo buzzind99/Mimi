@@ -52,7 +52,7 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     var gateOffThreshold: Float = 0.6e-3
     var gateHoldSeconds: Double = 0.5
     /// Master switch for the gate
-    var gateEnabled = false
+    var gateEnabled = true
 
     private let outputQueue = DispatchQueue(
         label: "dev.mimi.capture.sck", qos: .userInteractive)
