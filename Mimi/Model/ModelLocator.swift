@@ -1,0 +1,191 @@
+import CryptoKit
+import Foundation
+
+/// Resolves the ASR GGUF in priority order:
+///   1. Bundled: `Bundle.main` → `models/` (full build; downloader skipped)
+///   2. Downloaded: `~/Library/Application Support/Mimi/models/` (lite build)
+enum ModelLocator {
+    static let modelName = "nemotron-3.5-asr-streaming-0.6b.q8_0.gguf"
+    static let modelID = "nemotron-3.5-asr-streaming-0.6b"
+
+    static var modelsDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("Mimi/models", isDirectory: true)
+    }
+
+    /// `true` when the GGUF ships inside the app bundle (full variant).
+    static var isBundled: Bool {
+        bundledURL != nil
+    }
+
+    static var bundledURL: URL? {
+        Bundle.main.url(forResource: modelName, withExtension: nil, subdirectory: "models")
+            ?? Bundle.main.url(forResource: modelName, withExtension: nil)
+    }
+
+    static var downloadedURL: URL {
+        modelsDirectory.appendingPathComponent(modelName)
+    }
+
+    /// Resolve the model for a session; nil means the onboarding/downloader
+    /// must run first (or the user drops a GGUF in manually).
+    static func resolve() -> URL? {
+        if let bundled = bundledURL { return bundled }
+        let downloaded = downloadedURL
+        if FileManager.default.fileExists(atPath: downloaded.path) {
+            return downloaded
+        }
+        // Development checkout: scripts/build_runtime.sh puts the dev model
+        // in <repo>/models/; Xcode runs the app with that as working directory.
+        let devURL = URL(fileURLWithPath: "models/\(modelName)")
+        if FileManager.default.fileExists(atPath: devURL.path) {
+            return devURL.absoluteURL
+        }
+        return nil
+    }
+}
+
+/// Lite-variant first-launch downloader: progress, resume, SHA-256
+/// verification, retry. Also accepts a manually dropped-in GGUF (the locator
+/// checks the models folder before/without any download).
+final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
+    enum State: Equatable {
+        case idle
+        case downloading(progress: Double, bytes: Int64, total: Int64?)
+        case verifying
+        case done(URL)
+        case failed(String)
+    }
+
+    /// Mutated only on the main actor (delegate callbacks hop via Task).
+    @Published private(set) var state: State = .idle
+
+    private func setState(_ new: State) {
+        Task { @MainActor in self.state = new }
+    }
+
+    static let downloadURL = URL(string:
+        "https://huggingface.co/nvidia/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
+
+    private var task: URLSessionDownloadTask?
+    private var resumeData: Data?
+    private var receivedBytes: Int64 = 0
+    private var expectedBytes: Int64?
+    /// Set at release time for pinned SHA-256 verification; nil = size check.
+    private let expectedSHA256: String? = nil
+
+    func start() {
+        Task { @MainActor in
+            if case .done = self.state { return }
+            self.begin()
+        }
+    }
+
+    private func begin() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: ModelLocator.modelsDirectory, withIntermediateDirectories: true)
+        let destination = ModelLocator.downloadedURL
+
+        if fm.fileExists(atPath: destination.path) {
+            setState(.done(destination))
+            return
+        }
+
+        receivedBytes = 0
+        setState(.downloading(progress: 0, bytes: 0, total: expectedBytes))
+        if let resumeData {
+            task = URLSession.shared.downloadTask(withResumeData: resumeData)
+        } else {
+            task = URLSession.shared.downloadTask(with: Self.downloadURL)
+        }
+        task?.resume()
+    }
+
+    func cancel() {
+        task?.cancel(byProducingResumeData: { [weak self] data in
+            guard let self else { return }
+            Task { @MainActor in self.resumeData = data }
+        })
+        task = nil
+        setState(.idle)
+    }
+
+    // MARK: - URLSessionDownloadDelegate
+
+    func urlSession(
+        _ session: URLSession, downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+    ) {
+        Task { @MainActor in
+            self.receivedBytes = totalBytesWritten
+            if totalBytesExpectedToWrite > 0 { self.expectedBytes = totalBytesExpectedToWrite }
+            let progress = totalBytesExpectedToWrite > 0
+                ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+                : 0
+            self.state = .downloading(
+                progress: progress, bytes: totalBytesWritten,
+                total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession, downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        Task { @MainActor in
+            self.task = nil
+            let destination = ModelLocator.downloadedURL
+            let fm = FileManager.default
+            self.state = .verifying
+            try? fm.removeItem(at: destination)
+            do {
+                try fm.moveItem(at: location, to: destination)
+                try self.verify(destination)
+                self.resumeData = nil
+                self.state = .done(destination)
+            } catch {
+                try? fm.removeItem(at: destination)
+                self.state = .failed("Verification failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        Task { @MainActor in
+            self.task = nil
+            guard let error else { return } // success handled by didFinishDownloadingTo
+            if (error as NSError).code == NSURLErrorCancelled { return }
+            self.state = .failed(
+                "Download failed: \(error.localizedDescription). Retry, or drop the GGUF into \(ModelLocator.modelsDirectory.path) manually.")
+        }
+    }
+
+    private func verify(_ file: URL) throws {
+        if let expectedSHA256 {
+            let digest = try SHA256.digest(file: file)
+            let hex = digest.map { String(format: "%02x", $0) }.joined()
+            if hex != expectedSHA256.lowercased() {
+                throw NSError(domain: "ModelDownloader", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "SHA-256 mismatch"])
+            }
+        } else {
+            let size = (try FileManager.default.attributesOfItem(atPath: file.path))[.size] as? Int64 ?? 0
+            guard size > 10_000_000 else {
+                throw NSError(domain: "ModelDownloader", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "File is too small to be the model"])
+            }
+        }
+    }
+}
+
+private extension SHA256 {
+    static func digest(file: URL) throws -> SHA256Digest {
+        var hasher = SHA256()
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        while let data = try handle.read(upToCount: 1 << 20), !data.isEmpty {
+            hasher.update(data: data)
+        }
+        return hasher.finalize()
+    }
+}
