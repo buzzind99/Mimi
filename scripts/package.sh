@@ -118,6 +118,9 @@ make_dmg() {
 
 # --- lite ---
 build_app Mimi Release "${BUILD_DIR}/Mimi-lite.app"
+# Both schemes share one derived-data product dir; a previous full build can
+# leave the bundled model in the product. The lite target must never ship it.
+rm -rf "${BUILD_DIR}/Mimi-lite.app/Contents/Resources/models"
 stage_runtime "${BUILD_DIR}/Mimi-lite.app"
 stage_readme "${BUILD_DIR}/Mimi-lite.app" "lite"
 make_dmg "${BUILD_DIR}/Mimi-lite.app" "Mimi-lite"
