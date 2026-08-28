@@ -19,6 +19,8 @@ struct TranslationSessionHost: View {
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
+    @State private var isAtTop = true
+    @State private var pulsing = false
 
     var body: some View {
         Group {
@@ -108,16 +110,53 @@ struct ContentView: View {
 
     // MARK: - Live subtitle (high-frequency state; only this row observes partials)
 
+    // Fixed-height live row: slots never resize so empty↔filled transitions
+    // don't jitter. Dot pulses only while a partial is streaming in.
+
     private var liveSubtitle: some View {
-        HStack {
-            if live.partial.isEmpty {
-                Text("…")
-                    .foregroundColor(.secondary.opacity(0.35))
-            } else {
-                Text(live.partial)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.teal)
+                    .frame(width: 7, height: 7)
+                    .opacity(pulsing && !live.partial.isEmpty ? 0.45 : 1)
+                    .animation(
+                        live.partial.isEmpty
+                            ? nil
+                            : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                        value: pulsing)
+                    .opacity(live.partial.isEmpty ? 0.35 : 1)
+
+                Text("live")
+                    .font(.caption.monospaced().bold())
+                    .foregroundColor(.teal)
+                    .opacity(live.partial.isEmpty ? 0.5 : 1)
             }
+            .onChange(of: live.partial.isEmpty) { _, isEmpty in
+                guard !isEmpty else { return }
+                pulsing = false
+                DispatchQueue.main.async { pulsing = true }
+            }
+
+            Text(live.partial.isEmpty ? "…" : live.partial)
+                .font(.system(size: 17, weight: .medium))
+                .italic()
+                .foregroundColor(live.partial.isEmpty ? .secondary.opacity(0.35) : .teal)
+                .lineLimit(2)
+                .frame(height: 22, alignment: .leading)
+                .textSelection(.enabled)
+
+            Group {
+                if let romaji = RomajiAnnotator.romaji(for: live.partial) {
+                    Text(romaji)
+                } else {
+                    Text(verbatim: " ")
+                }
+            }
+            .font(.caption.monospaced())
+            .foregroundColor(.secondary.opacity(0.55))
+            .frame(height: 14, alignment: .leading)
+            .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -126,6 +165,10 @@ struct ContentView: View {
     }
 
     // MARK: - Transcript (stacked subtitle-style rows in one virtualized scroll)
+
+    // Newest sentence first. While the user is at the top, finalizing a
+    // sentence pushes older rows down with a spring; scrolled down, the view
+    // stays put.
 
     private var transcript: some View {
         ScrollViewReader { proxy in
@@ -143,20 +186,28 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 80)
                     }
-                    ForEach(model.entries) { entry in
+                    ForEach(model.entries.reversed()) { entry in
                         TranscriptRow(entry: entry)
                             .id(entry.id)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .top).combined(with: .opacity),
+                                removal: .opacity))
                         Divider().opacity(0.15)
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.entries.count)
+            }
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                geo.contentOffset.y < 1
+            } action: { _, atTop in
+                isAtTop = atTop
             }
             .onChange(of: model.entries.count) { _, _ in
-                if let last = model.entries.last {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
+                guard isAtTop, let newest = model.entries.last else { return }
+                withAnimation(.easeOut(duration: 0.3)) {
+                    proxy.scrollTo(newest.id, anchor: .top)
                 }
             }
         }
