@@ -33,7 +33,7 @@ final class HUDWindowController {
 
     private func makePanel() -> HUDPanel {
         let panel = HUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 130),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 150),
             styleMask: [.borderless, .resizable, .nonactivatingPanel],
             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -95,13 +95,20 @@ struct HUDView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
             } else if let lastJP = live.lastFinalJP {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(SessionClock.timestamp(lastJP.startS))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                    Text(lastJP.text)
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(SessionClock.timestamp(lastJP.startS))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                        Text(lastJP.text)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white)
+                    }
+                    if let romaji = RomajiAnnotator.romaji(for: lastJP.text) {
+                        Text(romaji)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    }
                 }
             } else {
                 Text("Mimi HUD")
@@ -125,6 +132,6 @@ struct HUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.white.opacity(panel.locked ? 0.08 : 0.35), lineWidth: 1)
         )
-        .frame(minWidth: 320, minHeight: 90)
+        .frame(minWidth: 320, minHeight: 110)
     }
 }

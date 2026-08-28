@@ -125,12 +125,12 @@ struct ContentView: View {
         .background(Color.secondary.opacity(0.06))
     }
 
-    // MARK: - Transcript (two aligned panes in one virtualized scroll)
+    // MARK: - Transcript (stacked subtitle-style rows in one virtualized scroll)
 
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if model.entries.isEmpty {
                         VStack(spacing: 8) {
                             Text("No transcript yet")
@@ -236,38 +236,40 @@ struct ContentView: View {
     }
 }
 
-/// One aligned row: JP final (timestamped) | EN translation (same start time).
+/// One stacked row: timestamp range header, EN translation (italic),
+/// JP sentence, romaji reading.
 struct TranscriptRow: View {
     let entry: SessionEntry
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(SessionClock.timestamp(entry.sentence.startS))
-                    .font(.caption.monospacedDigit())
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(SessionClock.timestamp(entry.sentence.startS)) – \(SessionClock.timestamp(entry.sentence.endS))")
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.secondary.opacity(0.6))
+
+            if entry.translations.isEmpty {
+                Text("…")
+                    .italic()
+                    .foregroundColor(.secondary.opacity(0.3))
+            } else {
+                Text(entry.translations.map(\.text).joined(separator: " / "))
+                    .italic()
                     .foregroundColor(.secondary)
-                    .frame(width: 52, alignment: .trailing)
-                Text(entry.sentence.text)
                     .textSelection(.enabled)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(SessionClock.timestamp(entry.sentence.startS))
-                    .font(.caption.monospacedDigit())
-                    .foregroundColor(.secondary.opacity(0.6))
-                    .frame(width: 52, alignment: .trailing)
-                if entry.translations.isEmpty {
-                    Text("…")
-                        .foregroundColor(.secondary.opacity(0.3))
-                } else {
-                    Text(entry.translations.map(\.text).joined(separator: " / "))
-                        .foregroundColor(.teal)
-                        .textSelection(.enabled)
-                }
+            Text(entry.sentence.text)
+                .font(.system(size: 17, weight: .medium))
+                .textSelection(.enabled)
+
+            if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
+                Text(romaji)
+                    .font(.caption.monospaced())
+                    .foregroundColor(.secondary.opacity(0.55))
+                    .textSelection(.enabled)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
     }
 }
