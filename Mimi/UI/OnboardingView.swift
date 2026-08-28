@@ -17,18 +17,18 @@ struct OnboardingView: View {
             VStack(spacing: 6) {
                 Text("Welcome to Mimi")
                     .font(.title.bold())
-                Text("Real-time Japanese livestream transcription & translation")
+                Text("Real-time Japanese audio transcription & translation")
                     .foregroundColor(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 12) {
                 Label {
-                    Text("Mimi captures all system audio via a ScreenCaptureKit stream — whatever app plays it (e.g. your browser). macOS will ask for Screen Recording access; Mimi never records your screen or uploads anything. Speech recognition and translation run on this Mac.")
+                    Text("Mimi listens to the audio playing on your Mac so it can transcribe what you hear. To allow this, macOS asks for Screen Recording access the first time you start; Mimi never records your screen or uploads anything. Everything runs locally on your Mac.")
                 } icon: {
                     Image(systemName: "display")
                 }
                 Label {
-                    Text("The speech model (\(ModelLocator.modelID), ~450 MB) downloads once from Hugging Face and is stored in Application Support.")
+                    Text("The speech model (~700 MB) downloads once from Hugging Face and is stored in Application Support.")
                 } icon: {
                     Image(systemName: "arrow.down.circle")
                 }
