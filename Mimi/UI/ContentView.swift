@@ -32,7 +32,6 @@ struct ContentView: View {
         .frame(minWidth: 860, minHeight: 600)
         .onAppear {
             model.refreshModelAvailability()
-            model.refreshApps()
         }
     }
 
@@ -51,9 +50,6 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            ProcessPicker(apps: model.apps, selection: $model.selectedApp)
-                .frame(maxWidth: 260)
-
             Button {
                 if model.phase == .running || model.phase == .sourceLost {
                     model.stop()
@@ -68,7 +64,7 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(model.phase == .running ? .red : .accentColor)
-            .disabled(model.phase == .starting || model.phase == .stopping || model.selectedApp == nil)
+            .disabled(model.phase == .starting || model.phase == .stopping)
 
             Toggle(isOn: $model.hudVisible) {
                 Label("HUD", systemImage: "rectangle.on.rectangle")
@@ -140,7 +136,7 @@ struct ContentView: View {
                             Text("No transcript yet")
                                 .font(.title3)
                                 .foregroundColor(.secondary)
-                            Text("Pick your browser, play a Japanese livestream, and press Start.")
+                            Text("Play any Japanese audio on your Mac (e.g. a livestream in your browser) and press Start.")
                                 .font(.callout)
                                 .foregroundColor(.secondary.opacity(0.7))
                         }
@@ -188,7 +184,7 @@ struct ContentView: View {
             Label("Capturing", systemImage: "dot.radiowaves.left.and.right")
                 .font(.caption).foregroundStyle(.green)
         case .sourceLost:
-            Label("Source lost — reselect the app", systemImage: "exclamationmark.triangle")
+            Label("Source lost — start capture again", systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
         case .starting:
             Label("Starting…", systemImage: "hourglass")
@@ -273,29 +269,5 @@ struct TranscriptRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 6)
-    }
-}
-
-/// Source-process picker (top-level apps; children are tapped automatically).
-struct ProcessPicker: View {
-    let apps: [TargetApp]
-    @Binding var selection: TargetApp?
-
-    var body: some View {
-        Menu {
-            if apps.isEmpty {
-                Text("No eligible apps")
-            } else {
-                ForEach(apps) { app in
-                    Button(app.name) { selection = app }
-                }
-            }
-        } label: {
-            HStack {
-                Image(systemName: "app.gift")
-                Text(selection?.name ?? "Choose app to capture")
-                    .lineLimit(1)
-            }
-        }
     }
 }

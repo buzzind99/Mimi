@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Lite-variant onboarding: explains microphone permission + process-audio
-/// capture, includes the source-app picker, and runs the model download
+/// Lite-variant onboarding: explains screen-recording permission + system
+/// audio capture, and runs the model download
 /// (progress / resume / retry). A manually dropped-in GGUF is picked up
 /// automatically by `ModelLocator.resolve()`.
 struct OnboardingView: View {
@@ -23,9 +23,9 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 Label {
-                    Text("Mimi captures the audio of the app you choose (e.g. your browser) using a Core Audio process tap. macOS will ask for Microphone access — required for process audio capture. Nothing is uploaded; speech recognition and translation run on this Mac.")
+                    Text("Mimi captures all system audio via a ScreenCaptureKit stream — whatever app plays it (e.g. your browser). macOS will ask for Screen Recording access; Mimi never records your screen or uploads anything. Speech recognition and translation run on this Mac.")
                 } icon: {
-                    Image(systemName: "mic")
+                    Image(systemName: "display")
                 }
                 Label {
                     Text("The speech model (\(ModelLocator.modelID), ~450 MB) downloads once from Hugging Face and is stored in Application Support.")
@@ -38,21 +38,11 @@ struct OnboardingView: View {
 
             modelSection
 
-            ProcessPicker(apps: model.apps, selection: $model.selectedApp)
-                .frame(width: 280)
-
-            if let selected = model.selectedApp {
-                Text("Audio helpers of “\(selected.name)” are tapped automatically.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
             Spacer(minLength: 0)
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            model.refreshApps()
             model.refreshModelAvailability()
         }
     }
