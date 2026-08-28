@@ -21,6 +21,13 @@ struct ContentView: View {
     @ObservedObject var live: LivePartialState
     @State private var isAtTop = true
     @State private var pulsing = false
+    @State private var scrollPosition = ScrollPosition()
+    @State private var pendingInsertCompensation = false
+
+    private struct ScrollSnapshot: Equatable {
+        let offset: CGFloat
+        let contentHeight: CGFloat
+    }
 
     var body: some View {
         Group {
@@ -167,8 +174,9 @@ struct ContentView: View {
     // MARK: - Transcript (stacked subtitle-style rows in one virtualized scroll)
 
     // Newest sentence first. While the user is at the top, finalizing a
-    // sentence pushes older rows down with a spring; scrolled down, the view
-    // stays put.
+    // sentence pushes older rows down with a spring; scrolled down, the
+    // scroll offset is compensated by the inserted row's height so the
+    // visible content doesn't move at all.
 
     private var transcript: some View {
         ScrollViewReader { proxy in
@@ -197,17 +205,31 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.entries.count)
+                .animation(
+                    isAtTop ? .spring(response: 0.35, dampingFraction: 0.85) : nil,
+                    value: model.entries.count)
             }
-            .onScrollGeometryChange(for: Bool.self) { geo in
-                geo.contentOffset.y < 1
-            } action: { _, atTop in
-                isAtTop = atTop
+            .scrollPosition($scrollPosition)
+            .onScrollGeometryChange(for: ScrollSnapshot.self) { geo in
+                ScrollSnapshot(offset: geo.contentOffset.y, contentHeight: geo.contentSize.height)
+            } action: { old, new in
+                isAtTop = new.offset < 1
+                guard pendingInsertCompensation, new.contentHeight > old.contentHeight else { return }
+                pendingInsertCompensation = false
+                scrollPosition.scrollTo(
+                    x: 0,
+                    y: new.offset + (new.contentHeight - old.contentHeight))
             }
             .onChange(of: model.entries.count) { _, _ in
-                guard isAtTop, let newest = model.entries.last else { return }
-                withAnimation(.easeOut(duration: 0.3)) {
-                    proxy.scrollTo(newest.id, anchor: .top)
+                if isAtTop {
+                    guard let newest = model.entries.last else { return }
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        proxy.scrollTo(newest.id, anchor: .top)
+                    }
+                } else {
+                    // A row is being inserted above the viewport; grow the
+                    // offset by the same amount so content stays visually put.
+                    pendingInsertCompensation = true
                 }
             }
         }
