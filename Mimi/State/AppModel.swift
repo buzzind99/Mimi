@@ -43,19 +43,13 @@ final class AppModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        Task { [translationQueue] in
-            await translationQueue.setHandlers(
-                result: { [weak self] index, translation in
-                    Task { @MainActor in
-                        self?.applyTranslation(index: index, translation: translation)
-                    }
-                },
-                status: { [weak self] status in
-                    Task { @MainActor in
-                        self?.translationStatus = status
-                    }
-                })
-        }
+        translationQueue.setHandlers(
+            result: { [weak self] index, translation in
+                self?.applyTranslation(index: index, translation: translation)
+            },
+            status: { [weak self] status in
+                self?.translationStatus = status
+            })
         refreshModelAvailability()
 
         NotificationCenter.default.addObserver(
@@ -119,10 +113,11 @@ final class AppModel: ObservableObject {
         live.lastFinalJP = nil
         live.lastFinalEN = ""
         latencySeconds = 0
+        translationQueue.clearResults()
 
         let buffer = SentenceBuffer()
         buffer.onSentence = { [weak self] sentence in
-            Task { @MainActor in self?.handleSentence(sentence) }
+            self?.handleSentence(sentence)
         }
         sentenceBuffer = buffer
 
@@ -182,8 +177,10 @@ final class AppModel: ObservableObject {
 
         // Activate translation: the hidden `.translationTask` host picks this
         // up and hands a session to the queue (prompting for the language
-        // pack the first time).
-        await translationQueue.resetForRetry()
+        // pack the first time). Invalidate first (mirroring retryTranslation)
+        // so SwiftUI reliably re-fires the task even if a config survived.
+        translationQueue.resetForRetry()
+        translationConfig?.invalidate()
         translationConfig = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
             target: Locale.Language(identifier: "en"))
@@ -195,6 +192,24 @@ final class AppModel: ObservableObject {
         guard phase == .running || phase == .sourceLost else { return }
         phase = .stopping
 
+        Task { @MainActor in
+            await performStop()
+        }
+    }
+
+    /// Teardown, ordered so pending translations finish first: capture and
+    /// ASR are shut down immediately, the final flushed sentence is enqueued,
+    /// and only after the translation queue drains (bounded by a timeout)
+    /// does the session wind down. That keeps the tail of the session
+    /// exportable with translations intact.
+    ///
+    /// The translation config is deliberately left alive: once drained, the
+    /// worker is suspended harmlessly, and keeping the config non-nil lets
+    /// `beginSession` restart via the reliable invalidate + reassign path
+    /// (same as `retryTranslation`). Nil-ing here and reassigning an
+    /// identical config on start is a path SwiftUI's `.translationTask`
+    /// does not reliably re-fire on.
+    private func performStop() async {
         // Strictly ordered teardown: capture stops first, then the ASR
         // finish → drain → close → destroy on the ASR queue.
         capture?.stop()
@@ -208,10 +223,11 @@ final class AppModel: ObservableObject {
         capture = nil
         stopTimers()
 
-        // Flush a partially-formed sentence, then wind translation down.
+        // Flush a partially-formed sentence (its translation is awaited
+        // below), then let the translation worker finish its tail.
         sentenceBuffer?.flush()
         sentenceBuffer = nil
-        translationConfig = nil
+        _ = await translationQueue.drain(timeout: 5)
         translationStatus = .idle
         live.partial = ""
         phase = .idle
@@ -270,7 +286,9 @@ final class AppModel: ObservableObject {
     private func handleSentence(_ sentence: Sentence) {
         entries.append(SessionEntry(sentence: sentence))
         live.lastFinalJP = sentence
-        Task { await translationQueue.enqueue(sentence) }
+        // Synchronous main-actor enqueue: by the time `stop` drains, every
+        // emitted sentence is observably in the queue.
+        translationQueue.enqueue(sentence)
     }
 
     private func applyTranslation(index: Int, translation: SentenceTranslation) {
