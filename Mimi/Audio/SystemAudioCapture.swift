@@ -51,6 +51,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     var gateOnThreshold: Float = 1.2e-3
     var gateOffThreshold: Float = 0.6e-3
     var gateHoldSeconds: Double = 0.5
+    /// Master switch for the gate
+    var gateEnabled = false
 
     private let outputQueue = DispatchQueue(
         label: "dev.mimi.capture.sck", qos: .userInteractive)
@@ -337,7 +339,7 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             var chunk = Array(accumulated[0..<chunkSize])
             accumulated.removeFirst(chunkSize)
 
-            let silent = applyGate(&chunk)
+            let silent = gateEnabled ? applyGate(&chunk) : false
             consecutiveSilentChunks = silent ? consecutiveSilentChunks + 1 : 0
             isStreamSilent = consecutiveSilentChunks >= 50
 

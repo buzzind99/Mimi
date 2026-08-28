@@ -122,6 +122,7 @@ final class AppModel: ObservableObject {
         sentenceBuffer = buffer
 
         let capture = SystemAudioCapture()
+        capture.gateEnabled = false
         #if DEBUG
         var debugIngressChunks = 0
         #endif
