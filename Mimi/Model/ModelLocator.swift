@@ -5,8 +5,8 @@ import Foundation
 ///   1. Bundled: `Bundle.main` → `models/` (downloader skipped)
 ///   2. Downloaded: `~/Library/Application Support/Mimi/models/`
 enum ModelLocator {
-    static let modelName = "nemotron-3.5-asr-streaming-0.6b.q8_0.gguf"
-    static let modelID = "nemotron-3.5-asr-streaming-0.6b"
+    static let modelName = "qwen3-asr-1.7b-ja-anime-q4_k.gguf"
+    static let modelID = "qwen3-asr-1.7b-ja-anime"
 
     static var modelsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -65,15 +65,15 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     }
 
     static let downloadURL = URL(string:
-        "https://huggingface.co/nvidia/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
+        "https://huggingface.co/cstr/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
 
     private var task: URLSessionDownloadTask?
     private var session: URLSession?
     private var resumeData: Data?
     private var receivedBytes: Int64 = 0
     private var expectedBytes: Int64?
-    /// Set at release time for pinned SHA-256 verification; nil = size check.
-    private let expectedSHA256: String? = nil
+    /// Pinned SHA-256 of the q4_k GGUF (release-time integrity check).
+    private let expectedSHA256: String? = "da00cec556885a60d47234b4def0dbdd08394df4d4df13866d7cd9726c23ccd9"
 
     func start() {
         Task { @MainActor in
