@@ -28,7 +28,7 @@ struct OnboardingView: View {
                     Image(systemName: "display")
                 }
                 Label {
-                    Text("The speech model (~700 MB) downloads once from Hugging Face and is stored in Application Support.")
+                    Text("The speech model (~1 GB) downloads once from Hugging Face and is stored in Application Support.")
                 } icon: {
                     Image(systemName: "arrow.down.circle")
                 }

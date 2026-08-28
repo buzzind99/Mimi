@@ -81,7 +81,7 @@ struct SettingsView: View {
             Section("Session") {
                 LabeledContent("Entries") { Text("\(model.entries.count)") }
                 LabeledContent("Engine") {
-                    Text(model.engineIsMock ? "Mock (runtime not installed)" : "CrispASR · Qwen3-ASR 1.7B JA-Anime (Metal)")
+                    Text(model.engineIsMock ? "Mock (runtime not installed)" : "CrispASR · Qwen3-ASR 0.6B (Metal)")
                 }
             }
         }
