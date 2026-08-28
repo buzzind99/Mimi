@@ -1,4 +1,3 @@
-import AVFoundation
 import Combine
 import Foundation
 import Translation
@@ -20,8 +19,6 @@ enum SessionPhase: Equatable {
 final class AppModel: ObservableObject {
     // Published UI state
     @Published var phase: SessionPhase = .idle
-    @Published var apps: [TargetApp] = []
-    @Published var selectedApp: TargetApp?
     @Published var entries: [SessionEntry] = []
     @Published var translationStatus: TranslationStatus = .idle
     @Published var latencySeconds: Double = 0
@@ -36,12 +33,11 @@ final class AppModel: ObservableObject {
     let live = LivePartialState()
     let translationQueue = TranslationQueue()
 
-    private var capture: ProcessTapCapture?
+    private var capture: SystemAudioCapture?
     private var engine: Transcriber?
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
     private var tickTimer: Timer?
-    private var watchdogTimer: Timer?
     private var sessionStartedAt: Date?
     private var sessionMetadata: SessionMetadata?
     private var cancellables = Set<AnyCancellable>()
@@ -61,7 +57,6 @@ final class AppModel: ObservableObject {
                 })
         }
         refreshModelAvailability()
-        refreshApps()
 
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("MimiAppWillTerminate"), object: nil, queue: .main
@@ -82,27 +77,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func refreshApps() {
-        apps = ProcessScanner.pickableApps()
-        if let selectedApp, !apps.contains(selectedApp) {
-            self.selectedApp = nil
-        }
-    }
-
     // MARK: - Session control
 
     func start() {
         guard case .idle = phase else { return }
-        guard let app = selectedApp else {
-            errorMessage = "Choose the app whose audio to capture (e.g. your browser)."
-            return
-        }
         phase = .starting
         errorMessage = nil
 
         Task { @MainActor in
             do {
-                try await self.beginSession(app: app)
+                try await self.beginSession()
             } catch {
                 self.phase = .failed(error.localizedDescription)
                 self.errorMessage = error.localizedDescription
@@ -110,10 +94,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func beginSession(app: TargetApp) async throws {
-        // Microphone permission (TCC) covers process-tap capture.
-        let granted = await Self.requestMicPermission()
-        guard granted else { throw CaptureError.permissionDenied }
+    private func beginSession() async throws {
+        // Screen Recording permission (TCC) covers SCK system-audio capture.
+        guard await SystemAudioCapture.ensurePermission() else {
+            throw CaptureError.permissionDenied
+        }
 
         let modelURL = ModelLocator.resolve()
         guard let engine = ASREngineFactory.makeEngine(modelURL: modelURL, allowMock: true) else {
@@ -141,7 +126,7 @@ final class AppModel: ObservableObject {
         }
         sentenceBuffer = buffer
 
-        let capture = ProcessTapCapture()
+        let capture = SystemAudioCapture()
         #if DEBUG
         var debugIngressChunks = 0
         #endif
@@ -158,7 +143,8 @@ final class AppModel: ObservableObject {
                 let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
                 print(
                     "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
-                    "silent=\(chunk.silent) t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))")
+                    "silent=\(chunk.silent) streamSilent=\(self.capture?.isStreamSilent ?? false) " +
+                    "t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))")
             }
             #endif
             let pushed = chunk.startSample + chunk.samples.count
@@ -166,10 +152,19 @@ final class AppModel: ObservableObject {
                 self.latencySeconds = max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate)
             }
         }
+        capture.onIOError = { [weak self] error in
+            Task { @MainActor in
+                guard self?.phase == .running else { return }
+                self?.phase = .sourceLost
+                self?.errorMessage = error.localizedDescription
+            }
+        }
         self.capture = capture
 
-        let pids = ProcessScanner.tapPIDs(for: app)
-        try capture.start(pids: pids)
+        #if DEBUG
+        print("[session] start: whole-system SCK audio capture")
+        #endif
+        try await capture.start()
 
         try engine.prepare()
         try engine.openStream()
@@ -244,39 +239,17 @@ final class AppModel: ObservableObject {
         tickTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sentenceBuffer?.tick() }
         }
-        watchdogTimer?.invalidate()
-        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.watchdog() }
-        }
     }
 
     private func stopTimers() {
         pollTimer?.invalidate(); pollTimer = nil
         tickTimer?.invalidate(); tickTimer = nil
-        watchdogTimer?.invalidate(); watchdogTimer = nil
     }
 
     private func pollASR() {
         guard let engine else { return }
         while let event = engine.poll() {
             handleASREvent(event)
-        }
-    }
-
-    private func watchdog() {
-        guard case .running = phase, let capture, let app = selectedApp else { return }
-        let current = capture.currentPIDs
-        let dead = current.filter { !ProcessScanner.isAlive($0) }
-        if !dead.isEmpty {
-            let fresh = ProcessScanner.tapPIDs(for: app)
-            if ProcessScanner.isAlive(app.pid) {
-                if Set(fresh) != Set(current), !fresh.isEmpty {
-                    try? capture.retarget(pids: fresh)
-                    phase = .running
-                }
-            } else {
-                phase = .sourceLost
-            }
         }
     }
 
@@ -342,18 +315,5 @@ final class AppModel: ObservableObject {
             }
         }
         return snapshot
-    }
-
-    // MARK: - Permissions
-
-    private static func requestMicPermission() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return true
-        case .notDetermined:
-            return await AVCaptureDevice.requestAccess(for: .audio)
-        default:
-            return false
-        }
     }
 }
