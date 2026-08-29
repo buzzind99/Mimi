@@ -53,6 +53,9 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private var converter: AVAudioConverter?
     private var cachedConverterRate: Double = 0
     private var accumulated: [Float] = []
+    /// Read cursor into `accumulated`: consumed chunks compact once per
+    /// callback instead of a `removeFirst` memmove per chunk.
+    private var accumulatedStart = 0
     private var emittedSamples = 0
 
     private(set) var isRunning = false
@@ -126,6 +129,7 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         let stream = self.stream
         self.stream = nil
         accumulated.removeAll(keepingCapacity: true)
+        accumulatedStart = 0
         Task {
             try? await stream?.stopCapture()
             try? stream?.removeStreamOutput(self, type: .audio)
@@ -267,34 +271,48 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private lazy var outputFormat: AVAudioFormat = AVAudioFormat(
         standardFormatWithSampleRate: Self.outputSampleRate, channels: 1)!
 
-    private func resample(_ mono: [Float], from rate: Double) -> [Float]? {
-        guard let inFormat = AVAudioFormat(
-            standardFormatWithSampleRate: rate, channels: 1)
-        else { return nil }
+    /// PCM buffers reused across chunks (reallocated only if a future
+    /// source rate/duration needs more capacity).
+    private var cachedInputFormat: AVAudioFormat?
+    private var inBuffer: AVAudioPCMBuffer?
+    private var outBuffer: AVAudioPCMBuffer?
 
+    private func resample(_ mono: [Float], from rate: Double) -> [Float]? {
         if cachedConverterRate != rate {
-            guard let new = AVAudioConverter(from: inFormat, to: outputFormat) else {
-                print("AVAudioConverter creation failed: \(inFormat) → \(outputFormat)")
+            guard let inFormat = AVAudioFormat(
+                standardFormatWithSampleRate: rate, channels: 1),
+                let newConverter = AVAudioConverter(from: inFormat, to: outputFormat)
+            else {
+                print("AVAudioConverter creation failed: \(rate) → \(outputFormat)")
                 return nil
             }
-            converter = new
+            converter = newConverter
+            cachedInputFormat = inFormat
             cachedConverterRate = rate
+            inBuffer = nil
+            outBuffer = nil
         }
-        guard let converter else { return nil }
+        guard let converter, let inFormat = cachedInputFormat else { return nil }
 
-        guard let inBuffer = AVAudioPCMBuffer(
-            pcmFormat: inFormat, frameCapacity: AVAudioFrameCount(mono.count))
-        else { return nil }
+        if inBuffer == nil || inBuffer!.frameCapacity < AVAudioFrameCount(mono.count) {
+            inBuffer = AVAudioPCMBuffer(
+                pcmFormat: inFormat, frameCapacity: AVAudioFrameCount(mono.count))
+        }
+        guard let inBuffer, inBuffer.floatChannelData != nil else { return nil }
         inBuffer.frameLength = AVAudioFrameCount(mono.count)
         if let dst = inBuffer.floatChannelData?[0] {
-            for (i, s) in mono.enumerated() { dst[i] = s }
+            mono.withUnsafeBufferPointer { src in
+                dst.update(from: src.baseAddress!, count: mono.count)
+            }
         }
 
         let ratio = Self.outputSampleRate / rate
         let outCapacity = AVAudioFrameCount(Double(mono.count) * ratio) + 32
-        guard let outBuffer = AVAudioPCMBuffer(
-            pcmFormat: outputFormat, frameCapacity: outCapacity)
-        else { return nil }
+        if outBuffer == nil || outBuffer!.frameCapacity < outCapacity {
+            outBuffer = AVAudioPCMBuffer(
+                pcmFormat: outputFormat, frameCapacity: outCapacity)
+        }
+        guard let outBuffer else { return nil }
 
         var fed = false
         var conversionError: NSError?
@@ -305,14 +323,14 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             }
             inputStatus.pointee = .haveData
             fed = true
-            return inBuffer
+            return self.inBuffer
         }
         guard status != .error, conversionError == nil,
             let src = outBuffer.floatChannelData?[0]
         else { return nil }
 
         let n = Int(outBuffer.frameLength)
-        return (0..<n).map { src[$0] }
+        return Array(UnsafeBufferPointer(start: src, count: n))
     }
 
     // MARK: - Chunking
@@ -320,14 +338,20 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     /// Slice the accumulator into 160 ms chunks and deliver.
     private func emitFixedChunks() {
         let chunkSize = Self.chunkSamples
-        while accumulated.count >= chunkSize {
-            let chunk = Array(accumulated[0..<chunkSize])
-            accumulated.removeFirst(chunkSize)
+        while accumulated.count - accumulatedStart >= chunkSize {
+            let chunk = Array(accumulated[accumulatedStart..<accumulatedStart + chunkSize])
+            accumulatedStart += chunkSize
 
             let chunkObj = AudioChunk(
                 samples: chunk, startSample: emittedSamples)
             emittedSamples += chunkSize
             onChunk?(chunkObj)
+        }
+        // One compaction per callback (not per chunk): amortizes the
+        // memmove when several chunks arrive together.
+        if accumulatedStart > 0 {
+            accumulated.removeFirst(accumulatedStart)
+            accumulatedStart = 0
         }
     }
 }
