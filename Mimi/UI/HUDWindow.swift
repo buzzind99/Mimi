@@ -69,7 +69,20 @@ final class HUDWindowController {
 /// interactive). Click-through is enforced by `HUDHostingView.hitTest`,
 /// not by `ignoresMouseEvents`, so the padlock stays clickable.
 final class HUDPanel: NSPanel, ObservableObject {
-    @Published var locked = true
+    @Published var locked = true {
+        didSet {
+            guard oldValue != locked, let content = contentView else { return }
+            content.needsLayout = true
+            content.superview?.layoutSubtreeIfNeeded()
+            var frame = self.frame
+            frame.size.height += 1
+            frame.origin.y -= 1
+            setFrame(frame, display: false, animate: false)
+            frame.size.height -= 1
+            frame.origin.y += 1
+            setFrame(frame, display: false, animate: false)
+        }
+    }
 }
 
 /// Hosts the HUD content and implements click-through via hit-testing:
