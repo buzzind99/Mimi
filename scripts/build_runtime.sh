@@ -12,8 +12,7 @@
 #   Mimi/native/include/crispasr/crispasr_session.h  refreshed stable header
 #
 # The dylib set is isolated in a `crispasr/` subdirectory (ids and load
-# commands use @loader_path/@rpath into that directory) so it can coexist on
-# disk with the NeMo-Speech runtime staged by the previous build script.
+# commands use @loader_path/@rpath into that directory).
 #
 # Prereqs: xcode-select --install; brew install cmake ninja
 #   (CMake >= 3.26)
@@ -26,7 +25,6 @@ SDK_DIR="${REPO_ROOT}/local/install/crispasr"
 FRAMEWORKS_DIR="${REPO_ROOT}/local/frameworks/crispasr"
 UPSTREAM="https://github.com/CrispStrobe/CrispASR.git"
 BUILD_DIR="build"
-MODEL="${REPO_ROOT}/models/qwen3-asr-0.6b-q8_0.gguf"
 
 GGML_METAL=ON
 if [[ "${1:-}" == "--cpu" ]]; then
@@ -103,7 +101,7 @@ for dylib in "${SDK_DIR}"/lib/*.dylib; do
   install_name_tool -id "@rpath/${name}" "${FRAMEWORKS_DIR}/${name}"
   strip_rpaths "${FRAMEWORKS_DIR}/${name}"
 done
-# A copy of the CLI next to the dylibs serves as the smoke-test binary.
+# A copy of the CLI next to the dylibs is handy for manual debugging.
 cp -f "${SDK_DIR}/bin/crispasr" "${FRAMEWORKS_DIR}/crispasr"
 strip_rpaths "${FRAMEWORKS_DIR}/crispasr"
 
@@ -130,18 +128,6 @@ echo "==> Ad-hoc signing"
 find "${FRAMEWORKS_DIR}" -name "*.dylib" -o -name crispasr | while read -r f; do
   codesign --force --sign - "${f}"
 done
-
-# 8. Smoke test: transcribe a short file against the JA anime fine-tune.
-if [[ -f "${MODEL}" ]]; then
-  echo "==> Smoke test (file mode, backend qwen3)"
-  "${FRAMEWORKS_DIR}/crispasr" --backend qwen3 -m "${MODEL}" -l ja -t 4 \
-    "${REPO_ROOT}/samples/smoke_ja.wav" 2>&1 || true
-else
-  echo "==> (Skipping smoke test: no model at ${MODEL})"
-  echo "    Download with:"
-  echo "    hf download cstr/qwen3-asr-0.6b-GGUF \\"
-  echo "      qwen3-asr-0.6b-q8_0.gguf --local-dir ${REPO_ROOT}/models"
-fi
 
 echo
 echo "Done. The app picks up the runtime from ${FRAMEWORKS_DIR} when run from"

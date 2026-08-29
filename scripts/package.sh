@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase 4 — package unsigned release DMG:
+# Phase 4 — package release DMG:
 #   build/pkg/Mimi.dmg   (~10–30 MB, model downloaded on first launch)
 #
 # Signed with the local self-signed "Mimi Dev" certificate so TCC
@@ -30,7 +30,13 @@ build_app() {
   rm -rf "${out}"
   mkdir -p "$(dirname "${out}")"
   cp -R "${built}" "${out}"
-  codesign --force --deep --sign "${SIGN_IDENTITY}" "${out}"
+}
+
+sign_app() {
+  # Sign last: staging (dylibs, README) modifies the bundle after the build,
+  # which would otherwise invalidate the seal. Nested dylibs are already
+  # signed by stage_runtime; this seals the outer bundle over them.
+  codesign --force --sign "${SIGN_IDENTITY}" "$1"
 }
 
 stage_runtime() {
@@ -89,6 +95,7 @@ make_dmg() {
 build_app Mimi Release "${BUILD_DIR}/Mimi.app"
 stage_runtime "${BUILD_DIR}/Mimi.app"
 stage_readme "${BUILD_DIR}/Mimi.app"
+sign_app "${BUILD_DIR}/Mimi.app"
 make_dmg "${BUILD_DIR}/Mimi.app" "Mimi"
 
 echo
