@@ -135,15 +135,19 @@ final class CrispASREngine: Transcriber {
     /// locate the model — and the bundled app), bundle Frameworks, cwd
     /// fallback.
     private static func resolveVADModelPath(nearDylib dylibDir: String?) -> String? {
+        #if DEBUG
         if let env = ProcessInfo.processInfo.environment["MIMI_VAD_MODEL"], !env.isEmpty {
             return FileManager.default.fileExists(atPath: env) ? env : nil
         }
-        let candidates: [String?] = [
+        #endif
+        var candidates: [String?] = [
             dylibDir.map { $0 + "/\(vadModelFile)" },
             Bundle.main.privateFrameworksPath.map { $0 + "/crispasr/\(vadModelFile)" },
-            FileManager.default.currentDirectoryPath
-                + "/local/frameworks/crispasr/\(vadModelFile)",
         ]
+        #if DEBUG
+        candidates.append(FileManager.default.currentDirectoryPath
+            + "/local/frameworks/crispasr/\(vadModelFile)")
+        #endif
         for path in candidates.compactMap({ $0 }) {
             if FileManager.default.fileExists(atPath: path) { return path }
         }
@@ -152,21 +156,28 @@ final class CrispASREngine: Transcriber {
 
     // MARK: - Library binding
 
-    private static let dylibCandidates: [String?] = [
-        // Test/CI override (absolute path).
-        ProcessInfo.processInfo.environment["MIMI_ASR_DYLIB"],
+    private static let dylibCandidates: [String?] = {
+        var candidates: [String?] = []
+        #if DEBUG
+        // Test/CI override (absolute path) — release builds resolve only
+        // via bundle/LC_RPATH paths, never the environment or the CWD.
+        candidates.append(ProcessInfo.processInfo.environment["MIMI_ASR_DYLIB"])
+        #endif
         // Bare name: resolved via the app's LC_RPATH (covers the dev
         // checkout via $(SRCROOT)/local/frameworks and the bundle via
         // @executable_path/../Frameworks).
-        "libcrispasr.dylib",
-        Bundle.main.privateFrameworksPath.map { $0 + "/libcrispasr.dylib" },
-        Bundle.main.path(forResource: "libcrispasr", ofType: "dylib"),
-        Bundle.main.path(
-            forResource: "libcrispasr", ofType: "dylib", inDirectory: "Frameworks"),
+        candidates.append("libcrispasr.dylib")
+        candidates.append(Bundle.main.privateFrameworksPath.map { $0 + "/libcrispasr.dylib" })
+        candidates.append(Bundle.main.path(forResource: "libcrispasr", ofType: "dylib"))
+        candidates.append(Bundle.main.path(
+            forResource: "libcrispasr", ofType: "dylib", inDirectory: "Frameworks"))
+        #if DEBUG
         // Development fallback (repo checkout before bundling).
-        FileManager.default.currentDirectoryPath
-            + "/local/frameworks/crispasr/libcrispasr.dylib",
-    ]
+        candidates.append(FileManager.default.currentDirectoryPath
+            + "/local/frameworks/crispasr/libcrispasr.dylib")
+        #endif
+        return candidates
+    }()
 
     private static func openLibrary() throws -> UnsafeMutableRawPointer {
         var lastError = "no candidate paths"
