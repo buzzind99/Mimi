@@ -33,7 +33,7 @@ final class HUDWindowController {
 
     private func makePanel() -> HUDPanel {
         let panel = HUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 150),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 180),
             styleMask: [.borderless, .resizable, .nonactivatingPanel],
             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -75,10 +75,11 @@ final class HUDPanel: NSPanel, ObservableObject {
 final class HUDHostingView: NSHostingView<HUDView> {
     private var panel: HUDPanel? { window as? HUDPanel }
 
-    // Covers the padlock button in the top-right corner (12pt content padding).
+    // Must mirror `padlockButton`'s layout: 24×24 button with 6pt padding,
+    // expanded by a 4pt margin for a comfortable hit target.
     private var unlockRegion: CGRect {
         let size: CGFloat = 24
-        let pad: CGFloat = 12
+        let pad: CGFloat = 6
         let margin: CGFloat = 4
         return CGRect(
             x: bounds.width - pad - size - margin,
@@ -105,54 +106,17 @@ struct HUDView: View {
     @ObservedObject var panel: HUDPanel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Spacer()
-                Button {
-                    panel.locked.toggle()
-                } label: {
-                    Image(systemName: panel.locked ? "lock.fill" : "lock.open.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(panel.locked ? "Unlock to move/resize (HUD becomes click-through when locked)" : "Lock (click-through)")
-            }
-
-            if !live.partial.isEmpty {
-                Text(live.partial)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-            } else if let lastJP = live.lastFinalJP {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(SessionClock.timestamp(lastJP.startS))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                        Text(lastJP.text)
-                            .font(.system(size: 15))
-                            .foregroundStyle(.white)
-                    }
-                    if let romaji = RomajiAnnotator.romaji(for: lastJP.text) {
-                        Text(romaji)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary.opacity(0.8))
-                    }
-                }
-            } else {
-                Text("Mimi HUD")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-            }
-
-            if !live.lastFinalEN.isEmpty {
-                Text(live.lastFinalEN)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.teal)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            liveSection
+                .padding(.bottom, 8)
+            Rectangle()
+                .fill(Color.white.opacity(0.14))
+                .frame(height: 1)
+                .padding(.bottom, 8)
+            completedSection
         }
         .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.black.opacity(0.62))
@@ -161,6 +125,78 @@ struct HUDView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.white.opacity(panel.locked ? 0.08 : 0.35), lineWidth: 1)
         )
-        .frame(minWidth: 320, minHeight: 110)
+        .frame(minWidth: 360, minHeight: 170)
+        .overlay(alignment: .topTrailing) { padlockButton }
+    }
+
+    // Pinned top-trailing with 6pt padding; HUDHostingView.unlockRegion
+    // mirrors this rect so it stays clickable while locked.
+    private var padlockButton: some View {
+        Button {
+            panel.locked.toggle()
+        } label: {
+            Image(systemName: panel.locked ? "lock.fill" : "lock.open.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(6)
+        .help(panel.locked ? "Unlock to move/resize (HUD is click-through when locked)" : "Lock (click-through)")
+    }
+
+    private var liveSection: some View {
+        Group {
+            if !live.partial.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(live.partial)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white)
+                    if let romaji = RomajiAnnotator.romaji(for: live.partial) {
+                        Text(romaji)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                Text("Listening…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
+    }
+
+    private var completedSection: some View {
+        Group {
+            if let entry = model.entries.last(where: { $0.joinedTranslations != nil }) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(SessionClock.timestamp(entry.sentence.startS))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                        Text(entry.sentence.text)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white)
+                    }
+                    if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
+                        Text(romaji)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    }
+                    if let en = entry.joinedTranslations {
+                        Text(en)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.teal)
+                    }
+                }
+            } else {
+                Text("Waiting for the first sentence…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }

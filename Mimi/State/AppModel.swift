@@ -125,8 +125,6 @@ final class AppModel: ObservableObject {
 
         entries.removeAll()
         live.partial = ""
-        live.lastFinalJP = nil
-        live.lastFinalEN = ""
         latency.reset()
 
         let buffer = SentenceBuffer()
@@ -295,7 +293,6 @@ final class AppModel: ObservableObject {
 
     private func handleSentence(_ sentence: Sentence) {
         entries.append(SessionEntry(sentence: sentence))
-        live.lastFinalJP = sentence
         // Synchronous main-actor enqueue: by the time `stop` drains, every
         // emitted sentence is observably in the queue.
         translationQueue.enqueue(sentence)
@@ -304,9 +301,6 @@ final class AppModel: ObservableObject {
     private func applyTranslation(index: Int, translation: SentenceTranslation) {
         if let at = entries.firstIndex(where: { $0.sentence.index == index }) {
             entries[at].appendTranslation(translation)
-        }
-        if translation.lang == "en" || live.lastFinalEN.isEmpty {
-            live.lastFinalEN = translation.text
         }
     }
 

@@ -8,8 +8,4 @@ import Combine
 final class LivePartialState: ObservableObject {
     /// Current in-flight partial (unstamped, still forming).
     @Published var partial: String = ""
-    /// Most recent finalized JP sentence (drives the HUD top line).
-    @Published var lastFinalJP: Sentence?
-    /// Most recent EN translation (drives the HUD second line).
-    @Published var lastFinalEN: String = ""
 }
