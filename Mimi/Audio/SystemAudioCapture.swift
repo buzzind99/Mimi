@@ -8,8 +8,6 @@ struct AudioChunk: Sendable {
     let samples: [Float]
     /// Session-relative sample offset of the first sample.
     let startSample: Int
-    /// True when the RMS gate classified the chunk as below-speech silence.
-    let silent: Bool
 }
 
 /// Errors surfaced by the capture pipeline.
@@ -38,21 +36,15 @@ enum CaptureError: LocalizedError {
 /// stream and delivers mono 16 kHz chunks.
 ///
 /// Threading: sample buffers arrive on the dedicated SCK output queue; the
-/// delegate downmixes/resamples when needed, slices 160 ms chunks, applies
-/// the RMS gate, and calls `onChunk` on that queue.
+/// delegate downmixes/resamples when needed, slices 160 ms chunks, and calls
+/// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
+/// engine's job.
 final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     static let outputSampleRate: Double = 16_000
     static let chunkSamples = Int(outputSampleRate * 0.16)
 
     var onChunk: ((AudioChunk) -> Void)?
     var onIOError: ((CaptureError) -> Void)?
-
-    /// RMS gate thresholds (float32 linear). Speech enter/exit hysteresis.
-    var gateOnThreshold: Float = 1.2e-3
-    var gateOffThreshold: Float = 0.6e-3
-    var gateHoldSeconds: Double = 0.5
-    /// Master switch for the gate
-    var gateEnabled = true
 
     private let outputQueue = DispatchQueue(
         label: "dev.mimi.capture.sck", qos: .userInteractive)
@@ -62,15 +54,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private var cachedConverterRate: Double = 0
     private var accumulated: [Float] = []
     private var emittedSamples = 0
-    private var gateSpeechActive = false
-    private var gateLastSpeechAt: Date = .distantPast
-    private var consecutiveSilentChunks = 0
 
     private(set) var isRunning = false
-
-    /// True while the stream has delivered only gate-silenced audio for a
-    /// stretch (debug aid for a dead pipeline).
-    private(set) var isStreamSilent = false
 
     // MARK: - Permission
 
@@ -330,50 +315,19 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         return (0..<n).map { src[$0] }
     }
 
-    // MARK: - Chunking + gate
+    // MARK: - Chunking
 
-    /// Slice the accumulator into 160 ms chunks, apply the RMS gate, deliver.
+    /// Slice the accumulator into 160 ms chunks and deliver.
     private func emitFixedChunks() {
         let chunkSize = Self.chunkSamples
         while accumulated.count >= chunkSize {
-            var chunk = Array(accumulated[0..<chunkSize])
+            let chunk = Array(accumulated[0..<chunkSize])
             accumulated.removeFirst(chunkSize)
 
-            let silent = gateEnabled ? applyGate(&chunk) : false
-            consecutiveSilentChunks = silent ? consecutiveSilentChunks + 1 : 0
-            isStreamSilent = consecutiveSilentChunks >= 50
-
             let chunkObj = AudioChunk(
-                samples: chunk, startSample: emittedSamples, silent: silent)
+                samples: chunk, startSample: emittedSamples)
             emittedSamples += chunkSize
             onChunk?(chunkObj)
         }
-    }
-
-    /// Hysteresis RMS gate: below-speech stretches pass as true silence so
-    /// the ASR cannot hallucinate on BGM-only passages.
-    private func applyGate(_ samples: inout [Float]) -> Bool {
-        var energy: Float = 0
-        for s in samples { energy += s * s }
-        let rms = (energy / Float(samples.count)).squareRoot()
-        let now = Date()
-
-        if gateSpeechActive {
-            if rms >= gateOffThreshold {
-                gateLastSpeechAt = now
-            } else if now.timeIntervalSince(gateLastSpeechAt) >= gateHoldSeconds {
-                gateSpeechActive = false
-            }
-        } else {
-            if rms >= gateOnThreshold {
-                gateSpeechActive = true
-                gateLastSpeechAt = now
-            }
-        }
-
-        if !gateSpeechActive {
-            for i in samples.indices { samples[i] = 0 }
-        }
-        return !gateSpeechActive
     }
 }

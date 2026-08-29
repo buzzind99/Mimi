@@ -115,7 +115,6 @@ final class AppModel: ObservableObject {
         sentenceBuffer = buffer
 
         let capture = SystemAudioCapture()
-        capture.gateEnabled = false
         #if DEBUG
         var debugIngressChunks = 0
         #endif
@@ -132,7 +131,6 @@ final class AppModel: ObservableObject {
                 let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
                 print(
                     "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
-                    "silent=\(chunk.silent) streamSilent=\(self.capture?.isStreamSilent ?? false) " +
                     "t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))")
             }
             #endif
