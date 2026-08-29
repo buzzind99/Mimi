@@ -146,17 +146,27 @@ struct ContentView: View {
                 DispatchQueue.main.async { pulsing = true }
             }
 
-            Text(live.partial.isEmpty ? "…" : live.partial)
-                .font(.system(size: 17, weight: .medium))
-                .italic()
-                .foregroundColor(live.partial.isEmpty ? .secondary.opacity(0.35) : .teal)
-                .lineLimit(2)
-                .frame(height: 22, alignment: .leading)
-                .textSelection(.enabled)
+            if live.partial.isEmpty {
+                Text("…")
+                    .font(.system(size: 17, weight: .medium))
+                    .italic()
+                    .foregroundColor(.secondary.opacity(0.35))
+                    .frame(height: 22, alignment: .leading)
+            } else {
+                Text(live.partial)
+                    .font(.system(size: 17, weight: .medium))
+                    .italic()
+                    .foregroundColor(.teal)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .frame(height: 22, alignment: .leading)
+            }
 
             Group {
                 if let romaji = RomajiAnnotator.romaji(for: live.partial) {
                     Text(romaji)
+                        .lineLimit(1)
+                        .truncationMode(.head)
                 } else {
                     Text(verbatim: " ")
                 }
@@ -164,7 +174,6 @@ struct ContentView: View {
             .font(.caption.monospaced())
             .foregroundColor(.secondary.opacity(0.55))
             .frame(height: 14, alignment: .leading)
-            .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
