@@ -304,6 +304,9 @@ final class CrispASREngine: Transcriber {
         }
         // TLS-backed GPU preference: must be set on the same thread that
         // opens the session (prepare runs once, before any decode starts).
+        #if DEBUG
+        print("[asr] prepare: opening C session (qwen3/metal)")
+        #endif
         fnSetGpuBackend("metal")
         let pathStorage = modelPath.utf8CString
         let langStorage = "qwen3".utf8CString
@@ -345,6 +348,9 @@ final class CrispASREngine: Transcriber {
         vadLastSpeechEndSample = nil
         vadAnalyzedThroughSample = 0
         vadFirstSpeechStartSample = nil
+        consecutiveDecodeFailures = 0
+        consecutiveVADFailures = 0
+        vadEnabled = true
     }
 
     func push(_ samples: [Float]) {
@@ -477,6 +483,13 @@ final class CrispASREngine: Transcriber {
     private func dispatchFinalLocked(end: Int) {
         let pcm = utterance
         let start = vadFirstSpeechStartSample ?? utteranceStartSample
+        #if DEBUG
+        print(String(
+            format: "[asr] final dispatch: %.2fs utterance [%.2fs..%.2fs]",
+            Double(pcm.count) / Double(Self.sampleRate),
+            Double(start) / Double(Self.sampleRate),
+            Double(end) / Double(Self.sampleRate)))
+        #endif
         decodeInFlight = true
         decodeQueue.async { [weak self] in
             self?.runDecode(pcm: pcm, start: start, end: end, isFinal: true)
@@ -489,12 +502,16 @@ final class CrispASREngine: Transcriber {
     /// serializes access to the cached model internally).
     private func runVADJob(pcm: [Float], utteranceStart: Int, generation: Int) {
         defer {
-            jobFinished.signal()
             lock.lock()
             vadInFlight = false
             // The VAD verdict may make an endpoint (or a decode step) due.
             maybeScheduleWorkLocked()
             lock.unlock()
+            // Signal *after* the flag reset (semaphore counts, so a waiter
+            // that checked the flag before this point still wakes): the old
+            // order let `finish` miss the signal and stall for its full
+            // 30 s timeout.
+            jobFinished.signal()
         }
         guard let vadModelPath, let fnVadSlices, let fnVadFree else { return }
 
@@ -522,13 +539,23 @@ final class CrispASREngine: Transcriber {
         defer { lock.unlock() }
         // A final/discard reset the utterance while this pass was running —
         // the result no longer matches live state.
-        guard generation == utteranceGeneration, vadEnabled else { return }
+        guard generation == utteranceGeneration, vadEnabled else {
+            #if DEBUG
+            print("[asr] vad: dropped stale result (generation \(generation) vs \(utteranceGeneration), vadEnabled=\(vadEnabled))")
+            #endif
+            return
+        }
         vadAnalyzedThroughSample = utteranceStart + pcm.count
 
         if count == 0 || spansPtr == nil {
             // Speechless buffer (VAD is authoritative over BGM): drop it so
             // the forced-final cap can't decode speechless audio later.
             if pcm.count >= Self.vadMinDiscardSamples {
+                #if DEBUG
+                print(String(
+                    format: "[asr] vad: speechless buffer (%.2fs) — discarded",
+                    Double(pcm.count) / Double(Self.sampleRate)))
+                #endif
                 discardUtteranceLocked()
             }
             return
@@ -602,13 +629,14 @@ final class CrispASREngine: Transcriber {
         let decodeStart = ContinuousClock.now
         #endif
         defer {
-            jobFinished.signal()
             lock.lock()
             decodeInFlight = false
             // A decode finishing may mean the next step (or a due VAD pass)
             // is already pending.
             maybeScheduleWorkLocked()
             lock.unlock()
+            // Signal after the flag reset — see runVADJob.
+            jobFinished.signal()
         }
         guard let session else { return }
 
@@ -641,34 +669,49 @@ final class CrispASREngine: Transcriber {
             }
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        #if DEBUG
+        if text.isEmpty {
+            print("[asr] \(isFinal ? "final" : "partial") decode returned no text (\(pcm.count) samples)")
+        }
+        #endif
 
         lock.lock()
         defer { lock.unlock() }
         processedCount = max(processedCount, end)
         if isFinal {
-            inbox.append(.final(text: text, startSample: start, endSample: end, lang: languageCode))
-            // Re-seed any audio past the finalized span (speech that resumed
-            // while this decode was in flight) as the start of the next one.
-            let finalized = end - utteranceStartSample
-            if finalized >= 0, finalized < utterance.count {
-                utterance.removeFirst(finalized)
-                utteranceStartSample = end
-                if !utterance.isEmpty { utteranceHasLoudAudio = true }
-            } else {
-                utterance = []
-                utteranceStartSample = 0
+            if !text.isEmpty {
+                inbox.append(.final(text: text, startSample: start, endSample: end, lang: languageCode))
             }
-            utteranceGeneration += 1
-            utteranceHasSpeech = false
-            lastPartialSpeechEndSample = 0
-            vadLastSpeechEndSample = nil
-            vadAnalyzedThroughSample = 0
-            vadFirstSpeechStartSample = nil
-            trimWindowLocked(throughSample: end)
-        } else {
+            // Close out the utterance even when the decode produced nothing:
+            // leaving it open would keep the endpoint/cap conditions true and
+            // re-decode the same buffer forever (finals wedge, partials die).
+            finalizeUtteranceLocked(end: end)
+        } else if !text.isEmpty {
             inbox.append(.partial(text: text))
         }
+    }
+
+    /// Caller holds `lock`. Closes out the utterance through `end` (the span
+    /// a final decode covered): drops the finalized span, re-seeding any
+    /// speech that resumed while the decode was in flight as the start of
+    /// the next utterance, and resets all endpoint state.
+    private func finalizeUtteranceLocked(end: Int) {
+        let finalized = end - utteranceStartSample
+        if finalized >= 0, finalized < utterance.count {
+            utterance.removeFirst(finalized)
+            utteranceStartSample = end
+            if !utterance.isEmpty { utteranceHasLoudAudio = true }
+        } else {
+            utterance = []
+            utteranceStartSample = 0
+        }
+        utteranceGeneration += 1
+        utteranceHasSpeech = false
+        lastPartialSpeechEndSample = 0
+        vadLastSpeechEndSample = nil
+        vadAnalyzedThroughSample = 0
+        vadFirstSpeechStartSample = nil
+        trimWindowLocked(throughSample: end)
     }
 
     /// Caller holds `lock`. Drops the finalized span from the rolling window
@@ -744,6 +787,9 @@ final class CrispASREngine: Transcriber {
                     }
                 }
                 text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                #if DEBUG
+                print("[asr] flush decode: \(padded.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
+                #endif
                 if !text.isEmpty {
                     inbox.append(.final(
                         text: text, startSample: start, endSample: end, lang: languageCode))
