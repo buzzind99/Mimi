@@ -21,7 +21,6 @@ final class AppModel: ObservableObject {
     @Published var phase: SessionPhase = .idle
     @Published var entries: [SessionEntry] = []
     @Published var translationStatus: TranslationStatus = .idle
-    @Published var latencySeconds: Double = 0
     @Published var engineIsMock = false
     @Published var modelURL: URL?
     @Published var hudVisible = false
@@ -31,6 +30,7 @@ final class AppModel: ObservableObject {
     @Published var translationConfig: TranslationSession.Configuration?
 
     let live = LivePartialState()
+    let latency = LatencyState()
     let translationQueue = TranslationQueue()
 
     private var capture: SystemAudioCapture?
@@ -106,7 +106,7 @@ final class AppModel: ObservableObject {
         live.partial = ""
         live.lastFinalJP = nil
         live.lastFinalEN = ""
-        latencySeconds = 0
+        latency.reset()
 
         let buffer = SentenceBuffer()
         buffer.onSentence = { [weak self] sentence in
@@ -136,7 +136,8 @@ final class AppModel: ObservableObject {
             #endif
             let pushed = chunk.startSample + chunk.samples.count
             Task { @MainActor in
-                self.latencySeconds = max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate)
+                self.latency.update(
+                    max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate))
             }
         }
         capture.onIOError = { [weak self] error in
@@ -280,7 +281,7 @@ final class AppModel: ObservableObject {
 
     private func applyTranslation(index: Int, translation: SentenceTranslation) {
         if let at = entries.firstIndex(where: { $0.sentence.index == index }) {
-            entries[at].translations.append(translation)
+            entries[at].appendTranslation(translation)
         }
         if translation.lang == "en" || live.lastFinalEN.isEmpty {
             live.lastFinalEN = translation.text

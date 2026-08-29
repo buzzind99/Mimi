@@ -11,7 +11,7 @@ struct MimiApp: App {
 
     var body: some Scene {
         WindowGroup("Mimi") {
-            ContentView(model: model, live: model.live)
+            ContentView(model: model, live: model.live, latency: model.latency)
                 .onChange(of: model.hudVisible) { _, visible in
                     if visible {
                         appDelegate.hud.bind(model: model, live: model.live)

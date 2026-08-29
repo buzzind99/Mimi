@@ -29,9 +29,27 @@ enum ASREvent: Sendable {
 }
 
 /// A complete session row: sentence + its (possibly empty) translations.
+/// Display strings (timestamps, joined translations) are precomputed at
+/// mutation time so row rendering never re-joins or re-formats.
 struct SessionEntry: Identifiable, Equatable {
     let sentence: Sentence
     var translations: [SentenceTranslation] = []
+    /// Formatted once at init for cheap row rendering.
+    let startTimestamp: String
+    let endTimestamp: String
+    /// `nil` while untranslated; the row renders a placeholder instead.
+    private(set) var joinedTranslations: String?
+
+    init(sentence: Sentence) {
+        self.sentence = sentence
+        self.startTimestamp = SessionClock.timestamp(sentence.startS)
+        self.endTimestamp = SessionClock.timestamp(sentence.endS)
+    }
+
+    mutating func appendTranslation(_ translation: SentenceTranslation) {
+        translations.append(translation)
+        joinedTranslations = translations.map(\.text).joined(separator: " / ")
+    }
 
     var id: Int { sentence.index }
 }

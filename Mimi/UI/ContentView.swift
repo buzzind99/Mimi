@@ -19,6 +19,7 @@ struct TranslationSessionHost: View {
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
+    @ObservedObject var latency: LatencyState
     @State private var isAtTop = true
     @State private var pulsing = false
     @State private var scrollPosition = ScrollPosition()
@@ -238,10 +239,34 @@ struct ContentView: View {
     // MARK: - Status bar
 
     private var statusBar: some View {
+        StatusBarView(model: model, latency: latency)
+    }
+
+    private func runExport(_ format: SessionExporter.Format) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [format.fileExtension == "json" ? .json : .plainText]
+        panel.nameFieldStringValue = "mimi-session.\(format.fileExtension)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try model.export(format: format)
+            try data.write(to: url)
+        } catch {
+            model.errorMessage = "Export failed: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// Status bar isolated into its own view so the high-frequency latency
+/// estimate re-renders only this bar, not the transcript or the header.
+private struct StatusBarView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var latency: LatencyState
+
+    var body: some View {
         HStack(spacing: 16) {
             statusBadge
             Spacer()
-            Text(String(format: "≈ %.1f s behind", model.latencySeconds))
+            Text(String(format: "≈ %.1f s behind", latency.seconds))
                 .font(.caption.monospacedDigit())
                 .foregroundColor(.secondary)
         }
@@ -294,41 +319,29 @@ struct ContentView: View {
             Text(message).font(.caption).foregroundStyle(.red)
         }
     }
-
-    private func runExport(_ format: SessionExporter.Format) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [format.fileExtension == "json" ? .json : .plainText]
-        panel.nameFieldStringValue = "mimi-session.\(format.fileExtension)"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let data = try model.export(format: format)
-            try data.write(to: url)
-        } catch {
-            model.errorMessage = "Export failed: \(error.localizedDescription)"
-        }
-    }
 }
 
 /// One stacked row: timestamp range header, EN translation (italic),
-/// JP sentence, romaji reading.
-struct TranscriptRow: View {
+/// JP sentence, romaji reading. `Equatable` so SwiftUI skips unchanged rows
+/// when the transcript re-diffs.
+struct TranscriptRow: View, Equatable {
     let entry: SessionEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(SessionClock.timestamp(entry.sentence.startS)) – \(SessionClock.timestamp(entry.sentence.endS))")
+            Text("\(entry.startTimestamp) – \(entry.endTimestamp)")
                 .font(.caption.monospacedDigit())
                 .foregroundColor(.secondary.opacity(0.6))
 
-            if entry.translations.isEmpty {
-                Text("…")
-                    .italic()
-                    .foregroundColor(.secondary.opacity(0.3))
-            } else {
-                Text(entry.translations.map(\.text).joined(separator: " / "))
+            if let joined = entry.joinedTranslations {
+                Text(joined)
                     .italic()
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
+            } else {
+                Text("…")
+                    .italic()
+                    .foregroundColor(.secondary.opacity(0.3))
             }
 
             Text(entry.sentence.text)
