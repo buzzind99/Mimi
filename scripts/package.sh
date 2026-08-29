@@ -51,10 +51,8 @@ stage_runtime() {
   # @rpath dependencies via a @loader_path RPATH), so it bundles as a plain
   # subdirectory of Contents/Frameworks.
   cp -R "${REPO_ROOT}/local/frameworks/crispasr" "${fwdir}/crispasr"
-
-  find "${fwdir}/crispasr" \( -name "*.dylib" -o -name crispasr \) | while read -r f; do
-    codesign --force --sign "${SIGN_IDENTITY}" "${f}" 2>/dev/null \
-      || codesign --force --sign - "${f}"
+  find "${fwdir}/crispasr" -type f \( -name "*.dylib" -o -name crispasr -o -name "*.gguf" \) | while read -r f; do
+    codesign --force --sign "${SIGN_IDENTITY}" "${f}"
   done
 }
 
