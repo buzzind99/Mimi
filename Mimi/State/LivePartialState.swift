@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// High-frequency live subtitle state (partials arrive at 6–10 Hz). Observed
 /// only by the live subtitle row and the HUD — partial updates never re-render

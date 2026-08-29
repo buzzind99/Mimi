@@ -25,12 +25,12 @@ final class SentenceBuffer {
     private static func hasContent(_ s: String) -> Bool {
         s.unicodeScalars.contains { scalar in
             switch scalar.value {
-            case 0x3040...0x309F, // hiragana
-                 0x30A0...0x30FF, // katakana (incl. long-vowel mark ー)
-                 0x4E00...0x9FFF, // CJK unified ideographs
-                 0x30...0x39:     // ASCII digits
+            case 0x3040 ... 0x309F, // hiragana
+                 0x30A0 ... 0x30FF, // katakana (incl. long-vowel mark ー)
+                 0x4E00 ... 0x9FFF, // CJK unified ideographs
+                 0x30 ... 0x39: // ASCII digits
                 return true
-            case 0x41...0x5A, 0x61...0x7A: // Latin letters
+            case 0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
                 return true
             default:
                 return false
@@ -56,18 +56,20 @@ final class SentenceBuffer {
         // Drop symbol-only finals (e.g. "...", "...?") when they would
         // start a new sentence; keep them as trailing punctuation when
         // the buffer already has content.
-        if isEmpty && !Self.hasContent(trimmed) { return }
+        if isEmpty, !Self.hasContent(trimmed) {
+            return
+        }
         if isEmpty {
             self.startSample = startSample
             isEmpty = false
         }
-        self.text += trimmed
+        text += trimmed
         lastEndSample = endSample
         lastAppendAt = Date()
 
         if tier1ShouldClose() {
             close()
-        } else if self.text.count >= config.maxChars {
+        } else if text.count >= config.maxChars {
             splitAtClauseBoundary()
         }
     }
@@ -102,24 +104,28 @@ final class SentenceBuffer {
             if boundaryChars.count <= chars.count {
                 var i = config.minSplitChars
                 while i <= chars.count - boundaryChars.count {
-                    if Array(chars[i..<(i + boundaryChars.count)]) == boundaryChars {
+                    if Array(chars[i ..< (i + boundaryChars.count)]) == boundaryChars {
                         cut = i + boundaryChars.count
                         break
                     }
                     i += 1
                 }
             }
-            if cut != nil { break }
+            if cut != nil {
+                break
+            }
         }
         guard let cut, cut > 0, cut < chars.count else { return }
 
-        let head = String(chars[0..<cut])
+        let head = String(chars[0 ..< cut])
         let tail = String(chars[cut...])
         text = head
         emit()
         text = tail
         startSample = lastEndSample
-        if tier1ShouldClose() { close() }
+        if tier1ShouldClose() {
+            close()
+        }
     }
 
     private func close() {

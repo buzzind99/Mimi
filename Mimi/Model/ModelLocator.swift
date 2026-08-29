@@ -30,14 +30,16 @@ enum ModelLocator {
         }
         let downloaded = downloadedURL
         if FileManager.default.fileExists(atPath: downloaded.path),
-           ModelVerifier.isVerified(downloaded) {
+           ModelVerifier.isVerified(downloaded)
+        {
             return downloaded
         }
         // Development checkout: scripts/build_runtime.sh puts the dev model
         // in <repo>/models/; Xcode runs the app with that as working directory.
         let devURL = URL(fileURLWithPath: "models/\(modelName)")
         if FileManager.default.fileExists(atPath: devURL.path),
-           ModelVerifier.isVerified(devURL) {
+           ModelVerifier.isVerified(devURL)
+        {
             return devURL.absoluteURL
         }
         return nil
@@ -54,7 +56,9 @@ enum ModelVerifier {
 
     struct VerificationError: LocalizedError {
         let message: String
-        var errorDescription: String? { message }
+        var errorDescription: String? {
+            message
+        }
     }
 
     private struct CacheKey: Hashable {
@@ -75,7 +79,9 @@ enum ModelVerifier {
         lock.lock()
         let cached = verified.contains(key)
         lock.unlock()
-        if cached { return true }
+        if cached {
+            return true
+        }
         do {
             try verify(file)
         } catch {
@@ -93,7 +99,8 @@ enum ModelVerifier {
         if hex != expectedSHA256.lowercased() {
             throw VerificationError(
                 message: "model file does not match Mimi's pinned checksum — "
-                    + "delete it and re-download, or replace it with an authentic copy")
+                    + "delete it and re-download, or replace it with an authentic copy"
+            )
         }
     }
 }
@@ -126,7 +133,9 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
 
     func start() {
         Task { @MainActor in
-            if case .done = self.state { return }
+            if case .done = self.state {
+                return
+            }
             self.begin()
         }
     }
@@ -185,13 +194,16 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
         Task { @MainActor in
-            if totalBytesExpectedToWrite > 0 { self.expectedBytes = totalBytesExpectedToWrite }
+            if totalBytesExpectedToWrite > 0 {
+                self.expectedBytes = totalBytesExpectedToWrite
+            }
             let progress = totalBytesExpectedToWrite > 0
                 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
                 : 0
             self.state = .downloading(
                 progress: progress, bytes: totalBytesWritten,
-                total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil)
+                total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil
+            )
         }
     }
 
@@ -231,9 +243,12 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
             self.task = nil
             self.invalidateSession()
             guard let error else { return } // success handled by didFinishDownloadingTo
-            if (error as NSError).code == NSURLErrorCancelled { return }
+            if (error as NSError).code == NSURLErrorCancelled {
+                return
+            }
             self.state = .failed(
-                "Download failed: \(error.localizedDescription). Retry, or drop the GGUF into \(ModelLocator.modelsDirectory.path) manually.")
+                "Download failed: \(error.localizedDescription). Retry, or drop the GGUF into \(ModelLocator.modelsDirectory.path) manually."
+            )
         }
     }
 

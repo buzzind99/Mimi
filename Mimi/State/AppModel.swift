@@ -54,7 +54,8 @@ final class AppModel: ObservableObject {
             },
             status: { [weak self] status in
                 self?.translationStatus = status
-            })
+            }
+        )
         refreshModelAvailability()
 
         NotificationCenter.default.addObserver(
@@ -68,7 +69,7 @@ final class AppModel: ObservableObject {
 
     func refreshModelAvailability() {
         modelURL = ModelLocator.resolve()
-        if modelURL == nil && phase == .idle {
+        if modelURL == nil, phase == .idle {
             phase = .needsModel
         } else if modelURL != nil, phase == .needsModel {
             phase = .idle
@@ -85,7 +86,7 @@ final class AppModel: ObservableObject {
         guard !warmUpScheduled, let url = modelURL else { return }
         warmUpScheduled = true
         #if DEBUG
-        print("[warmup] preparing ASR engine in background")
+            print("[warmup] preparing ASR engine in background")
         #endif
         Task.detached(priority: .utility) {
             if let engine = ASREngineFactory.makeEngine(modelURL: url, allowMock: false) {
@@ -141,28 +142,32 @@ final class AppModel: ObservableObject {
 
         let capture = SystemAudioCapture()
         #if DEBUG
-        var debugIngressChunks = 0
+            var debugIngressChunks = 0
         #endif
         capture.onChunk = { [weak self] chunk in
             guard let self, let engine = self.engine else { return }
             engine.push(chunk.samples)
             #if DEBUG
-            // Every ~8 s of audio, print ASR-ingress energy so a dead
-            // pipeline (all-zero audio reaching the model) is obvious.
-            debugIngressChunks += 1
-            if debugIngressChunks % 50 == 0 {
-                var energy: Float = 0
-                for s in chunk.samples { energy += s * s }
-                let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
-                print(
-                    "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
-                    "t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))")
-            }
+                // Every ~8 s of audio, print ASR-ingress energy so a dead
+                // pipeline (all-zero audio reaching the model) is obvious.
+                debugIngressChunks += 1
+                if debugIngressChunks % 50 == 0 {
+                    var energy: Float = 0
+                    for s in chunk.samples {
+                        energy += s * s
+                    }
+                    let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
+                    print(
+                        "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
+                            "t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))"
+                    )
+                }
             #endif
             let pushed = chunk.startSample + chunk.samples.count
             Task { @MainActor in
                 self.latency.update(
-                    max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate))
+                    max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate)
+                )
             }
         }
         capture.onIOError = { [weak self] error in
@@ -175,7 +180,7 @@ final class AppModel: ObservableObject {
         self.capture = capture
 
         #if DEBUG
-        print("[session] start: whole-system SCK audio capture")
+            print("[session] start: whole-system SCK audio capture")
         #endif
         try await capture.start()
 
@@ -188,7 +193,8 @@ final class AppModel: ObservableObject {
             targetLang: "en",
             model: engine.isMock ? "mock" : ModelLocator.modelID,
             chunkMS: 160,
-            streamOffset: nil)
+            streamOffset: nil
+        )
 
         phase = .running
 
@@ -200,7 +206,8 @@ final class AppModel: ObservableObject {
         translationConfig?.invalidate()
         translationConfig = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: "en"))
+            target: Locale.Language(identifier: "en")
+        )
 
         startTimers()
     }
@@ -255,7 +262,8 @@ final class AppModel: ObservableObject {
         translationConfig?.invalidate()
         translationConfig = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: "en"))
+            target: Locale.Language(identifier: "en")
+        )
     }
 
     // MARK: - Timers
@@ -287,12 +295,13 @@ final class AppModel: ObservableObject {
 
     private func handleASREvent(_ event: ASREvent) {
         switch event {
-        case .partial(let text):
+        case let .partial(text):
             live.partial = text
-        case .final(let text, let startSample, let endSample, let lang):
+        case let .final(text, startSample, endSample, lang):
             live.partial = ""
             sentenceBuffer?.append(
-                finalText: text, startSample: startSample, endSample: endSample)
+                finalText: text, startSample: startSample, endSample: endSample
+            )
             _ = lang
         }
     }
@@ -331,7 +340,8 @@ final class AppModel: ObservableObject {
         case .json:
             let results = snapshotTranslationResults()
             return try SessionExporter.json(
-                entries: entries, metadata: sessionMetadata, results: results)
+                entries: entries, metadata: sessionMetadata, results: results
+            )
         }
     }
 

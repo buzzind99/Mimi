@@ -35,7 +35,8 @@ final class HUDWindowController {
         let panel = HUDPanel(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 180),
             styleMask: [.borderless, .resizable, .nonactivatingPanel],
-            backing: .buffered, defer: false)
+            backing: .buffered, defer: false
+        )
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
@@ -49,7 +50,8 @@ final class HUDWindowController {
 
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         panel.setFrameOrigin(
-            NSPoint(x: screen.midX - panel.frame.width / 2, y: screen.minY + 90))
+            NSPoint(x: screen.midX - panel.frame.width / 2, y: screen.minY + 90)
+        )
         installContent(in: panel)
         self.panel = panel
         return panel
@@ -96,10 +98,12 @@ final class HUDHostingView: NSHostingView<HUDView> {
 
     private var measureHost: NSHostingView<HUDView>?
 
-    private var panel: HUDPanel? { window as? HUDPanel }
+    private var panel: HUDPanel? {
+        window as? HUDPanel
+    }
 
-    // Must mirror `padlockButton`'s layout: 24×24 button with 6pt padding,
-    // expanded by a 4pt margin for a comfortable hit target.
+    /// Must mirror `padlockButton`'s layout: 24×24 button with 6pt padding,
+    /// expanded by a 4pt margin for a comfortable hit target.
     private var unlockRegion: CGRect {
         let size: CGFloat = 24
         let pad: CGFloat = 6
@@ -108,7 +112,8 @@ final class HUDHostingView: NSHostingView<HUDView> {
             x: bounds.width - pad - size - margin,
             y: pad - margin,
             width: size + 2 * margin,
-            height: size + 2 * margin)
+            height: size + 2 * margin
+        )
     }
 
     override func layout() {
@@ -191,8 +196,8 @@ struct HUDView: View {
         .overlay(alignment: .topTrailing) { padlockButton }
     }
 
-    // Pinned top-trailing with 6pt padding; HUDHostingView.unlockRegion
-    // mirrors this rect so it stays clickable while locked.
+    /// Pinned top-trailing with 6pt padding; HUDHostingView.unlockRegion
+    /// mirrors this rect so it stays clickable while locked.
     private var padlockButton: some View {
         Button {
             panel.locked.toggle()
@@ -259,7 +264,8 @@ struct HUDView: View {
     /// that no longer resolves) the latest translated entry.
     private func displayedEntry(in entries: [SessionEntry]) -> SessionEntry {
         if let pinned = model.hudPinnedIndex,
-           let at = entries.firstIndex(where: { $0.sentence.index == pinned }) {
+           let at = entries.firstIndex(where: { $0.sentence.index == pinned })
+        {
             return entries[at]
         }
         return entries[entries.count - 1]
@@ -305,13 +311,15 @@ struct HUDView: View {
             historyButton(
                 icon: "chevron.up",
                 help: "Newer translation",
-                disabled: atLatest) {
+                disabled: atLatest
+            ) {
                 cycleHistory(entries: entries, step: 1)
             }
             historyButton(
                 icon: "chevron.down",
                 help: "Older translation",
-                disabled: atOldest) {
+                disabled: atOldest
+            ) {
                 cycleHistory(entries: entries, step: -1)
             }
         }

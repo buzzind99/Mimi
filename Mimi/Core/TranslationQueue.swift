@@ -103,14 +103,17 @@ final class TranslationQueue {
                         let response = try await session.translate(batch[0].text)
                         deliver(batch[0], SentenceTranslation(
                             lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                            text: response.targetText))
+                            text: response.targetText
+                        ))
                     } else {
                         let responses = try await session.translations(
-                            from: batch.map { TranslationSession.Request(sourceText: $0.text) })
+                            from: batch.map { TranslationSession.Request(sourceText: $0.text) }
+                        )
                         for (sentence, response) in zip(batch, responses) {
                             deliver(sentence, SentenceTranslation(
                                 lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                                text: response.targetText))
+                                text: response.targetText
+                            ))
                         }
                     }
                     setStatus(.ready)
@@ -179,7 +182,9 @@ final class TranslationQueue {
         let deadline = Date().addingTimeInterval(timeout)
         while !pending.isEmpty || inFlight {
             // A failed translator will never drain — don't make stop hang.
-            if case .unavailable = status { return false }
+            if case .unavailable = status {
+                return false
+            }
             guard Date() < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(50))
         }

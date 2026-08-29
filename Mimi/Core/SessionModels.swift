@@ -12,7 +12,9 @@ struct Sentence: Identifiable, Equatable, Sendable {
     let lang: String
     let text: String
 
-    var id: Int { index }
+    var id: Int {
+        index
+    }
 }
 
 /// A translation for a sentence. `translations` is append-only by design
@@ -42,8 +44,8 @@ struct SessionEntry: Identifiable, Equatable {
 
     init(sentence: Sentence) {
         self.sentence = sentence
-        self.startTimestamp = SessionClock.timestamp(sentence.startS)
-        self.endTimestamp = SessionClock.timestamp(sentence.endS)
+        startTimestamp = SessionClock.timestamp(sentence.startS)
+        endTimestamp = SessionClock.timestamp(sentence.endS)
     }
 
     mutating func appendTranslation(_ translation: SentenceTranslation) {
@@ -51,7 +53,9 @@ struct SessionEntry: Identifiable, Equatable {
         joinedTranslations = translations.map(\.text).joined(separator: " / ")
     }
 
-    var id: Int { sentence.index }
+    var id: Int {
+        sentence.index
+    }
 }
 
 /// Session metadata captured at Start.
@@ -65,7 +69,7 @@ struct SessionMetadata: Equatable, Codable {
 }
 
 enum SessionClock {
-    static let sampleRate: Double = 16_000
+    static let sampleRate: Double = 16000
 
     static func seconds(_ sample: Int) -> Double {
         Double(sample) / sampleRate

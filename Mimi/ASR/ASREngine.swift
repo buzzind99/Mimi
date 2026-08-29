@@ -30,11 +30,11 @@ enum ASREngineError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .runtimeNotFound(let detail):
+        case let .runtimeNotFound(detail):
             return "ASR runtime not found (\(detail)). Build it with scripts/build_runtime.sh, or drop the GGUF into the models folder to use the mock."
-        case .modelNotFound(let path):
+        case let .modelNotFound(path):
             return "ASR model not found at \(path)."
-        case .createFailed(let detail):
+        case let .createFailed(detail):
             return "Failed to create ASR recognizer: \(detail)"
         }
     }
@@ -54,7 +54,7 @@ final class MockASREngine: Transcriber {
         "これから配信を始めます、よろしくお願いします。",
         "新しいゲーム、みんな遊んだ？",
         "チャットの質問に答えていきますね。",
-        "次の話題に移ります、面白いですよ。",
+        "次の話題に移ります、面白いですよ。"
     ]
 
     private var speechChunksSeen = 0
@@ -64,7 +64,9 @@ final class MockASREngine: Transcriber {
     private var totalSamples = 0
     private var lastFinalEnd = 0
 
-    var processedSamples: Int { totalSamples }
+    var processedSamples: Int {
+        totalSamples
+    }
 
     func prepare() throws {}
     func openStream() throws {}
@@ -72,7 +74,9 @@ final class MockASREngine: Transcriber {
     func push(_ samples: [Float]) {
         totalSamples += samples.count
         var energy: Float = 0
-        for s in samples { energy += s * s }
+        for s in samples {
+            energy += s * s
+        }
         let rms = (energy / Float(max(1, samples.count))).squareRoot()
         if rms > 1e-3 {
             speechChunksSeen += 1
@@ -80,7 +84,7 @@ final class MockASREngine: Transcriber {
         if pendingFinal == nil, speechChunksSeen >= nextSentenceAt {
             pendingFinal = Self.canned[cannedIndex % Self.canned.count]
             cannedIndex += 1
-            nextSentenceAt = speechChunksSeen + Int.random(in: 5...12)
+            nextSentenceAt = speechChunksSeen + Int.random(in: 5 ... 12)
         }
     }
 
@@ -93,7 +97,9 @@ final class MockASREngine: Transcriber {
         return .final(text: text, startSample: start, endSample: end, lang: "ja")
     }
 
-    func finish() -> [ASREvent] { [] }
+    func finish() -> [ASREvent] {
+        []
+    }
 }
 
 /// Builds the right engine for a session: native when the runtime + model

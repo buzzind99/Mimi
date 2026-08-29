@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// High-frequency latency estimate, updated per 160 ms audio chunk. Observed
 /// only by the status bar — latency updates never re-render the transcript

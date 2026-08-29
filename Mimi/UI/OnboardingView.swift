@@ -23,7 +23,9 @@ struct OnboardingView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 Label {
-                    Text("Mimi listens to the audio playing on your Mac so it can transcribe what you hear. To allow this, macOS asks for Screen Recording access the first time you start; Mimi never records your screen or uploads anything. Everything runs locally on your Mac.")
+                    Text("Mimi listens to the audio playing on your Mac so it can transcribe what you hear. "
+                        + "To allow this, macOS asks for Screen Recording access the first time you start; "
+                        + "Mimi never records your screen or uploads anything. Everything runs locally on your Mac.")
                 } icon: {
                     Image(systemName: "display")
                 }
@@ -59,7 +61,7 @@ struct OnboardingView: View {
             VStack(spacing: 8) {
                 Button("Download speech model") { downloader.start() }
                     .buttonStyle(.borderedProminent)
-                if case .failed(let message) = downloader.state {
+                if case let .failed(message) = downloader.state {
                     Text(message)
                         .font(.caption)
                         .foregroundColor(.orange)
@@ -75,7 +77,7 @@ struct OnboardingView: View {
                         .foregroundColor(.secondary)
                 }
             }
-        case .downloading(_, let bytes, let total):
+        case let .downloading(_, bytes, total):
             VStack(spacing: 6) {
                 if let total, total > 0 {
                     ProgressView(value: Double(bytes), total: Double(total))

@@ -24,7 +24,7 @@ enum CaptureError: LocalizedError {
                 "Screen Recording access is required to capture system audio. Grant it in System Settings → Privacy & Security → Screen Recording, then restart Mimi."
         case .noDisplayFound:
             return "No display available to attach the audio stream to."
-        case .streamSetupFailed(let detail):
+        case let .streamSetupFailed(detail):
             return "Failed to start system audio capture: \(detail)"
         case .formatUnavailable:
             return "Could not process the captured audio format."
@@ -40,14 +40,15 @@ enum CaptureError: LocalizedError {
 /// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
 /// engine's job.
 final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
-    static let outputSampleRate: Double = 16_000
+    static let outputSampleRate: Double = 16000
     static let chunkSamples = Int(outputSampleRate * 0.16)
 
     var onChunk: ((AudioChunk) -> Void)?
     var onIOError: ((CaptureError) -> Void)?
 
     private let outputQueue = DispatchQueue(
-        label: "dev.mimi.capture.sck", qos: .userInteractive)
+        label: "dev.mimi.capture.sck", qos: .userInteractive
+    )
 
     private var stream: SCStream?
     private var converter: AVAudioConverter?
@@ -65,10 +66,13 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     /// Triggers the TCC prompt when undetermined. Returns false if Screen
     /// Recording has not been granted (granting requires an app restart).
     static func ensurePermission() async -> Bool {
-        if CGPreflightScreenCaptureAccess() { return true }
+        if CGPreflightScreenCaptureAccess() {
+            return true
+        }
         // The shareable-content query triggers the system prompt.
         _ = try? await SCShareableContent.excludingDesktopWindows(
-            false, onScreenWindowsOnly: false)
+            false, onScreenWindowsOnly: false
+        )
         return CGPreflightScreenCaptureAccess()
     }
 
@@ -80,7 +84,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(
-                false, onScreenWindowsOnly: true)
+                false, onScreenWindowsOnly: true
+            )
         } catch {
             throw CaptureError.streamSetupFailed(error.localizedDescription)
         }
@@ -94,7 +99,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             $0.bundleIdentifier != Bundle.main.bundleIdentifier
         }
         let filter = SCContentFilter(
-            display: display, excludingApplications: apps, exceptingWindows: [])
+            display: display, excludingApplications: apps, exceptingWindows: []
+        )
 
         let config = SCStreamConfiguration()
         config.capturesAudio = true
@@ -119,7 +125,7 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
         isRunning = true
         #if DEBUG
-        print("[capture] SCK system-audio stream started (target: 16 kHz mono)")
+            print("[capture] SCK system-audio stream started (target: 16 kHz mono)")
         #endif
     }
 
@@ -186,7 +192,7 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     /// (N one-channel buffers) layouts.
     private func extractMono(sampleBuffer: CMSampleBuffer, asbd: AudioStreamBasicDescription) -> [Float]? {
         guard MemoryLayout<Float>.size == 4, asbd.mBitsPerChannel == 32,
-            asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+              asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
         else {
             print("unsupported SCK audio format: \(asbd)")
             return nil
@@ -200,14 +206,16 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             bufferListOut: nil, bufferListSize: 0,
             blockBufferAllocator: nil, blockBufferMemoryAllocator: nil,
             flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
-            blockBufferOut: nil)
+            blockBufferOut: nil
+        )
         guard status == noErr, listSize > 0 else {
             print("CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer (size): \(status)")
             return nil
         }
 
         let raw = UnsafeMutableRawPointer.allocate(
-            byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment)
+            byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment
+        )
         defer { raw.deallocate() }
         let abl = raw.assumingMemoryBound(to: AudioBufferList.self)
         memset(abl, 0, listSize)
@@ -219,7 +227,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             blockBufferAllocator: kCFAllocatorDefault,
             blockBufferMemoryAllocator: kCFAllocatorDefault,
             flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
-            blockBufferOut: &blockBuffer)
+            blockBufferOut: &blockBuffer
+        )
         guard status == noErr else {
             print("CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer: \(status)")
             return nil
@@ -248,9 +257,9 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
         var mono = [Float](repeating: 0, count: frames)
         let scale = 1.0 / Float(channels)
-        for f in 0..<frames {
+        for f in 0 ..< frames {
             var sum: Float = 0
-            for ch in 0..<channels {
+            for ch in 0 ..< channels {
                 let ptr: UnsafeMutablePointer<Float>
                 if interleaved {
                     ptr = firstData.assumingMemoryBound(to: Float.self)
@@ -268,8 +277,9 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
     // MARK: - Resample (fallback when SCK ignores the 16 kHz request)
 
-    private lazy var outputFormat: AVAudioFormat = AVAudioFormat(
-        standardFormatWithSampleRate: Self.outputSampleRate, channels: 1)!
+    private lazy var outputFormat: AVAudioFormat = .init(
+        standardFormatWithSampleRate: Self.outputSampleRate, channels: 1
+    )!
 
     /// PCM buffers reused across chunks (reallocated only if a future
     /// source rate/duration needs more capacity).
@@ -280,7 +290,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private func resample(_ mono: [Float], from rate: Double) -> [Float]? {
         if cachedConverterRate != rate {
             guard let inFormat = AVAudioFormat(
-                standardFormatWithSampleRate: rate, channels: 1),
+                standardFormatWithSampleRate: rate, channels: 1
+            ),
                 let newConverter = AVAudioConverter(from: inFormat, to: outputFormat)
             else {
                 print("AVAudioConverter creation failed: \(rate) → \(outputFormat)")
@@ -296,7 +307,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
         if inBuffer == nil || inBuffer!.frameCapacity < AVAudioFrameCount(mono.count) {
             inBuffer = AVAudioPCMBuffer(
-                pcmFormat: inFormat, frameCapacity: AVAudioFrameCount(mono.count))
+                pcmFormat: inFormat, frameCapacity: AVAudioFrameCount(mono.count)
+            )
         }
         guard let inBuffer, inBuffer.floatChannelData != nil else { return nil }
         inBuffer.frameLength = AVAudioFrameCount(mono.count)
@@ -310,7 +322,8 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         let outCapacity = AVAudioFrameCount(Double(mono.count) * ratio) + 32
         if outBuffer == nil || outBuffer!.frameCapacity < outCapacity {
             outBuffer = AVAudioPCMBuffer(
-                pcmFormat: outputFormat, frameCapacity: outCapacity)
+                pcmFormat: outputFormat, frameCapacity: outCapacity
+            )
         }
         guard let outBuffer else { return nil }
 
@@ -326,7 +339,7 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             return self.inBuffer
         }
         guard status != .error, conversionError == nil,
-            let src = outBuffer.floatChannelData?[0]
+              let src = outBuffer.floatChannelData?[0]
         else { return nil }
 
         let n = Int(outBuffer.frameLength)
@@ -339,11 +352,12 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private func emitFixedChunks() {
         let chunkSize = Self.chunkSamples
         while accumulated.count - accumulatedStart >= chunkSize {
-            let chunk = Array(accumulated[accumulatedStart..<accumulatedStart + chunkSize])
+            let chunk = Array(accumulated[accumulatedStart ..< accumulatedStart + chunkSize])
             accumulatedStart += chunkSize
 
             let chunkObj = AudioChunk(
-                samples: chunk, startSample: emittedSamples)
+                samples: chunk, startSample: emittedSamples
+            )
             emittedSamples += chunkSize
             onChunk?(chunkObj)
         }

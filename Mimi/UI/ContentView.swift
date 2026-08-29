@@ -69,8 +69,9 @@ struct ContentView: View {
             } label: {
                 Label(
                     model.phase == .running || model.phase == .sourceLost ? "Stop" : "Start",
-                    systemImage: model.phase == .running ? "stop.circle.fill" : "play.circle.fill")
-                    .labelStyle(.titleAndIcon)
+                    systemImage: model.phase == .running ? "stop.circle.fill" : "play.circle.fill"
+                )
+                .labelStyle(.titleAndIcon)
             }
             .buttonStyle(.borderedProminent)
             .tint(model.phase == .running ? .red : .accentColor)
@@ -132,7 +133,8 @@ struct ContentView: View {
                         live.partial.isEmpty
                             ? nil
                             : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                        value: pulsing)
+                        value: pulsing
+                    )
                     .opacity(live.partial.isEmpty ? 0.35 : 1)
 
                 Text("live")
@@ -209,7 +211,8 @@ struct ContentView: View {
                             .id(entry.id)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .top).combined(with: .opacity),
-                                removal: .opacity))
+                                removal: .opacity
+                            ))
                         Divider().opacity(0.15)
                     }
                 }
@@ -217,7 +220,8 @@ struct ContentView: View {
                 .padding(.bottom, 12)
                 .animation(
                     isAtTop ? .spring(response: 0.35, dampingFraction: 0.85) : nil,
-                    value: model.entries.count)
+                    value: model.entries.count
+                )
             }
             .scrollPosition($scrollPosition)
             .onScrollGeometryChange(for: ScrollSnapshot.self) { geo in
@@ -228,7 +232,8 @@ struct ContentView: View {
                 pendingInsertCompensation = false
                 scrollPosition.scrollTo(
                     x: 0,
-                    y: new.offset + (new.contentHeight - old.contentHeight))
+                    y: new.offset + (new.contentHeight - old.contentHeight)
+                )
             }
             .onChange(of: model.entries.count) { _, _ in
                 if isAtTop {
@@ -299,7 +304,7 @@ private struct StatusBarView: View {
         case .stopping:
             Label("Stopping…", systemImage: "hourglass.bottomhalf.filled")
                 .font(.caption)
-        case .failed(let message):
+        case let .failed(message):
             Label(message, systemImage: "xmark.octagon")
                 .font(.caption).foregroundStyle(.red)
         case .needsModel:
@@ -311,7 +316,7 @@ private struct StatusBarView: View {
         }
 
         switch model.translationStatus {
-        case .unavailable(let message):
+        case let .unavailable(message):
             HStack(spacing: 6) {
                 Text(message).font(.caption).foregroundStyle(.orange)
                 Button("Retry") { model.retryTranslation() }

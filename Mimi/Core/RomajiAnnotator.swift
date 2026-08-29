@@ -30,7 +30,8 @@ enum RomajiAnnotator {
             text as CFString,
             CFRange(location: 0, length: (text as NSString).length),
             kCFStringTokenizerUnitWord,
-            locale)
+            locale
+        )
 
         var parts: [String] = []
         // The tokenizer marks a sokuon that straddles a token boundary with a
@@ -44,12 +45,14 @@ enum RomajiAnnotator {
             guard tokenRange.length > 0 else { break }
 
             let surface = (text as NSString).substring(
-                with: NSRange(location: tokenRange.location, length: tokenRange.length))
+                with: NSRange(location: tokenRange.location, length: tokenRange.length)
+            )
 
             var reading: String
             var endsWithSokuon = false
             if let transcription = CFStringTokenizerCopyCurrentTokenAttribute(
-                tokenizer, kCFStringTokenizerAttributeLatinTranscription) as? String {
+                tokenizer, kCFStringTokenizerAttributeLatinTranscription
+            ) as? String {
                 reading = transcription
                 if reading.lowercased().hasSuffix("~tsu") {
                     reading = String(reading.dropLast(4))
@@ -107,14 +110,14 @@ enum RomajiAnnotator {
     private static let lexicalOverrides = [
         "こんにちは": "konnichiwa",
         "こんばんは": "konbanwa",
-        "抹茶": "matcha",
+        "抹茶": "matcha"
     ]
 
     /// The tokenizer emits mixed wapuro/macron vowels ("tou", "tawā");
     /// normalize macrons to wapuro spellings for consistency.
     private static let macronExpansion: [Character: String] = [
         "ā": "aa", "ī": "ii", "ū": "uu", "ē": "ee", "ō": "ou",
-        "Ā": "Aa", "Ī": "Ii", "Ū": "Uu", "Ē": "Ee", "Ō": "Ou",
+        "Ā": "Aa", "Ī": "Ii", "Ū": "Uu", "Ē": "Ee", "Ō": "Ou"
     ]
 
     private static func romanize(surface: String, reading: String) -> String {

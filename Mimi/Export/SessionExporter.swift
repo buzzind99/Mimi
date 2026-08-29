@@ -9,7 +9,9 @@ enum SessionExporter {
         case vtt = "WebVTT (.vtt)"
         case json = "JSON session"
 
-        var id: String { rawValue }
+        var id: String {
+            rawValue
+        }
 
         var fileExtension: String {
             switch self {
@@ -74,23 +76,32 @@ enum SessionExporter {
 
     /// SRT: `00:01:23,450` (comma ms delimiter).
     private static func srtTime(_ seconds: Double) -> String {
-        let (h, m, s, ms) = components(seconds)
-        return String(format: "%02d:%02d:%02d,%03d", h, m, s, ms)
+        let c = components(seconds)
+        return String(format: "%02d:%02d:%02d,%03d", c.h, c.m, c.s, c.ms)
     }
 
     /// VTT: `00:01:23.450` (dot ms delimiter).
     private static func vttTime(_ seconds: Double) -> String {
-        let (h, m, s, ms) = components(seconds)
-        return String(format: "%02d:%02d:%02d.%03d", h, m, s, ms)
+        let c = components(seconds)
+        return String(format: "%02d:%02d:%02d.%03d", c.h, c.m, c.s, c.ms)
     }
 
-    private static func components(_ seconds: Double) -> (Int, Int, Int, Int) {
+    private struct TimeComponents {
+        let h: Int
+        let m: Int
+        let s: Int
+        let ms: Int
+    }
+
+    private static func components(_ seconds: Double) -> TimeComponents {
         let total = max(0, seconds)
-        let h = Int(total) / 3600
-        let m = (Int(total) % 3600) / 60
-        let s = Int(total) % 60
-        let ms = Int((total - Double(Int(total))) * 1000)
-        return (h, m, s, ms)
+        let whole = Int(total)
+        return TimeComponents(
+            h: whole / 3600,
+            m: (whole % 3600) / 60,
+            s: whole % 60,
+            ms: Int((total - Double(whole)) * 1000)
+        )
     }
 
     // MARK: - JSON session (authoritative interchange format, v1)
@@ -115,7 +126,8 @@ enum SessionExporter {
                 endS: entry.sentence.endS,
                 lang: entry.sentence.lang,
                 transcript: entry.sentence.text,
-                translations: translations))
+                translations: translations
+            ))
         }
         let session = JSONSession(
             startedAt: metadata?.startedAt ?? Date(),
@@ -123,7 +135,8 @@ enum SessionExporter {
             targetLang: metadata?.targetLang ?? "en",
             model: metadata?.model,
             chunkMS: metadata?.chunkMS ?? 160,
-            streamOffset: metadata?.streamOffset)
+            streamOffset: metadata?.streamOffset
+        )
         let doc = JSONSessionDocument(schemaVersion: 1, session: session, sentences: sentences)
         return try encoder.encode(doc)
     }

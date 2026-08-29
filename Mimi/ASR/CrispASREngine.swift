@@ -41,9 +41,9 @@ final class CrispASREngine: Transcriber {
     private let languageCode: String
 
     // Window/endpointing knobs (mirrors the CLI defaults where sensible).
-    private static let sampleRate = 16_000
-    private static let stepSamples = 1 * sampleRate       // decode cadence
-    private static let lengthSamples = 10 * sampleRate    // rolling window cap
+    private static let sampleRate = 16000
+    private static let stepSamples = 1 * sampleRate // decode cadence
+    private static let lengthSamples = 10 * sampleRate // rolling window cap
     /// How much confirmed silence after the last VAD speech span triggers a
     /// final. Must stay ≥ the VAD's `min_silence_ms` (below) — that is what
     /// makes a span end + this much analyzed audio a *confirmed* silence gap.
@@ -53,7 +53,7 @@ final class CrispASREngine: Transcriber {
     private static let utteranceCapSamples = 12 * sampleRate
     /// Tail kept in the rolling window after a final, for decode context.
     private static let windowKeepTailSamples = 200 * sampleRate / 1000
-    private static let minDecodeSamples = 2 * sampleRate  // encoder conv-kernel floor
+    private static let minDecodeSamples = 2 * sampleRate // encoder conv-kernel floor
     /// Backstop only (never used for endpointing): marks a buffer as not
     /// truly silent so the cap path never decodes known-silent audio.
     private static let speechRMS: Float = 1e-3
@@ -114,16 +114,17 @@ final class CrispASREngine: Transcriber {
         self.languageCode = languageCode
         let handle: UnsafeMutableRawPointer
         switch Self.library {
-        case .success(let h): handle = h
-        case .failure(let error): throw error
+        case let .success(h): handle = h
+        case let .failure(error): throw error
         }
         bind(from: handle)
         if fnVadSlices != nil, fnVadFree != nil,
-            let vad = Self.resolveVADModelPath(nearDylib: dylibDirectory) {
-            self.vadModelPath = vad
+           let vad = Self.resolveVADModelPath(nearDylib: dylibDirectory)
+        {
+            vadModelPath = vad
         } else {
-            self.vadModelPath = nil
-            self.vadUnavailableReason =
+            vadModelPath = nil
+            vadUnavailableReason =
                 "VAD unavailable (missing firered-vad.gguf or libcrispasr VAD symbols) — " +
                 "finalization falls back to the \(Self.utteranceCapSamples / Self.sampleRate)s cap"
         }
@@ -136,20 +137,22 @@ final class CrispASREngine: Transcriber {
     /// fallback.
     private static func resolveVADModelPath(nearDylib dylibDir: String?) -> String? {
         #if DEBUG
-        if let env = ProcessInfo.processInfo.environment["MIMI_VAD_MODEL"], !env.isEmpty {
-            return FileManager.default.fileExists(atPath: env) ? env : nil
-        }
+            if let env = ProcessInfo.processInfo.environment["MIMI_VAD_MODEL"], !env.isEmpty {
+                return FileManager.default.fileExists(atPath: env) ? env : nil
+            }
         #endif
         var candidates: [String?] = [
             dylibDir.map { $0 + "/\(vadModelFile)" },
-            Bundle.main.privateFrameworksPath.map { $0 + "/crispasr/\(vadModelFile)" },
+            Bundle.main.privateFrameworksPath.map { $0 + "/crispasr/\(vadModelFile)" }
         ]
         #if DEBUG
-        candidates.append(FileManager.default.currentDirectoryPath
-            + "/local/frameworks/crispasr/\(vadModelFile)")
+            candidates.append(FileManager.default.currentDirectoryPath
+                + "/local/frameworks/crispasr/\(vadModelFile)")
         #endif
         for path in candidates.compactMap({ $0 }) {
-            if FileManager.default.fileExists(atPath: path) { return path }
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
         }
         return nil
     }
@@ -159,9 +162,9 @@ final class CrispASREngine: Transcriber {
     private static let dylibCandidates: [String?] = {
         var candidates: [String?] = []
         #if DEBUG
-        // Test/CI override (absolute path) — release builds resolve only
-        // via bundle/LC_RPATH paths, never the environment or the CWD.
-        candidates.append(ProcessInfo.processInfo.environment["MIMI_ASR_DYLIB"])
+            // Test/CI override (absolute path) — release builds resolve only
+            // via bundle/LC_RPATH paths, never the environment or the CWD.
+            candidates.append(ProcessInfo.processInfo.environment["MIMI_ASR_DYLIB"])
         #endif
         // Bare name: resolved via the app's LC_RPATH (covers the dev
         // checkout via $(SRCROOT)/local/frameworks and the bundle via
@@ -170,11 +173,12 @@ final class CrispASREngine: Transcriber {
         candidates.append(Bundle.main.privateFrameworksPath.map { $0 + "/libcrispasr.dylib" })
         candidates.append(Bundle.main.path(forResource: "libcrispasr", ofType: "dylib"))
         candidates.append(Bundle.main.path(
-            forResource: "libcrispasr", ofType: "dylib", inDirectory: "Frameworks"))
+            forResource: "libcrispasr", ofType: "dylib", inDirectory: "Frameworks"
+        ))
         #if DEBUG
-        // Development fallback (repo checkout before bundling).
-        candidates.append(FileManager.default.currentDirectoryPath
-            + "/local/frameworks/crispasr/libcrispasr.dylib")
+            // Development fallback (repo checkout before bundling).
+            candidates.append(FileManager.default.currentDirectoryPath
+                + "/local/frameworks/crispasr/libcrispasr.dylib")
         #endif
         return candidates
     }()
@@ -186,7 +190,9 @@ final class CrispASREngine: Transcriber {
             if let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) {
                 return handle
             }
-            if let err = dlerror() { lastError = String(cString: err) }
+            if let err = dlerror() {
+                lastError = String(cString: err)
+            }
         }
         throw ASREngineError.runtimeNotFound(lastError)
     }
@@ -195,7 +201,7 @@ final class CrispASREngine: Transcriber {
     /// re-creating engines (warm restarts, model swaps) never re-opens it.
     /// dlopen is refcounted internally — the handle stays valid forever.
     private static let library: Result<UnsafeMutableRawPointer, ASREngineError> = {
-        do { return .success(try openLibrary()) }
+        do { return try .success(openLibrary()) }
         catch let error as ASREngineError { return .failure(error) }
         catch { return .failure(.runtimeNotFound(error.localizedDescription)) }
     }()
@@ -218,8 +224,8 @@ final class CrispASREngine: Transcriber {
         fnVadFree = fn("crispasr_vad_free", FnVadFree.self)
 
         guard fnSetGpuBackend != nil, fnOpenExplicit != nil, fnSessionClose != nil,
-            fnTranscribeLang != nil, fnResultNSegments != nil, fnResultSegmentText != nil,
-            fnResultFree != nil
+              fnTranscribeLang != nil, fnResultNSegments != nil, fnResultSegmentText != nil,
+              fnResultFree != nil
         else {
             preconditionFailure("libcrispasr: missing required symbols")
         }
@@ -248,8 +254,8 @@ final class CrispASREngine: Transcriber {
     private var session: OpaquePointer?
 
     private var totalSamples = 0
-    private var window: [Float] = []          // last `lengthSamples` samples
-    private var utterance: [Float] = []       // PCM since the last final
+    private var window: [Float] = [] // last `lengthSamples` samples
+    private var utterance: [Float] = [] // PCM since the last final
     private var utteranceStartSample = 0
     /// Bumped on every final/discard so stale VAD results (snapshot taken
     /// before the reset) can be ignored.
@@ -267,7 +273,7 @@ final class CrispASREngine: Transcriber {
     private var inbox: [ASREvent] = []
     private var consecutiveDecodeFailures = 0
 
-    // VAD state (all guarded by `lock`).
+    /// VAD state (all guarded by `lock`).
     private var vadModelPath: String?
     /// Set in init when the VAD can't be used; reported once in `prepare`.
     private var vadUnavailableReason: String?
@@ -309,14 +315,14 @@ final class CrispASREngine: Transcriber {
         lock.unlock()
         if alreadyOpen {
             #if DEBUG
-            print("[asr] prepare: reusing warm session (model already loaded)")
+                print("[asr] prepare: reusing warm session (model already loaded)")
             #endif
             return
         }
         // TLS-backed GPU preference: must be set on the same thread that
         // opens the session (prepare runs once, before any decode starts).
         #if DEBUG
-        print("[asr] prepare: opening C session (qwen3/metal)")
+            print("[asr] prepare: opening C session (qwen3/metal)")
         #endif
         fnSetGpuBackend("metal")
         let pathStorage = modelPath.utf8CString
@@ -333,7 +339,7 @@ final class CrispASREngine: Transcriber {
         if let reason = vadUnavailableReason, !vadUnavailableReported {
             vadUnavailableReported = true
             #if DEBUG
-            print("[asr] \(reason)")
+                print("[asr] \(reason)")
             #endif
             onEngineError?(reason)
         }
@@ -385,9 +391,13 @@ final class CrispASREngine: Transcriber {
 
         // RMS backstop: track whether this buffer is not truly silent.
         var energy: Float = 0
-        for s in samples { energy += s * s }
+        for s in samples {
+            energy += s * s
+        }
         let rms = (energy / Float(max(1, samples.count))).squareRoot()
-        if rms > Self.speechRMS { utteranceHasLoudAudio = true }
+        if rms > Self.speechRMS {
+            utteranceHasLoudAudio = true
+        }
 
         maybeScheduleWorkLocked()
         lock.unlock()
@@ -402,7 +412,9 @@ final class CrispASREngine: Transcriber {
     private func maybeScheduleWorkLocked() {
         guard session != nil, !finishing else { return }
         maybeScheduleVADLocked()
-        if maybeScheduleFinalLocked() { return }
+        if maybeScheduleFinalLocked() {
+            return
+        }
         maybeSchedulePartialLocked()
     }
 
@@ -418,11 +430,13 @@ final class CrispASREngine: Transcriber {
         // finalize mid-speech). The endpoint redecodes the whole utterance
         // span for a clean final.
         if let speechEnd = vadLastSpeechEndSample,
-            vadAnalyzedThroughSample - speechEnd >= Self.endpointSamples {
+           vadAnalyzedThroughSample - speechEnd >= Self.endpointSamples
+        {
             #if DEBUG
-            print(String(
-                format: "[asr] endpoint: %.2fs of confirmed silence after speech",
-                Double(vadAnalyzedThroughSample - speechEnd) / Double(Self.sampleRate)))
+                print(String(
+                    format: "[asr] endpoint: %.2fs of confirmed silence after speech",
+                    Double(vadAnalyzedThroughSample - speechEnd) / Double(Self.sampleRate)
+                ))
             #endif
             dispatchFinalLocked(end: speechEnd)
             return true
@@ -433,12 +447,12 @@ final class CrispASREngine: Transcriber {
         if utterance.count >= Self.utteranceCapSamples {
             if utteranceHasLoudAudio || utteranceHasSpeech {
                 #if DEBUG
-                print("[asr] endpoint: utterance cap reached")
+                    print("[asr] endpoint: utterance cap reached")
                 #endif
                 dispatchFinalLocked(end: utteranceStartSample + utterance.count)
             } else {
                 #if DEBUG
-                print("[asr] discard: silent utterance reached cap")
+                    print("[asr] discard: silent utterance reached cap")
                 #endif
                 discardUtteranceLocked()
             }
@@ -450,14 +464,16 @@ final class CrispASREngine: Transcriber {
     /// True when the VAD is actually in the loop (symbols bound, model
     /// present, not runtime-disabled). Everything else is degraded mode.
     /// Callers hold `lock`.
-    private var vadActive: Bool { vadEnabled && vadModelPath != nil }
+    private var vadActive: Bool {
+        vadEnabled && vadModelPath != nil
+    }
 
     /// Caller holds `lock`. Re-runs the VAD over the utterance after
     /// `vadCheckIntervalSamples` of new audio. Returns true if dispatched.
     @discardableResult
     private func maybeScheduleVADLocked() -> Bool {
         guard vadActive, !vadInFlight, !utterance.isEmpty,
-            totalSamples - lastVADDispatchSample >= Self.vadCheckIntervalSamples
+              totalSamples - lastVADDispatchSample >= Self.vadCheckIntervalSamples
         else { return false }
         lastVADDispatchSample = totalSamples
         let pcm = utterance
@@ -477,9 +493,9 @@ final class CrispASREngine: Transcriber {
     /// would just freeze the HUD draft on identical text).
     private func maybeSchedulePartialLocked() {
         guard session != nil, !finishing, !decodeInFlight, !utterance.isEmpty,
-            utteranceHasSpeech,
-            (vadLastSpeechEndSample ?? 0) > lastPartialSpeechEndSample,
-            totalSamples - lastDecodeDispatchSample >= Self.stepSamples
+              utteranceHasSpeech,
+              (vadLastSpeechEndSample ?? 0) > lastPartialSpeechEndSample,
+              totalSamples - lastDecodeDispatchSample >= Self.stepSamples
         else { return }
         let pcm = window
         let end = totalSamples
@@ -495,11 +511,12 @@ final class CrispASREngine: Transcriber {
         let pcm = utterance
         let start = vadFirstSpeechStartSample ?? utteranceStartSample
         #if DEBUG
-        print(String(
-            format: "[asr] final dispatch: %.2fs utterance [%.2fs..%.2fs]",
-            Double(pcm.count) / Double(Self.sampleRate),
-            Double(start) / Double(Self.sampleRate),
-            Double(end) / Double(Self.sampleRate)))
+            print(String(
+                format: "[asr] final dispatch: %.2fs utterance [%.2fs..%.2fs]",
+                Double(pcm.count) / Double(Self.sampleRate),
+                Double(start) / Double(Self.sampleRate),
+                Double(end) / Double(Self.sampleRate)
+            ))
         #endif
         decodeInFlight = true
         decodeQueue.async { [weak self] in
@@ -528,18 +545,19 @@ final class CrispASREngine: Transcriber {
 
         var spansPtr: UnsafeMutablePointer<Float>?
         #if DEBUG
-        let vadStart = ContinuousClock.now
+            let vadStart = ContinuousClock.now
         #endif
         let count = pcm.withUnsafeBufferPointer { buf -> Int32 in
             vadModelPath.withCString { path in
                 fnVadSlices(
                     path, buf.baseAddress, Int32(pcm.count), Int32(Self.sampleRate),
                     Self.vadThreshold, Int32(Self.vadMinSpeechMS), Int32(Self.vadMinSilenceMS),
-                    Int32(Self.vadPadMS), 0, 0, &spansPtr)
+                    Int32(Self.vadPadMS), 0, 0, &spansPtr
+                )
             }
         }
         #if DEBUG
-        print("[asr] vad: \(pcm.count) samples -> \(count) spans in \(ContinuousClock.now - vadStart)")
+            print("[asr] vad: \(pcm.count) samples -> \(count) spans in \(ContinuousClock.now - vadStart)")
         #endif
         guard count >= 0 else {
             handleVADFailure(code: count)
@@ -552,7 +570,7 @@ final class CrispASREngine: Transcriber {
         // the result no longer matches live state.
         guard generation == utteranceGeneration, vadEnabled else {
             #if DEBUG
-            print("[asr] vad: dropped stale result (generation \(generation) vs \(utteranceGeneration), vadEnabled=\(vadEnabled))")
+                print("[asr] vad: dropped stale result (generation \(generation) vs \(utteranceGeneration), vadEnabled=\(vadEnabled))")
             #endif
             return
         }
@@ -563,9 +581,10 @@ final class CrispASREngine: Transcriber {
             // the forced-final cap can't decode speechless audio later.
             if pcm.count >= Self.vadMinDiscardSamples {
                 #if DEBUG
-                print(String(
-                    format: "[asr] vad: speechless buffer (%.2fs) — discarded",
-                    Double(pcm.count) / Double(Self.sampleRate)))
+                    print(String(
+                        format: "[asr] vad: speechless buffer (%.2fs) — discarded",
+                        Double(pcm.count) / Double(Self.sampleRate)
+                    ))
                 #endif
                 discardUtteranceLocked()
             }
@@ -615,20 +634,22 @@ final class CrispASREngine: Transcriber {
         // transient errors get a few retries first.
         let shouldDisable = code == -3 || consecutiveVADFailures >= 3
         let alreadyDisabled = !vadEnabled
-        if shouldDisable { vadEnabled = false }
+        if shouldDisable {
+            vadEnabled = false
+        }
         let n = consecutiveVADFailures
         lock.unlock()
 
         if shouldDisable && !alreadyDisabled {
             let message = "VAD failed (\(code)) — falling back to cap-only finalization"
             #if DEBUG
-            print("[asr] \(message)")
+                print("[asr] \(message)")
             #endif
             onEngineError?(message)
         } else if n == 1 || n % 32 == 0 {
             let message = "VAD pass failed (×\(n))"
             #if DEBUG
-            print("[asr] \(message)")
+                print("[asr] \(message)")
             #endif
         }
     }
@@ -637,7 +658,7 @@ final class CrispASREngine: Transcriber {
     /// and the serial queue); posts results into the inbox under `lock`.
     private func runDecode(pcm: [Float], start: Int, end: Int, isFinal: Bool) {
         #if DEBUG
-        let decodeStart = ContinuousClock.now
+            let decodeStart = ContinuousClock.now
         #endif
         defer {
             lock.lock()
@@ -664,7 +685,7 @@ final class CrispASREngine: Transcriber {
             }
         }
         #if DEBUG
-        print("[asr] \(isFinal ? "final" : "partial") decode: \(pcm.count) samples in \(ContinuousClock.now - decodeStart)")
+            print("[asr] \(isFinal ? "final" : "partial") decode: \(pcm.count) samples in \(ContinuousClock.now - decodeStart)")
         #endif
         guard let result else {
             reportDecodeFailure()
@@ -674,16 +695,16 @@ final class CrispASREngine: Transcriber {
 
         var text = ""
         let n = fnResultNSegments(result)
-        for i in 0..<max(0, n) {
+        for i in 0 ..< max(0, n) {
             if let seg = fnResultSegmentText(result, i) {
                 text += String(cString: seg)
             }
         }
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         #if DEBUG
-        if text.isEmpty {
-            print("[asr] \(isFinal ? "final" : "partial") decode returned no text (\(pcm.count) samples)")
-        }
+            if text.isEmpty {
+                print("[asr] \(isFinal ? "final" : "partial") decode returned no text (\(pcm.count) samples)")
+            }
         #endif
 
         lock.lock()
@@ -711,7 +732,9 @@ final class CrispASREngine: Transcriber {
         if finalized >= 0, finalized < utterance.count {
             utterance.removeFirst(finalized)
             utteranceStartSample = end
-            if !utterance.isEmpty { utteranceHasLoudAudio = true }
+            if !utterance.isEmpty {
+                utteranceHasLoudAudio = true
+            }
         } else {
             utterance = []
             utteranceStartSample = 0
@@ -732,7 +755,9 @@ final class CrispASREngine: Transcriber {
     private func trimWindowLocked(throughSample end: Int) {
         let windowStart = totalSamples - window.count
         let drop = min(window.count, max(0, end + Self.windowKeepTailSamples - windowStart))
-        if drop > 0 { window.removeFirst(drop) }
+        if drop > 0 {
+            window.removeFirst(drop)
+        }
     }
 
     private func reportDecodeFailure() {
@@ -743,11 +768,15 @@ final class CrispASREngine: Transcriber {
         guard n == 1 || n % 32 == 0 else { return }
         let message = "ASR decode failed (×\(n))"
         #if DEBUG
-        print("[asr] \(message)")
+            print("[asr] \(message)")
         #endif
         onEngineError?(message)
     }
+}
 
+// MARK: - Draining & teardown
+
+extension CrispASREngine {
     func poll() -> ASREvent? {
         lock.lock(); defer { lock.unlock() }
         guard !inbox.isEmpty else { return nil }
@@ -763,7 +792,9 @@ final class CrispASREngine: Transcriber {
             lock.lock()
             let inFlight = decodeInFlight || vadInFlight
             lock.unlock()
-            if !inFlight { break }
+            if !inFlight {
+                break
+            }
             _ = jobFinished.wait(timeout: .now() + 30)
         }
 
@@ -781,7 +812,8 @@ final class CrispASREngine: Transcriber {
             var padded = pcm
             if padded.count < Self.minDecodeSamples {
                 padded.append(
-                    contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - padded.count))
+                    contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - padded.count)
+                )
             }
             let result = padded.withUnsafeBufferPointer { buf -> OpaquePointer? in
                 languageCode.withCString { lang in
@@ -792,18 +824,19 @@ final class CrispASREngine: Transcriber {
                 defer { fnResultFree(result) }
                 var text = ""
                 let n = fnResultNSegments(result)
-                for i in 0..<max(0, n) {
+                for i in 0 ..< max(0, n) {
                     if let seg = fnResultSegmentText(result, i) {
                         text += String(cString: seg)
                     }
                 }
                 text = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 #if DEBUG
-                print("[asr] flush decode: \(padded.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
+                    print("[asr] flush decode: \(padded.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
                 #endif
                 if !text.isEmpty {
                     inbox.append(.final(
-                        text: text, startSample: start, endSample: end, lang: languageCode))
+                        text: text, startSample: start, endSample: end, lang: languageCode
+                    ))
                 }
             }
         }
