@@ -1,0 +1,17 @@
+# SwiftFormat configuration — matches Mimi's existing style.
+# Run `swiftformat --lint .` (or scripts/lint.sh) in CI / before commit.
+
+--swiftversion 5.0
+
+--indent 4
+--maxwidth none
+--semicolons inline
+--commas inline
+--stripunusedargs closure-only
+--self remove
+--empty void
+--trimwhitespace always
+--header ignore
+
+# Rules that would churn existing code without adding value
+--disable blankLinesAtStartOfScope,elseOnSameLine,redundantBackticks

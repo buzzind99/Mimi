@@ -1,0 +1,48 @@
+# SwiftLint configuration — tuned to match Mimi's existing style.
+
+# Files/lints that shouldn't be checked.
+excluded:
+  - vendor
+  - build
+  - local
+  - models
+  - .codegraph
+
+# Keep the default rule set, then opt out of rules that fight the
+# existing code style. Re-enable individually if desired.
+disabled_rules:
+  - trailing_comma          # trailing commas in multiline literals are fine
+  - vertical_parameter_alignment
+  - opening_brace           # SwiftFormat owns brace placement
+  - closure_spacing
+  - todo                    # TODOs are intentional in this codebase
+
+line_length:
+  warning: 140
+  error: 200
+  ignores_comments: true
+  ignores_interpolated_strings: true
+
+function_body_length:
+  warning: 60
+  error: 120
+
+type_body_length:
+  warning: 350
+  error: 600
+
+file_length:
+  warning: 600
+  error: 1200
+
+identifier_name:
+  min_length: 1          # short names like `id`, `s`, `ms` are used
+  max_length: 60
+  excluded:
+    - s
+    - ms
+    - id
+    - x
+    - y
+    - h
+    - m
