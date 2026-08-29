@@ -90,22 +90,24 @@ enum RomajiAnnotator {
     }
 
     /// Doubles the leading consonant of `reading` to realize a preceding
-    /// sokuon (か→"kka", さ→"ssa", ち→"tchi", ぱ→"ppa"). Returns `nil` when
+    /// sokuon (か→"kka", さ→"ssa", ち→"cchi", ぱ→"ppa"). Returns `nil` when
     /// the reading can't take a geminate (vowel-initial, empty, digits…).
     private static func geminate(_ reading: String) -> String? {
         guard let first = reading.first else { return nil }
         if reading.lowercased().hasPrefix("ch") {
-            return "t" + reading
+            return "c" + reading
         }
         guard "kstpc".contains(String(first).lowercased()) else { return nil }
         return String(first) + reading
     }
 
     /// Common lexicalized greetings where the topic particle is fused into a
-    /// single dictionary token and the tokenizer's transcription is wrong.
+    /// single dictionary token and the tokenizer's transcription is wrong,
+    /// plus established English loanword spellings (抹茶 → "matcha").
     private static let lexicalOverrides = [
         "こんにちは": "konnichiwa",
         "こんばんは": "konbanwa",
+        "抹茶": "matcha",
     ]
 
     /// The tokenizer emits mixed wapuro/macron vowels ("tou", "tawā");
@@ -120,16 +122,19 @@ enum RomajiAnnotator {
             return overridden
         }
         let lower = reading.lowercased()
+        // The tokenizer spells っち as "tch" (めっちゃ→"metcha"); normalize to
+        // the doubled-consonant "cch" (meccha, kocchi, macchi).
+        let sokuonCorrected = reading.replacingOccurrences(of: "tch", with: "cch")
         let particleCorrected: String
         switch surface {
         case "は":
-            particleCorrected = lower == "ha" ? "wa" : reading
+            particleCorrected = lower == "ha" ? "wa" : sokuonCorrected
         case "へ":
-            particleCorrected = lower == "he" ? "e" : reading
+            particleCorrected = lower == "he" ? "e" : sokuonCorrected
         case "を":
-            particleCorrected = lower == "wo" ? "o" : reading
+            particleCorrected = lower == "wo" ? "o" : sokuonCorrected
         default:
-            particleCorrected = reading
+            particleCorrected = sokuonCorrected
         }
         return particleCorrected.map { macronExpansion[$0] ?? String($0) }
             .joined()
