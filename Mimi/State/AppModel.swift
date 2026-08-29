@@ -24,6 +24,11 @@ final class AppModel: ObservableObject {
     @Published var engineIsMock = false
     @Published var modelURL: URL?
     @Published var hudVisible = false
+    /// HUD translation history cursor: the pinned sentence index while
+    /// browsing older translations, or nil to follow the latest translated
+    /// entry. Pinning an older entry means new translations never move the
+    /// view; nil tracks the newest.
+    @Published var hudPinnedIndex: Int? = nil
     @Published var errorMessage: String?
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
@@ -124,6 +129,7 @@ final class AppModel: ObservableObject {
         }
 
         entries.removeAll()
+        hudPinnedIndex = nil
         live.partial = ""
         latency.reset()
 

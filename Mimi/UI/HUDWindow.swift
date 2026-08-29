@@ -219,38 +219,116 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
     }
 
+    /// Translated entries only; finalized-but-untranslated sentences never
+    /// enter the cycle (the view doesn't move until their translation lands).
+    private var translatedEntries: [SessionEntry] {
+        model.entries.filter { $0.joinedTranslations != nil }
+    }
+
     private var completedSection: some View {
         Group {
-            if let entry = model.entries.last(where: { $0.joinedTranslations != nil }) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(SessionClock.timestamp(entry.sentence.startS))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                        Text(entry.sentence.text)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
-                        Text(romaji)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary.opacity(0.8))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let en = entry.joinedTranslations {
-                        Text(en)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.teal)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            } else {
+            let entries = translatedEntries
+            if entries.isEmpty {
                 Text("Waiting for the first sentence…")
                     .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
+            } else {
+                HStack(alignment: .top, spacing: 6) {
+                    entryView(displayedEntry(in: entries))
+                    historyButtons(entries: entries)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// The pinned entry while browsing history; otherwise (nil pin, or a pin
+    /// that no longer resolves) the latest translated entry.
+    private func displayedEntry(in entries: [SessionEntry]) -> SessionEntry {
+        if let pinned = model.hudPinnedIndex,
+           let at = entries.firstIndex(where: { $0.sentence.index == pinned }) {
+            return entries[at]
+        }
+        return entries[entries.count - 1]
+    }
+
+    private func entryView(_ entry: SessionEntry) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(SessionClock.timestamp(entry.sentence.startS))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                Text(entry.sentence.text)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
+                Text(romaji)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let en = entry.joinedTranslations {
+                Text(en)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.teal)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Right-side history cycling. Up = newer (disabled at latest, so the
+    /// cursor follows new translations); down = older (pins to that exact
+    /// sentence, so new translations never move the view).
+    private func historyButtons(entries: [SessionEntry]) -> some View {
+        let newest = entries[entries.count - 1].sentence.index
+        let oldest = entries[0].sentence.index
+        let pinned = model.hudPinnedIndex
+        let atLatest = pinned == nil || pinned == newest
+        let atOldest = entries.count < 2 || pinned == oldest
+        return VStack(spacing: 2) {
+            historyButton(
+                icon: "chevron.up",
+                help: "Newer translation",
+                disabled: atLatest) {
+                cycleHistory(entries: entries, step: 1)
+            }
+            historyButton(
+                icon: "chevron.down",
+                help: "Older translation",
+                disabled: atOldest) {
+                cycleHistory(entries: entries, step: -1)
+            }
+        }
+        .padding(.top, 1)
+    }
+
+    /// Steps the pin one translated entry up/down. Stepping onto the newest
+    /// entry clears the pin (re-follows latest, re-disabling up).
+    private func cycleHistory(entries: [SessionEntry], step: Int) {
+        let current = model.hudPinnedIndex ?? entries[entries.count - 1].sentence.index
+        guard let at = entries.firstIndex(where: { $0.sentence.index == current }) else {
+            return
+        }
+        let next = at + step
+        guard entries.indices.contains(next) else { return }
+        model.hudPinnedIndex = next == entries.count - 1 ? nil : entries[next].sentence.index
+    }
+
+    private func historyButton(
+        icon: String, help: String, disabled: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(disabled ? .tertiary : .secondary)
+                .frame(width: 16, height: 14)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(help)
     }
 }
