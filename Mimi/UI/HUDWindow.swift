@@ -43,7 +43,7 @@ final class HUDWindowController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
-        panel.ignoresMouseEvents = true // click-through by default (locked)
+        panel.ignoresMouseEvents = false
         panel.isReleasedWhenClosed = false
         panel.center()
 
@@ -58,22 +58,51 @@ final class HUDWindowController {
     private func installContent(in panel: HUDPanel) {
         guard let model, let live else { return }
         let root = HUDView(model: model, live: live, panel: panel)
-        panel.contentView = NSHostingView(rootView: root)
+        panel.contentView = HUDHostingView(rootView: root)
     }
 }
 
-/// NSPanel subclass that keeps itself non-activating and knows about its
-/// lock state (click-through vs interactive).
-final class HUDPanel: NSPanel {
-    @objc dynamic var locked = true {
-        didSet { ignoresMouseEvents = locked }
+/// Non-activating panel that owns the HUD lock state (click-through vs
+/// interactive). Click-through is enforced by `HUDHostingView.hitTest`,
+/// not by `ignoresMouseEvents`, so the padlock stays clickable.
+final class HUDPanel: NSPanel, ObservableObject {
+    @Published var locked = true
+}
+
+/// Hosts the HUD content and implements click-through via hit-testing:
+/// while locked, only the padlock's region accepts mouse events; every
+/// other point returns nil so clicks land on the window underneath.
+final class HUDHostingView: NSHostingView<HUDView> {
+    private var panel: HUDPanel? { window as? HUDPanel }
+
+    // Covers the padlock button in the top-right corner (12pt content padding).
+    private var unlockRegion: CGRect {
+        let size: CGFloat = 24
+        let pad: CGFloat = 12
+        let margin: CGFloat = 4
+        return CGRect(
+            x: bounds.width - pad - size - margin,
+            y: pad - margin,
+            width: size + 2 * margin,
+            height: size + 2 * margin)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let panel, panel.locked else { return super.hitTest(point) }
+        let local = convert(point, from: superview)
+        return unlockRegion.contains(local) ? super.hitTest(point) : nil
+    }
+
+    override var mouseDownCanMoveWindow: Bool {
+        guard let panel else { return super.mouseDownCanMoveWindow }
+        return !panel.locked
     }
 }
 
 struct HUDView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
-    let panel: HUDPanel
+    @ObservedObject var panel: HUDPanel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
