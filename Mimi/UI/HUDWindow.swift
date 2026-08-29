@@ -57,8 +57,11 @@ final class HUDWindowController {
 
     private func installContent(in panel: HUDPanel) {
         guard let model, let live else { return }
-        let root = HUDView(model: model, live: live, panel: panel)
-        panel.contentView = HUDHostingView(rootView: root)
+        let hosting = HUDHostingView(rootView: HUDView(model: model, live: live, panel: panel))
+        hosting.makeMeasureRoot = { width in
+            HUDView(model: model, live: live, panel: panel, fixedWidth: width)
+        }
+        panel.contentView = hosting
     }
 }
 
@@ -72,7 +75,14 @@ final class HUDPanel: NSPanel, ObservableObject {
 /// Hosts the HUD content and implements click-through via hit-testing:
 /// while locked, only the padlock's region accepts mouse events; every
 /// other point returns nil so clicks land on the window underneath.
+/// Also grows the window vertically to fit its content (top edge anchored).
 final class HUDHostingView: NSHostingView<HUDView> {
+    /// Builds a fixed-width measurement copy of the HUD content so the
+    /// fully-wrapped ideal height can be computed offscreen.
+    var makeMeasureRoot: ((CGFloat) -> HUDView)?
+
+    private var measureHost: NSHostingView<HUDView>?
+
     private var panel: HUDPanel? { window as? HUDPanel }
 
     // Must mirror `padlockButton`'s layout: 24×24 button with 6pt padding,
@@ -86,6 +96,34 @@ final class HUDHostingView: NSHostingView<HUDView> {
             y: pad - margin,
             width: size + 2 * margin,
             height: size + 2 * margin)
+    }
+
+    override func layout() {
+        super.layout()
+        fitWindowHeight()
+    }
+
+    private func fitWindowHeight() {
+        guard let makeMeasureRoot, let panel else { return }
+        let width = bounds.width
+        if let measureHost {
+            if measureHost.rootView.fixedWidth != width {
+                measureHost.rootView = makeMeasureRoot(width)
+            }
+        } else {
+            measureHost = NSHostingView(rootView: makeMeasureRoot(width))
+        }
+        guard let measureHost else { return }
+        var ideal = measureHost.fittingSize.height
+        if let screenHeight = panel.screen?.visibleFrame.height {
+            ideal = min(ideal, screenHeight)
+        }
+        guard abs(panel.frame.height - ideal) > 1 else { return }
+        var frame = panel.frame
+        let top = frame.maxY
+        frame.size.height = ideal
+        frame.origin.y = top - ideal
+        panel.setFrame(frame, display: true, animate: false)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -104,8 +142,19 @@ struct HUDView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
     @ObservedObject var panel: HUDPanel
+    /// Set on offscreen measurement copies: fixes the layout width so the
+    /// measured ideal height reflects text wrapped at the real HUD width.
+    var fixedWidth: CGFloat?
 
     var body: some View {
+        if let fixedWidth {
+            hudContent.frame(width: fixedWidth, alignment: .topLeading)
+        } else {
+            hudContent
+        }
+    }
+
+    private var hudContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             liveSection
                 .padding(.bottom, 8)
@@ -153,10 +202,12 @@ struct HUDView: View {
                     Text(live.partial)
                         .font(.system(size: 15))
                         .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let romaji = RomajiAnnotator.romaji(for: live.partial) {
                         Text(romaji)
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             } else {
@@ -179,16 +230,19 @@ struct HUDView: View {
                         Text(entry.sentence.text)
                             .font(.system(size: 14))
                             .foregroundStyle(.white)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
                         Text(romaji)
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary.opacity(0.8))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if let en = entry.joinedTranslations {
                         Text(en)
                             .font(.system(size: 13))
                             .foregroundStyle(.teal)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             } else {
