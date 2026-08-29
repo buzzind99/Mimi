@@ -39,6 +39,8 @@ final class AppModel: ObservableObject {
     private var pollTimer: Timer?
     private var tickTimer: Timer?
     private var sessionMetadata: SessionMetadata?
+    /// Guards the one-shot engine warm-up (app launch / model arrival).
+    private var warmUpScheduled = false
 
     init() {
         translationQueue.setHandlers(
@@ -65,6 +67,25 @@ final class AppModel: ObservableObject {
             phase = .needsModel
         } else if modelURL != nil, phase == .needsModel {
             phase = .idle
+        }
+        warmUpEngineIfNeeded()
+    }
+
+    /// Loads the ASR model + compiles the Metal pipelines in the background
+    /// (at app launch, or once a model becomes available) so the first
+    /// session start is instant. Safe against racing `beginSession`: the
+    /// engine's `prepare` is serialized, and a second opener reuses the
+    /// already-open session.
+    private func warmUpEngineIfNeeded() {
+        guard !warmUpScheduled, let url = modelURL else { return }
+        warmUpScheduled = true
+        #if DEBUG
+        print("[warmup] preparing ASR engine in background")
+        #endif
+        Task.detached(priority: .utility) {
+            if let engine = ASREngineFactory.makeEngine(modelURL: url, allowMock: false) {
+                try? engine.prepare()
+            }
         }
     }
 
@@ -203,7 +224,8 @@ final class AppModel: ObservableObject {
     /// does not reliably re-fire on.
     private func performStop() async {
         // Strictly ordered teardown: capture stops first, then the ASR
-        // finish → drain → close → destroy on the ASR queue.
+        // finish → drain on the ASR queue. The engine stays warm (loaded
+        // model reused by the next session).
         capture?.stop()
         if let engine {
             let drained = engine.finish()

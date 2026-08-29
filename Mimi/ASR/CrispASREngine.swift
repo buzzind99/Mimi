@@ -112,7 +112,11 @@ final class CrispASREngine: Transcriber {
     init(modelPath: URL, languageCode: String = "ja") throws {
         self.modelPath = modelPath.path
         self.languageCode = languageCode
-        let handle = try Self.openLibrary()
+        let handle: UnsafeMutableRawPointer
+        switch Self.library {
+        case .success(let h): handle = h
+        case .failure(let error): throw error
+        }
         bind(from: handle)
         if fnVadSlices != nil, fnVadFree != nil,
             let vad = Self.resolveVADModelPath(nearDylib: dylibDirectory) {
@@ -176,6 +180,15 @@ final class CrispASREngine: Transcriber {
         throw ASREngineError.runtimeNotFound(lastError)
     }
 
+    /// Process-global dlopen cache: the dylib is opened once per process, so
+    /// re-creating engines (warm restarts, model swaps) never re-opens it.
+    /// dlopen is refcounted internally — the handle stays valid forever.
+    private static let library: Result<UnsafeMutableRawPointer, ASREngineError> = {
+        do { return .success(try openLibrary()) }
+        catch let error as ASREngineError { return .failure(error) }
+        catch { return .failure(.runtimeNotFound(error.localizedDescription)) }
+    }()
+
     private func bind(from handle: UnsafeMutableRawPointer) {
         func fn<T>(_ name: String, _ type: T.Type) -> T? {
             guard let p = dlsym(handle, name) else { return nil }
@@ -212,6 +225,9 @@ final class CrispASREngine: Transcriber {
     // MARK: - State
 
     private let lock = NSLock()
+    /// Serializes `prepare` so a background warm-up and a session start can
+    /// never both open a C session (the second opener would leak the first).
+    private let prepareLock = NSLock()
     private let decodeQueue = DispatchQueue(label: "dev.mimi.asr.decode", qos: .userInitiated)
     private let vadQueue = DispatchQueue(label: "dev.mimi.asr.vad", qos: .userInitiated)
     /// Signaled after every decode or VAD completion so `finish` can wait
@@ -272,6 +288,19 @@ final class CrispASREngine: Transcriber {
     func prepare() throws {
         guard FileManager.default.fileExists(atPath: modelPath) else {
             throw ASREngineError.modelNotFound(modelPath)
+        }
+        prepareLock.lock()
+        defer { prepareLock.unlock() }
+        // Warm restart: the C session from a previous run is still open —
+        // reuse it and skip the multi-second GGUF load + Metal compile.
+        lock.lock()
+        let alreadyOpen = session != nil
+        lock.unlock()
+        if alreadyOpen {
+            #if DEBUG
+            print("[asr] prepare: reusing warm session (model already loaded)")
+            #endif
+            return
         }
         // TLS-backed GPU preference: must be set on the same thread that
         // opens the session (prepare runs once, before any decode starts).
@@ -725,12 +754,24 @@ final class CrispASREngine: Transcriber {
         lock.lock()
         let drained = inbox
         inbox = []
+        lock.unlock()
+        return drained
+    }
+
+    /// Releases the C session (and the resident model) permanently. Not part
+    /// of normal teardown — sessions stay warm so restarts are instant. Used
+    /// only when the factory discards the engine (e.g. the model file was
+    /// replaced and a fresh one takes its place).
+    func close() {
+        prepareLock.lock()
+        defer { prepareLock.unlock() }
+        lock.lock()
+        finishing = true
         let sessionHandle = session
         session = nil
         lock.unlock()
         if let sessionHandle {
             fnSessionClose(sessionHandle)
         }
-        return drained
     }
 }
