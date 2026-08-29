@@ -91,11 +91,6 @@ struct OnboardingView: View {
                     .font(.caption)
             }
             .frame(maxWidth: 420)
-        case .verifying:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Verifying model…").font(.caption)
-            }
         case .done:
             Label("Model ready", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)

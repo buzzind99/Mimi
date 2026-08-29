@@ -25,18 +25,76 @@ enum ModelLocator {
     /// Resolve the model for a session; nil means the onboarding/downloader
     /// must run first (or the user drops a GGUF in manually).
     static func resolve() -> URL? {
-        if let bundled = bundledURL { return bundled }
+        if let bundled = bundledURL, ModelVerifier.isVerified(bundled) {
+            return bundled
+        }
         let downloaded = downloadedURL
-        if FileManager.default.fileExists(atPath: downloaded.path) {
+        if FileManager.default.fileExists(atPath: downloaded.path),
+           ModelVerifier.isVerified(downloaded) {
             return downloaded
         }
         // Development checkout: scripts/build_runtime.sh puts the dev model
         // in <repo>/models/; Xcode runs the app with that as working directory.
         let devURL = URL(fileURLWithPath: "models/\(modelName)")
-        if FileManager.default.fileExists(atPath: devURL.path) {
+        if FileManager.default.fileExists(atPath: devURL.path),
+           ModelVerifier.isVerified(devURL) {
             return devURL.absoluteURL
         }
         return nil
+    }
+}
+
+/// Pinned-digest verification for the ASR GGUF. Verdicts are cached per
+/// (path, size) so the ~200 MB re-hash only runs when the file actually
+/// changes (first resolve, re-download, or a dropped-in replacement).
+enum ModelVerifier {
+    /// Pinned SHA-256 of the q8_0 GGUF (release-time integrity check).
+    static let expectedSHA256 =
+        "f547589d5ca582e093b2d3312ad9ff13b609b43d413f972c0e92b823dde70a00"
+
+    struct VerificationError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    private struct CacheKey: Hashable {
+        let path: String
+        let size: Int64
+    }
+
+    private static let lock = NSLock()
+    private static var verified: Set<CacheKey> = []
+
+    /// Returns true iff the file matches the pinned SHA-256.
+    static func isVerified(_ file: URL) -> Bool {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: file.path),
+              let size = attrs[.size] as? Int64
+        else { return false }
+        let key = CacheKey(path: file.path, size: size)
+        lock.lock()
+        let cached = verified.contains(key)
+        lock.unlock()
+        if cached { return true }
+        do {
+            try verify(file)
+        } catch {
+            return false
+        }
+        lock.lock()
+        verified.insert(key)
+        lock.unlock()
+        return true
+    }
+
+    static func verify(_ file: URL) throws {
+        let digest = try SHA256.digest(file: file)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        if hex != expectedSHA256.lowercased() {
+            throw VerificationError(
+                message: "model file does not match Mimi's pinned checksum — "
+                    + "delete it and re-download, or replace it with an authentic copy")
+        }
     }
 }
 
@@ -47,7 +105,6 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     enum State: Equatable {
         case idle
         case downloading(progress: Double, bytes: Int64, total: Int64?)
-        case verifying
         case done(URL)
         case failed(String)
     }
@@ -66,9 +123,6 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     private var session: URLSession?
     private var resumeData: Data?
     private var expectedBytes: Int64?
-    /// Pinned SHA-256 of the q8_0 GGUF (release-time integrity check).
-    private let expectedSHA256 =
-        "f547589d5ca582e093b2d3312ad9ff13b609b43d413f972c0e92b823dde70a00"
 
     func start() {
         Task { @MainActor in
@@ -83,8 +137,13 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         let destination = ModelLocator.downloadedURL
 
         if fm.fileExists(atPath: destination.path) {
-            setState(.done(destination))
-            return
+            if ModelVerifier.isVerified(destination) {
+                setState(.done(destination))
+                return
+            }
+            // Corrupt or replaced file at Mimi's own model path: remove and
+            // re-download (never trust an unverifiable GGUF).
+            try? fm.removeItem(at: destination)
         }
 
         guard session == nil else { return } // already downloading
@@ -140,30 +199,29 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         _ session: URLSession, downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        // Move synchronously: the temp file is deleted once this delegate
-        // method returns.
+        // The temp file is deleted once this delegate method returns, so both
+        // verification (at the temp location — a bad file never reaches the
+        // well-known model path) and the move happen synchronously here.
+        // State updates hop to the main actor afterwards.
         let destination = ModelLocator.downloadedURL
         let fm = FileManager.default
+        var failure: Error?
         do {
+            try Self.verify(location)
             try? fm.removeItem(at: destination)
             try fm.moveItem(at: location, to: destination)
         } catch {
-            Task { @MainActor in
-                self.task = nil
-                self.state = .failed("Download failed: \(error.localizedDescription)")
-            }
-            return
+            failure = error
         }
         Task { @MainActor in
             self.task = nil
-            self.state = .verifying
-            do {
-                try self.verify(destination)
+            self.invalidateSession()
+            if let failure {
+                try? fm.removeItem(at: location)
+                self.state = .failed("Verification failed: \(failure.localizedDescription)")
+            } else {
                 self.resumeData = nil
                 self.state = .done(destination)
-            } catch {
-                try? fm.removeItem(at: destination)
-                self.state = .failed("Verification failed: \(error.localizedDescription)")
             }
         }
     }
@@ -179,13 +237,8 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
     }
 
-    private func verify(_ file: URL) throws {
-        let digest = try SHA256.digest(file: file)
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
-        if hex != expectedSHA256.lowercased() {
-            throw NSError(domain: "ModelDownloader", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "SHA-256 mismatch"])
-        }
+    private static func verify(_ file: URL) throws {
+        try ModelVerifier.verify(file)
     }
 }
 
