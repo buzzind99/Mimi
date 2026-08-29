@@ -13,11 +13,6 @@ enum ModelLocator {
         return base.appendingPathComponent("Mimi/models", isDirectory: true)
     }
 
-    /// `true` when the GGUF ships inside the app bundle.
-    static var isBundled: Bool {
-        bundledURL != nil
-    }
-
     static var bundledURL: URL? {
         Bundle.main.url(forResource: modelName, withExtension: nil, subdirectory: "models")
             ?? Bundle.main.url(forResource: modelName, withExtension: nil)
@@ -70,10 +65,10 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     private var task: URLSessionDownloadTask?
     private var session: URLSession?
     private var resumeData: Data?
-    private var receivedBytes: Int64 = 0
     private var expectedBytes: Int64?
     /// Pinned SHA-256 of the q8_0 GGUF (release-time integrity check).
-    private let expectedSHA256: String? = "f547589d5ca582e093b2d3312ad9ff13b609b43d413f972c0e92b823dde70a00"
+    private let expectedSHA256 =
+        "f547589d5ca582e093b2d3312ad9ff13b609b43d413f972c0e92b823dde70a00"
 
     func start() {
         Task { @MainActor in
@@ -93,7 +88,6 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
 
         guard session == nil else { return } // already downloading
-        receivedBytes = 0
         setState(.downloading(progress: 0, bytes: 0, total: expectedBytes))
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         self.session = session
@@ -132,7 +126,6 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
         Task { @MainActor in
-            self.receivedBytes = totalBytesWritten
             if totalBytesExpectedToWrite > 0 { self.expectedBytes = totalBytesExpectedToWrite }
             let progress = totalBytesExpectedToWrite > 0
                 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
@@ -187,19 +180,11 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     }
 
     private func verify(_ file: URL) throws {
-        if let expectedSHA256 {
-            let digest = try SHA256.digest(file: file)
-            let hex = digest.map { String(format: "%02x", $0) }.joined()
-            if hex != expectedSHA256.lowercased() {
-                throw NSError(domain: "ModelDownloader", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "SHA-256 mismatch"])
-            }
-        } else {
-            let size = (try FileManager.default.attributesOfItem(atPath: file.path))[.size] as? Int64 ?? 0
-            guard size > 10_000_000 else {
-                throw NSError(domain: "ModelDownloader", code: 2,
-                              userInfo: [NSLocalizedDescriptionKey: "File is too small to be the model"])
-            }
+        let digest = try SHA256.digest(file: file)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        if hex != expectedSHA256.lowercased() {
+            throw NSError(domain: "ModelDownloader", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "SHA-256 mismatch"])
         }
     }
 }

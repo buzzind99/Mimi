@@ -38,9 +38,7 @@ final class AppModel: ObservableObject {
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
     private var tickTimer: Timer?
-    private var sessionStartedAt: Date?
     private var sessionMetadata: SessionMetadata?
-    private var cancellables = Set<AnyCancellable>()
 
     init() {
         translationQueue.setHandlers(
@@ -109,7 +107,6 @@ final class AppModel: ObservableObject {
         live.lastFinalJP = nil
         live.lastFinalEN = ""
         latencySeconds = 0
-        translationQueue.clearResults()
 
         let buffer = SentenceBuffer()
         buffer.onSentence = { [weak self] sentence in
@@ -161,7 +158,6 @@ final class AppModel: ObservableObject {
         try engine.prepare()
         try engine.openStream()
 
-        sessionStartedAt = Date()
         sessionMetadata = SessionMetadata(
             startedAt: Date(),
             sourceLang: "ja",
@@ -235,10 +231,6 @@ final class AppModel: ObservableObject {
         translationConfig = TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
             target: Locale.Language(identifier: "en"))
-    }
-
-    func toggleHUD() {
-        hudVisible.toggle()
     }
 
     // MARK: - Timers

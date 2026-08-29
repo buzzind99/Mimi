@@ -12,6 +12,4 @@ final class LivePartialState: ObservableObject {
     @Published var lastFinalJP: Sentence?
     /// Most recent EN translation (drives the HUD second line).
     @Published var lastFinalEN: String = ""
-
-    var hasActivity: Bool { !partial.isEmpty || lastFinalJP != nil }
 }

@@ -37,7 +37,6 @@ final class TranslationQueue {
     private var pending: [Sentence] = []
     /// Wake-up signal for the worker loop (carries no data).
     private var wake: AsyncStream<Void>.Continuation?
-    private var results: [Int: SentenceTranslation] = [:]
     /// Guards the reentrancy window between a cancelled run unwinding and a
     /// fresh run starting: only the run holding the current generation may
     /// clear `wake` or update `inFlight`.
@@ -88,7 +87,6 @@ final class TranslationQueue {
                     let pair = SentenceTranslation(
                         lang: response.targetLanguage.languageCode?.identifier ?? "en",
                         text: response.targetText)
-                    results[sentence.index] = pair
                     onResult?(sentence.index, pair)
                     setStatus(.ready)
                 } catch is CancellationError {
@@ -149,20 +147,6 @@ final class TranslationQueue {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return true
-    }
-
-    /// Drop per-session results (called when a new session starts, so stale
-    /// index-keyed translations can't leak across sessions).
-    func clearResults() {
-        results.removeAll()
-    }
-
-    func translation(for index: Int) -> SentenceTranslation? {
-        results[index]
-    }
-
-    func snapshotResults() -> [Int: SentenceTranslation] {
-        results
     }
 
     private func setStatus(_ newStatus: TranslationStatus) {

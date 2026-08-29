@@ -49,8 +49,6 @@ final class SentenceBuffer {
 
     var onSentence: ((Sentence) -> Void)?
 
-    var pendingText: String { text }
-
     /// Append a final ASR piece with its sample span.
     func append(finalText piece: String, startSample: Int, endSample: Int) {
         let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)

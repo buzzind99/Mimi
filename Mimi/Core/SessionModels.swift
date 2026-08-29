@@ -48,8 +48,6 @@ struct SessionMetadata: Equatable, Codable {
 
 enum SessionClock {
     static let sampleRate: Double = 16_000
-    /// Samples per 160 ms chunk.
-    static let chunkSamples = Int(sampleRate * 0.16)
 
     static func seconds(_ sample: Int) -> Double {
         Double(sample) / sampleRate

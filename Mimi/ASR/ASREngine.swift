@@ -26,7 +26,6 @@ enum ASREngineError: LocalizedError {
     case runtimeNotFound(String)
     case modelNotFound(String)
     case createFailed(String)
-    case streamFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -36,14 +35,13 @@ enum ASREngineError: LocalizedError {
             return "ASR model not found at \(path)."
         case .createFailed(let detail):
             return "Failed to create ASR recognizer: \(detail)"
-        case .streamFailed(let detail):
-            return "Failed to open ASR stream: \(detail)"
         }
     }
 }
 
 /// Pure-Swift stand-in used when the native runtime is unavailable. Emits
-/// deterministic pseudo transcripts driven by the (gated) audio energy so the
+/// deterministic pseudo transcripts driven by the audio energy (simple RMS
+/// threshold) so the
 /// full pipeline — buffering, translation, UI, export — stays exercisable.
 /// The UI labels mock sessions clearly.
 final class MockASREngine: Transcriber {
