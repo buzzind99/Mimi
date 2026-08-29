@@ -16,7 +16,8 @@ enum TranslationStatus: Equatable {
 /// live in the plain `pending` array — always observable on the main actor —
 /// and the worker consumes them FIFO, so output order can never diverge from
 /// input order. Sentences are keyed by index; timestamps travel with the
-/// sentence.
+/// sentence. Repeats of already-translated sentences are served from a cache
+/// at `enqueue` time and bypass the worker entirely.
 ///
 /// The class is `@MainActor` so that `enqueue` is a synchronous call from the
 /// sentence pipeline (also on the main actor): by the time `stop` calls
@@ -41,8 +42,18 @@ final class TranslationQueue {
     /// fresh run starting: only the run holding the current generation may
     /// clear `wake` or update `inFlight`.
     private var generation = 0
-    /// True while a `session.translate` call is suspended inside the worker.
+    /// True while a `session.translate`/batch call is suspended inside the worker.
     private var inFlight = false
+
+    /// App-run-scoped cache: repeated sentences ("よろしくお願いします"…) skip
+    /// the session round-trip entirely — the result posts at `enqueue` time.
+    /// NSCache's default is UNLIMITED, so `countLimit` is what bounds long
+    /// sessions; entries are ≤42-char sentences (`SentenceBuffer.maxChars`).
+    private let cache: NSCache<NSString, TranslationBox> = {
+        let cache = NSCache<NSString, TranslationBox>()
+        cache.countLimit = 200
+        return cache
+    }()
 
     /// Called when a translation completes (main-actor context).
     private var onResult: ((Int, SentenceTranslation) -> Void)?
@@ -76,30 +87,44 @@ final class TranslationQueue {
 
         /// Translate everything currently in `pending`, FIFO. Returns `false`
         /// when this run must exit (stale generation, cancellation, error).
+        /// Bursts (a pause flushes several finals at once) drain in batched
+        /// round-trips instead of one call per sentence.
         func pump() async -> Bool {
             while !pending.isEmpty {
                 guard token == generation else { return false }
-                let sentence = pending.removeFirst()
+                // Take a bounded slice: visible progress and a bounded
+                // round-trip, while bursts still amortize the session call.
+                let batch = Array(pending.prefix(16))
+                pending.removeFirst(batch.count)
                 setStatus(.translating)
                 inFlight = true
                 do {
-                    let response = try await session.translate(sentence.text)
-                    let pair = SentenceTranslation(
-                        lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                        text: response.targetText)
-                    onResult?(sentence.index, pair)
+                    if batch.count == 1 {
+                        let response = try await session.translate(batch[0].text)
+                        deliver(batch[0], SentenceTranslation(
+                            lang: response.targetLanguage.languageCode?.identifier ?? "en",
+                            text: response.targetText))
+                    } else {
+                        let responses = try await session.translations(
+                            from: batch.map { TranslationSession.Request(sourceText: $0.text) })
+                        for (sentence, response) in zip(batch, responses) {
+                            deliver(sentence, SentenceTranslation(
+                                lang: response.targetLanguage.languageCode?.identifier ?? "en",
+                                text: response.targetText))
+                        }
+                    }
                     setStatus(.ready)
                 } catch is CancellationError {
                     // Configuration invalidated / task torn down: re-queue
                     // and exit; `pending` survives for the next run.
-                    pending.insert(sentence, at: 0)
+                    pending.insert(contentsOf: batch, at: 0)
                     if token == generation {
                         inFlight = false
                         setStatus(.idle)
                     }
                     return false
                 } catch {
-                    pending.insert(sentence, at: 0)
+                    pending.insert(contentsOf: batch, at: 0)
                     if token == generation {
                         inFlight = false
                         setStatus(.unavailable(Self.describe(error)))
@@ -109,6 +134,12 @@ final class TranslationQueue {
                 inFlight = false
             }
             return true
+        }
+
+        /// Posts a result and seeds the repeat-sentence cache.
+        func deliver(_ sentence: Sentence, _ pair: SentenceTranslation) {
+            cache.setObject(TranslationBox(pair), forKey: sentence.text as NSString)
+            onResult?(sentence.index, pair)
         }
 
         // Replay anything that arrived before a session existed.
@@ -121,8 +152,14 @@ final class TranslationQueue {
         }
     }
 
-    /// Enqueue a finalized sentence for translation.
+    /// Enqueue a finalized sentence for translation. A repeat of an
+    /// already-translated sentence posts its cached result synchronously and
+    /// never enters `pending` (or the session round-trip).
     func enqueue(_ sentence: Sentence) {
+        if let hit = cache.object(forKey: sentence.text as NSString) {
+            onResult?(sentence.index, hit.value)
+            return
+        }
         pending.append(sentence)
         wake?.yield(())
     }
@@ -169,5 +206,14 @@ final class TranslationQueue {
         default:
             return "Translation failed: \(error.localizedDescription)"
         }
+    }
+}
+
+/// NSCache stores class instances only; boxes the value-type translation.
+private final class TranslationBox {
+    let value: SentenceTranslation
+
+    init(_ value: SentenceTranslation) {
+        self.value = value
     }
 }
