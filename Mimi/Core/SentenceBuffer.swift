@@ -121,7 +121,10 @@ final class SentenceBuffer {
         let tail = String(chars[cut...])
         text = head
         emit()
+        // emit() reset the buffer; reinstate the tail as live content so a
+        // session stop before the next final still flushes it.
         text = tail
+        isEmpty = false
         startSample = lastEndSample
         if tier1ShouldClose() {
             close()
