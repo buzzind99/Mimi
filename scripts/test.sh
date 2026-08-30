@@ -65,13 +65,33 @@ for target in report.get("targets", []):
                 agg[label][1] += covered
                 break
 
-print(f"{'Folder / file':<28} {'line %':>8}")
-print("-" * 37)
+print(f"{'Folder / file':<28} {'line %':>8}  gate")
+print("-" * 47)
+
+floors = {
+    "State/":       77.5,
+    "Export/":     100.0,
+    "Text/":        98.0,
+    "Session/":     65.0,
+    "Translation/": 96.5,
+    "Model/":       79.5,
+    "ASR/":         43.0,
+    "Audio/":        8.0,
+}
+failed_gates = []
 for label, _ in prefixes:
     total, covered = agg[label]
     pct = (covered / total * 100) if total else float("nan")
-    print(f"{label:<28} {pct:>7.1f}%")
-print("-" * 37)
+    floor = floors.get(label)
+    if floor is None:
+        verdict = "  (excluded)"
+    elif pct >= floor:
+        verdict = f"  PASS ≥ {floor:g}%"
+    else:
+        verdict = f"  FAIL < {floor:g}%"
+        failed_gates.append(label)
+    print(f"{label:<28} {pct:>7.1f}%{verdict}")
+print("-" * 47)
 for path, cov, lines in sorted(files):
     name = path.split("/Mimi/")[-1]
     print(f"{name:<28} {cov * 100:>7.1f}%  ({lines} lines)")
@@ -79,4 +99,7 @@ for path, cov, lines in sorted(files):
 bad = [f for f in files if f[1] < 1.0]
 if bad:
     print(f"\n{len(bad)} file(s) below 100%:", file=sys.stderr)
+if failed_gates:
+    print(f"\ncoverage gate FAILED: {', '.join(failed_gates)}", file=sys.stderr)
+    sys.exit(1)
 PY
