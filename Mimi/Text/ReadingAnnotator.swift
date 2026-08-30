@@ -184,14 +184,17 @@ enum ReadingAnnotator {
     /// The tokenizer's Latin transcription for the current token, with the
     /// "~tsu" straddling-sokuon marker consumed and the ヴ row's morpheme
     /// break fused ("vu~aiorin" → "vaiorin"). Falls back to the surface text
-    /// for tokens without a transcription (digits, Latin runs, symbols).
+    /// for tokens without a transcription (digits, Latin runs, symbols) and
+    /// for tokens transcribing to the empty string (rare ideographs like
+    /// 𠮷/㐂) — dropping them would break the surfaces-concatenate-back
+    /// invariant.
     private static func tokenReading(
         tokenizer: CFStringTokenizer,
         surface: String
     ) -> (reading: String, endsWithSokuon: Bool) {
         guard let transcription = CFStringTokenizerCopyCurrentTokenAttribute(
             tokenizer, kCFStringTokenizerAttributeLatinTranscription
-        ) as? String else {
+        ) as? String, !transcription.isEmpty else {
             return (surface, false)
         }
         var reading = transcription
@@ -241,10 +244,11 @@ enum ReadingAnnotator {
 
     /// Calendar days where the tokenizer splits the native numeral from a
     /// 日 read "ka" (二日 → "futa"|"ka", 六日 → "mui"|"ka", 二十日 →
-    /// "hatsu"|"ka"): the stems fused with "ka". The sokuon-fusing days
-    /// (三日 → "mi~tsu"|"ka") are handled by the existing sokuon path.
+    /// "hatsu"|"ka"): the stems fused with "ka". 三日 arrives with a
+    /// straddling sokuon ("mi~tsu"|"ka") and fuses on the sokuon path; 四日
+    /// is a single token ("yon nichi") fused by the pair overrides below.
     private static let dateCounterStems: [String: String] = [
-        "futa": "futsu", "mi": "mi", "yo": "yo", "itsu": "itsu",
+        "futa": "futsu", "itsu": "itsu",
         "mui": "mui", "nana": "nana", "you": "you", "kokono": "kokono",
         "too": "tou", "hatsu": "hatsu"
     ]
@@ -282,16 +286,11 @@ enum ReadingAnnotator {
             return fused
         }
 
-        // 二日/五日/…: only the "ka" reading of 日 participates; 三日 and
-        // 四日 geminate (mikka, yokka), the rest elide or keep their mora.
+        // 二日/五日/…: only the "ka" reading of 日 participates (三日 is
+        // fused upstream via the sokuon path, 四日 via the pair overrides).
         if let stem = dateCounterStems[number.romaji] {
             guard lower == "ka" else { return nil }
-            switch number.romaji {
-            case "mi", "yo":
-                return stem + (geminate("ka") ?? "ka")
-            default:
-                return stem + "ka"
-            }
+            return stem + "ka"
         }
 
         guard let stem = geminationStem(of: number.romaji),
