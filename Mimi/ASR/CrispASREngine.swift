@@ -57,6 +57,13 @@ final class CrispASREngine: ASREngine {
     /// Backstop only (never used for endpointing): marks a buffer as not
     /// truly silent so the cap path never decodes known-silent audio.
     private static let speechRMS: Float = 1e-3
+    /// Total budget for `finish()` to wait out in-flight decode/VAD jobs.
+    /// Bounds the whole drain, not each semaphore wait — a hung C call never
+    /// clears its in-flight flag, so per-wait timeouts alone would re-arm
+    /// forever. (The synchronous flush decode below stays unbounded: it is a
+    /// single direct C call on the session, and aborting mid-call would leave
+    /// the C library using a session this side has already torn down.)
+    private static let drainTimeout: TimeInterval = 30
 
     // FireRedVAD (via the dispatcher-backed crispasr_vad_slices ABI; the
     // model is process-cached in the C library after the first call).
@@ -790,6 +797,11 @@ extension CrispASREngine {
         finishing = true
         lock.unlock()
         // Wait (bounded) for any in-flight decode or VAD pass to finish.
+        // The deadline caps the TOTAL wait: each semaphore wait is at most
+        // the remaining budget, so a hung decode/VAD call (its flag never
+        // clears) delays teardown by at most `drainTimeout` instead of
+        // re-arming a fresh 30 s wait forever.
+        let deadline = Date().addingTimeInterval(Self.drainTimeout)
         while true {
             lock.lock()
             let inFlight = decodeInFlight || vadInFlight
@@ -797,7 +809,11 @@ extension CrispASREngine {
             if !inFlight {
                 break
             }
-            _ = jobFinished.wait(timeout: .now() + 30)
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 {
+                break
+            }
+            _ = jobFinished.wait(timeout: .now() + remaining)
         }
 
         // Flush any open utterance synchronously — capture has already

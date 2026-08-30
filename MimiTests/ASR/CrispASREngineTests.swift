@@ -4,8 +4,9 @@ import XCTest
 /// Tests the `CrispASREngine` paths reachable without a loaded GGUF model or
 /// a Metal pipeline: the init bind-failure throw (assertable only when the
 /// dylib is absent), `prepare`'s missing-model guard, `openStream`'s state
-/// reset, `push`'s session guard, `poll` on an empty inbox, and `close`
-/// idempotency.
+/// reset, `push`'s session guard, `poll` on an empty inbox, `close`
+/// idempotency, and `finish`'s sessionless drain (no in-flight jobs →
+/// immediate empty drain).
 final class CrispASREngineTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -87,6 +88,20 @@ final class CrispASREngineTests: XCTestCase {
     func test_poll_whenInboxEmpty_shouldReturnNil() throws {
         let engine = try requireEngine()
 
+        XCTAssertNil(engine.poll())
+    }
+
+    // MARK: - finish (sessionless drain)
+
+    func test_finish_whenSessionless_shouldReturnImmediatelyWithNoEvents() throws {
+        let engine = try requireEngine()
+
+        // No session → no job can ever have been dispatched, so the drain
+        // loop must break on its first in-flight check (never waiting on the
+        // semaphore) and the empty inbox drains to nothing.
+        let drained = engine.finish()
+
+        XCTAssertTrue(drained.isEmpty)
         XCTAssertNil(engine.poll())
     }
 
