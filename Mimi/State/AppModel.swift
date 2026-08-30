@@ -14,7 +14,9 @@ enum SessionPhase: Equatable {
 }
 
 /// Orchestrates capture → ASR → sentence buffering → translation, and owns
-/// the published UI state. All public state is @MainActor.
+/// the published UI state. All public state is @MainActor. The mechanics of
+/// a live session (engine, capture, buffering, timers) live in
+/// `SessionController`.
 @MainActor
 final class AppModel: ObservableObject {
     // Published UI state
@@ -28,7 +30,7 @@ final class AppModel: ObservableObject {
     /// browsing older translations, or nil to follow the latest translated
     /// entry. Pinning an older entry means new translations never move the
     /// view; nil tracks the newest.
-    @Published var hudPinnedIndex: Int? = nil
+    @Published var hudPinnedIndex: Int?
     @Published var errorMessage: String?
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
@@ -38,16 +40,13 @@ final class AppModel: ObservableObject {
     let latency = LatencyState()
     let translationQueue = TranslationQueue()
 
-    private var capture: SystemAudioCapture?
-    private var engine: ASREngine?
-    private var sentenceBuffer: SentenceBuffer?
-    private var pollTimer: Timer?
-    private var tickTimer: Timer?
-    private var sessionMetadata: SessionMetadata?
-    /// Guards the one-shot engine warm-up (app launch / model arrival).
-    private var warmUpScheduled = false
+    private let sessionController: SessionController
 
     init() {
+        sessionController = SessionController(
+            live: live, latency: latency, translationQueue: translationQueue
+        )
+        wireSessionController()
         translationQueue.setHandlers(
             result: { [weak self] index, translation in
                 self?.applyTranslation(index: index, translation: translation)
@@ -65,6 +64,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func wireSessionController() {
+        sessionController.onSessionBegin = { [weak self] in
+            guard let self else { return }
+            entries.removeAll()
+            hudPinnedIndex = nil
+        }
+        sessionController.onEngineChosen = { [weak self] isMock, url in
+            self?.engineIsMock = isMock
+            self?.modelURL = url
+        }
+        sessionController.onSentence = { [weak self] sentence in
+            self?.handleSentence(sentence)
+        }
+        sessionController.onEngineError = { [weak self] message in
+            self?.errorMessage = message
+        }
+        sessionController.onCaptureError = { [weak self] message in
+            guard let self, phase == .running else { return }
+            phase = .sourceLost
+            errorMessage = message
+        }
+    }
+
     // MARK: - Model / app discovery
 
     func refreshModelAvailability() {
@@ -74,25 +96,7 @@ final class AppModel: ObservableObject {
         } else if modelURL != nil, phase == .needsModel {
             phase = .idle
         }
-        warmUpEngineIfNeeded()
-    }
-
-    /// Loads the ASR model + compiles the Metal pipelines in the background
-    /// (at app launch, or once a model becomes available) so the first
-    /// session start is instant. Safe against racing `beginSession`: the
-    /// engine's `prepare` is serialized, and a second opener reuses the
-    /// already-open session.
-    private func warmUpEngineIfNeeded() {
-        guard !warmUpScheduled, let url = modelURL else { return }
-        warmUpScheduled = true
-        #if DEBUG
-            print("[warmup] preparing ASR engine in background")
-        #endif
-        Task.detached(priority: .utility) {
-            if let engine = ASREngineFactory.makeEngine(modelURL: url, allowMock: false) {
-                try? engine.prepare()
-            }
-        }
+        sessionController.warmUpIfNeeded(modelURL: modelURL)
     }
 
     // MARK: - Session control
@@ -112,89 +116,11 @@ final class AppModel: ObservableObject {
     }
 
     private func beginSession() async throws {
-        // Screen Recording permission (TCC) covers SCK system-audio capture.
-        guard await SystemAudioCapture.ensurePermission() else {
-            throw CaptureError.permissionDenied
-        }
-
-        let modelURL = ModelLocator.resolve()
-        guard let engine = ASREngineFactory.makeEngine(modelURL: modelURL, allowMock: true) else {
+        let started = try await sessionController.begin()
+        guard started else {
             phase = .needsModel
             return
         }
-        self.engine = engine
-        self.modelURL = modelURL
-        engineIsMock = engine.isMock
-        engine.onEngineError = { [weak self] message in
-            Task { @MainActor in self?.errorMessage = message }
-        }
-
-        entries.removeAll()
-        hudPinnedIndex = nil
-        live.partial = ""
-        latency.reset()
-
-        let buffer = SentenceBuffer()
-        buffer.onSentence = { [weak self] sentence in
-            self?.handleSentence(sentence)
-        }
-        sentenceBuffer = buffer
-
-        let capture = SystemAudioCapture()
-        #if DEBUG
-            var debugIngressChunks = 0
-        #endif
-        capture.onChunk = { [weak self] chunk in
-            guard let self, let engine = self.engine else { return }
-            engine.push(chunk.samples)
-            #if DEBUG
-                // Every ~8 s of audio, print ASR-ingress energy so a dead
-                // pipeline (all-zero audio reaching the model) is obvious.
-                debugIngressChunks += 1
-                if debugIngressChunks % 50 == 0 {
-                    var energy: Float = 0
-                    for s in chunk.samples {
-                        energy += s * s
-                    }
-                    let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
-                    print(
-                        "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
-                            "t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))"
-                    )
-                }
-            #endif
-            let pushed = chunk.startSample + chunk.samples.count
-            Task { @MainActor in
-                self.latency.update(
-                    max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate)
-                )
-            }
-        }
-        capture.onIOError = { [weak self] error in
-            Task { @MainActor in
-                guard self?.phase == .running else { return }
-                self?.phase = .sourceLost
-                self?.errorMessage = error.localizedDescription
-            }
-        }
-        self.capture = capture
-
-        #if DEBUG
-            print("[session] start: whole-system SCK audio capture")
-        #endif
-        try await capture.start()
-
-        try engine.prepare()
-        try engine.openStream()
-
-        sessionMetadata = SessionMetadata(
-            startedAt: Date(),
-            sourceLang: "ja",
-            targetLang: "en",
-            model: engine.isMock ? "mock" : ModelLocator.modelID,
-            chunkMS: 160,
-            streamOffset: nil
-        )
 
         phase = .running
 
@@ -204,12 +130,9 @@ final class AppModel: ObservableObject {
         // so SwiftUI reliably re-fires the task even if a config survived.
         translationQueue.resetForRetry()
         translationConfig?.invalidate()
-        translationConfig = TranslationSession.Configuration(
-            source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: "en")
-        )
+        translationConfig = makeTranslationConfig()
 
-        startTimers()
+        sessionController.startTimers()
     }
 
     func stop() {
@@ -221,11 +144,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Teardown, ordered so pending translations finish first: capture and
-    /// ASR are shut down immediately, the final flushed sentence is enqueued,
-    /// and only after the translation queue drains (bounded by a timeout)
-    /// does the session wind down. That keeps the tail of the session
-    /// exportable with translations intact.
+    /// Teardown via `SessionController` (capture, ASR, buffering, timers),
+    /// after which the translation queue has drained and the session winds
+    /// down. That keeps the tail of the session exportable with translations
+    /// intact.
     ///
     /// The translation config is deliberately left alive: once drained, the
     /// worker is suspended harmlessly, and keeping the config non-nil lets
@@ -234,77 +156,26 @@ final class AppModel: ObservableObject {
     /// identical config on start is a path SwiftUI's `.translationTask`
     /// does not reliably re-fire on.
     private func performStop() async {
-        // Strictly ordered teardown: capture stops first, then the ASR
-        // finish → drain on the ASR queue. The engine stays warm (loaded
-        // model reused by the next session).
-        capture?.stop()
-        if let engine {
-            let drained = engine.finish()
-            for event in drained {
-                handleASREvent(event)
-            }
-        }
-        engine = nil
-        capture = nil
-        stopTimers()
-
-        // Flush a partially-formed sentence (its translation is awaited
-        // below), then let the translation worker finish its tail.
-        sentenceBuffer?.flush()
-        sentenceBuffer = nil
-        _ = await translationQueue.drain(timeout: 5)
+        await sessionController.stop()
         translationStatus = .idle
-        live.partial = ""
         phase = .idle
     }
 
     func retryTranslation() {
         translationConfig?.invalidate()
-        translationConfig = TranslationSession.Configuration(
+        translationConfig = makeTranslationConfig()
+    }
+
+    /// ja→en configuration, built identically for session start and retry so
+    /// SwiftUI's `.translationTask` treats both paths the same way.
+    private func makeTranslationConfig() -> TranslationSession.Configuration {
+        TranslationSession.Configuration(
             source: Locale.Language(identifier: "ja"),
             target: Locale.Language(identifier: "en")
         )
     }
 
-    // MARK: - Timers
-
-    private func startTimers() {
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.pollASR() }
-        }
-        tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sentenceBuffer?.tick() }
-        }
-    }
-
-    private func stopTimers() {
-        pollTimer?.invalidate(); pollTimer = nil
-        tickTimer?.invalidate(); tickTimer = nil
-    }
-
-    private func pollASR() {
-        guard let engine else { return }
-        while let event = engine.poll() {
-            handleASREvent(event)
-        }
-    }
-
     // MARK: - Event handling (main actor)
-
-    private func handleASREvent(_ event: ASREvent) {
-        switch event {
-        case let .partial(text):
-            live.partial = text
-        case let .final(text, startSample, endSample, lang):
-            live.partial = ""
-            sentenceBuffer?.append(
-                finalText: text, startSample: startSample, endSample: endSample
-            )
-            _ = lang
-        }
-    }
 
     private func handleSentence(_ sentence: Sentence) {
         entries.append(SessionEntry(sentence: sentence))
@@ -340,7 +211,7 @@ final class AppModel: ObservableObject {
         case .json:
             let results = snapshotTranslationResults()
             return try SessionExporter.json(
-                entries: entries, metadata: sessionMetadata, results: results
+                entries: entries, metadata: sessionController.sessionMetadata, results: results
             )
         }
     }
