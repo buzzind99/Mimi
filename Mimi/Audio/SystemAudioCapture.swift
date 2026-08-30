@@ -49,6 +49,12 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     private let outputQueue = DispatchQueue(
         label: "dev.mimi.capture.sck", qos: .userInteractive
     )
+    /// Guards `isRunning` and the chunk accumulator. Sample callbacks run on
+    /// `outputQueue`, but `stop()` can be called from any thread — the lock is
+    /// what fences an in-flight callback against teardown: one that passed
+    /// the cheap entry check re-checks under the lock before touching state
+    /// or calling `onChunk`, so no chunk can land after `stop()` returns.
+    private let stateLock = NSLock()
 
     private var stream: SCStream?
     private var converter: AVAudioConverter?
@@ -123,19 +129,25 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
             throw CaptureError.streamSetupFailed(error.localizedDescription)
         }
 
-        isRunning = true
+        stateLock.withLock { isRunning = true }
         #if DEBUG
             print("[capture] SCK system-audio stream started (target: 16 kHz mono)")
         #endif
     }
 
     func stop() {
-        guard isRunning else { return }
+        stateLock.lock()
+        guard isRunning else {
+            stateLock.unlock()
+            return
+        }
         isRunning = false
-        let stream = self.stream
-        self.stream = nil
         accumulated.removeAll(keepingCapacity: true)
         accumulatedStart = 0
+        stateLock.unlock()
+
+        let stream = self.stream
+        self.stream = nil
         Task {
             try? await stream?.stopCapture()
             try? stream?.removeStreamOutput(self, type: .audio)
@@ -145,8 +157,13 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
     // MARK: - SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        guard isRunning else { return }
+        stateLock.lock()
+        guard isRunning else {
+            stateLock.unlock()
+            return
+        }
         isRunning = false
+        stateLock.unlock()
         self.stream = nil
         onIOError?(.streamSetupFailed(error.localizedDescription))
     }
@@ -173,16 +190,25 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         }
         guard !mono.isEmpty else { return }
 
+        // The entry `isRunning` check is only a pre-filter; `stop()` may have
+        // fenced teardown while this callback was extracting. The locked
+        // re-check makes teardown vs. in-flight-callback mutually exclusive.
+        stateLock.lock()
+        guard isRunning else {
+            stateLock.unlock()
+            return
+        }
         if asbd.mSampleRate == Self.outputSampleRate {
             accumulated.append(contentsOf: mono)
-        } else {
-            guard let converted = resample(mono, from: asbd.mSampleRate) else {
-                onIOError?(.formatUnavailable)
-                return
-            }
+        } else if let converted = resample(mono, from: asbd.mSampleRate) {
             accumulated.append(contentsOf: converted)
+        } else {
+            stateLock.unlock()
+            onIOError?(.formatUnavailable)
+            return
         }
         emitFixedChunks()
+        stateLock.unlock()
     }
 
     // MARK: - PCM extraction
@@ -348,7 +374,9 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
 
     // MARK: - Chunking
 
-    /// Slice the accumulator into 160 ms chunks and deliver.
+    /// Slice the accumulator into 160 ms chunks and deliver. Caller holds
+    /// `stateLock`; `onChunk` fires under it (handlers never re-enter capture
+    /// state, so this cannot deadlock).
     private func emitFixedChunks() {
         let chunkSize = Self.chunkSamples
         while accumulated.count - accumulatedStart >= chunkSize {
