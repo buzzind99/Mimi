@@ -25,27 +25,13 @@ enum SessionExporter {
 
     // MARK: - Plain text
 
-    static func plainText(entries: [SessionEntry], interleaved: Bool = true) -> String {
+    static func plainText(entries: [SessionEntry]) -> String {
         var lines: [String] = []
-        if interleaved {
-            for entry in entries {
-                let stamp = SessionClock.timestamp(entry.sentence.startS)
-                lines.append("\(stamp)  \(entry.sentence.text)")
-                for translation in entry.translations {
-                    lines.append("\(stamp)  \(translation.text)")
-                }
-            }
-        } else {
-            for entry in entries {
-                let stamp = SessionClock.timestamp(entry.sentence.startS)
-                lines.append("\(stamp)  \(entry.sentence.text)")
-            }
-            lines.append("")
-            for entry in entries {
-                for translation in entry.translations {
-                    let stamp = SessionClock.timestamp(entry.sentence.startS)
-                    lines.append("\(stamp)  \(translation.text)")
-                }
+        for entry in entries {
+            let stamp = SessionClock.timestamp(entry.sentence.startS)
+            lines.append("\(stamp)  \(entry.sentence.text)")
+            for translation in entry.translations {
+                lines.append("\(stamp)  \(translation.text)")
             }
         }
         return lines.joined(separator: "\n") + "\n"
