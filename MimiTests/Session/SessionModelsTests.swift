@@ -32,6 +32,18 @@ final class SessionModelsTests: XCTestCase {
         XCTAssertEqual(seconds, 1.0)
     }
 
+    func test_seconds_whenZeroSamples_shouldBeZero() {
+        let seconds = SessionClock.seconds(0)
+
+        XCTAssertEqual(seconds, 0.0)
+    }
+
+    func test_seconds_whenHalfASecondOfSamples_shouldConvertToSeconds() {
+        let seconds = SessionClock.seconds(sampleRateSamples / 2)
+
+        XCTAssertEqual(seconds, 0.5)
+    }
+
     // MARK: - SessionClock.timestamp
 
     func test_timestamp_whenUnderOneHour_shouldFormatAsMinutesAndSeconds() {
@@ -46,13 +58,72 @@ final class SessionModelsTests: XCTestCase {
         XCTAssertEqual(timestamp, expectedOverHourTimestamp)
     }
 
+    func test_timestamp_whenExactlyOneHour_shouldFormatAsHoursMinutesAndSeconds() {
+        let timestamp = SessionClock.timestamp(3600)
+
+        XCTAssertEqual(timestamp, "01:00:00")
+    }
+
+    func test_timestamp_whenJustUnderOneHour_shouldFormatAsMinutesAndSeconds() {
+        let timestamp = SessionClock.timestamp(3599.9)
+
+        XCTAssertEqual(timestamp, "59:59")
+    }
+
+    func test_timestamp_whenSubSecond_shouldRoundDown() {
+        let timestamp = SessionClock.timestamp(underHourSeconds + 0.9)
+
+        XCTAssertEqual(timestamp, expectedUnderHourTimestamp)
+    }
+
     func test_timestamp_whenNegative_shouldClampToZero() {
         let timestamp = SessionClock.timestamp(negativeSeconds)
 
         XCTAssertEqual(timestamp, expectedClampedTimestamp)
     }
 
+    // MARK: - Sentence
+
+    func test_sentence_id_shouldMirrorIndex() {
+        let sentence = Sentence(index: 7, startS: 0, endS: 1, lang: "ja", text: "テスト")
+
+        XCTAssertEqual(sentence.id, 7)
+    }
+
     // MARK: - SessionEntry
+
+    func test_init_whenUntranslated_shouldLeaveJoinedTranslationsNil() {
+        let entry = makeEntry()
+
+        XCTAssertTrue(entry.translations.isEmpty)
+        XCTAssertNil(entry.joinedTranslations)
+    }
+
+    func test_init_shouldPrecomputeTimestampsFromSentence() {
+        let sentence = Sentence(index: 3, startS: 0, endS: 61, lang: "ja", text: "テスト")
+
+        let entry = SessionEntry(sentence: sentence)
+
+        XCTAssertEqual(entry.startTimestamp, "00:00")
+        XCTAssertEqual(entry.endTimestamp, "01:01")
+    }
+
+    func test_id_shouldMirrorSentenceIndex() {
+        let entry = makeEntry()
+
+        XCTAssertEqual(entry.id, 0)
+    }
+
+    func test_appendTranslation_whenCalledOnce_shouldJoinWithoutSeparator() {
+        var entry = makeEntry()
+
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
+
+        XCTAssertEqual(entry.joinedTranslations, firstTranslationText)
+        XCTAssertEqual(entry.translations, [
+            SentenceTranslation(lang: "en", text: firstTranslationText)
+        ])
+    }
 
     func test_appendTranslation_whenCalledTwice_shouldJoinWithSlash() {
         var entry = makeEntry()

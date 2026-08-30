@@ -126,9 +126,6 @@ final class SentenceBuffer {
         text = tail
         isEmpty = false
         startSample = lastEndSample
-        if tier1ShouldClose() {
-            close()
-        }
     }
 
     private func close() {
