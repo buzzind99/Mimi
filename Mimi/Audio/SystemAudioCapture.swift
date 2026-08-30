@@ -20,8 +20,8 @@ enum CaptureError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            return
-                "Screen Recording access is required to capture system audio. Grant it in System Settings → Privacy & Security → Screen Recording, then restart Mimi."
+            return "Screen Recording access is required to capture system audio. Grant it "
+                + "in System Settings → Privacy & Security → Screen Recording, then restart Mimi."
         case .noDisplayFound:
             return "No display available to attach the audio stream to."
         case let .streamSetupFailed(detail):

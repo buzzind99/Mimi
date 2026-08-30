@@ -149,10 +149,10 @@ final class CrispASREngine: ASREngine {
             candidates.append(FileManager.default.currentDirectoryPath
                 + "/local/frameworks/crispasr/\(vadModelFile)")
         #endif
-        for path in candidates.compactMap({ $0 }) {
-            if FileManager.default.fileExists(atPath: path) {
-                return path
-            }
+        for path in candidates.compactMap({ $0 })
+            where FileManager.default.fileExists(atPath: path)
+        {
+            return path
         }
         return nil
     }
@@ -201,9 +201,11 @@ final class CrispASREngine: ASREngine {
     /// re-creating engines (warm restarts, model swaps) never re-opens it.
     /// dlopen is refcounted internally — the handle stays valid forever.
     private static let library: Result<UnsafeMutableRawPointer, ASREngineError> = {
-        do { return try .success(openLibrary()) }
-        catch let error as ASREngineError { return .failure(error) }
-        catch { return .failure(.runtimeNotFound(error.localizedDescription)) }
+        do { return try .success(openLibrary()) } catch let error as ASREngineError {
+            return .failure(error)
+        } catch {
+            return .failure(.runtimeNotFound(error.localizedDescription))
+        }
     }()
 
     private func bind(from handle: UnsafeMutableRawPointer) {

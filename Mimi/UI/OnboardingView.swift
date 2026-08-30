@@ -67,10 +67,13 @@ struct OnboardingView: View {
                         .foregroundColor(.orange)
                         .frame(maxWidth: 480)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Offline? Download the GGUF on another machine and drop it into ~/Library/Application Support/Mimi/models/ — Mimi picks it up automatically.")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: 480)
+                    Text(
+                        "Offline? Download the GGUF on another machine and drop it into "
+                            + "~/Library/Application Support/Mimi/models/ — Mimi picks it up automatically."
+                    )
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: 480)
                 } else if ModelLocator.resolve() == nil {
                     Text("Or drop the GGUF into ~/Library/Application Support/Mimi/models/")
                         .font(.caption2)

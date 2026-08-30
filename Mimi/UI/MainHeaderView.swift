@@ -34,7 +34,10 @@ struct MainHeaderView: View {
                     .font(.caption).bold()
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(Color.orange.opacity(0.25)))
-                    .help("Native ASR runtime not found — running the built-in mock so you can exercise the pipeline. Build it with scripts/build_runtime.sh.")
+                    .help(
+                        "Native ASR runtime not found — running the built-in mock so you can "
+                            + "exercise the pipeline. Build it with scripts/build_runtime.sh."
+                    )
             }
 
             exportMenu

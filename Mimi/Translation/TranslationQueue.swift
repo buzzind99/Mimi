@@ -202,7 +202,8 @@ final class TranslationQueue {
             if #available(macOS 26.0, *) {
                 switch translationError {
                 case TranslationError.notInstalled:
-                    return "The ja→en translation pack is not installed. Allow the download prompt (or install it in System Settings), then retry."
+                    return "The ja→en translation pack is not installed. Allow the download "
+                        + "prompt (or install it in System Settings), then retry."
                 default:
                     break
                 }
