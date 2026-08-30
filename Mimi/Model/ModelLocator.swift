@@ -33,14 +33,17 @@ enum ModelLocator {
         {
             return downloaded
         }
-        // Development checkout: scripts/build_runtime.sh puts the dev model
-        // in <repo>/models/; Xcode runs the app with that as working directory.
-        let devURL = URL(fileURLWithPath: "models/\(modelName)")
-        if FileManager.default.fileExists(atPath: devURL.path),
-           ModelVerifier.isVerified(devURL)
-        {
-            return devURL.absoluteURL
-        }
+        #if DEBUG
+            // Development checkout: scripts/build_runtime.sh puts the dev model
+            // in <repo>/models/; Xcode runs the app with that as working
+            // directory. Debug-only so release never depends on the cwd
+            let devURL = URL(fileURLWithPath: "models/\(modelName)")
+            if FileManager.default.fileExists(atPath: devURL.path),
+               ModelVerifier.isVerified(devURL)
+            {
+                return devURL.absoluteURL
+            }
+        #endif
         return nil
     }
 }
