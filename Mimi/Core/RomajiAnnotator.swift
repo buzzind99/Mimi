@@ -1,10 +1,26 @@
 import Foundation
 
+/// One rendered run of text plus its optional romaji annotation. The
+/// `surface` strings concatenate back to the original text (gaps between
+/// tokenizer tokens — punctuation, symbols — become plain runs with a nil
+/// `romaji`). A run whose romaji equals its surface (Latin, digits) is
+/// self-transcribed; renderers skip annotating those.
+final class RomajiSegment {
+    var surface: String
+    var romaji: String?
+
+    init(surface: String, romaji: String?) {
+        self.surface = surface
+        self.romaji = romaji
+    }
+}
+
 /// Produces romaji (Hepburn-style Latin transcription) for Japanese text using
 /// the system tokenizer's built-in `LatinTranscription` attribute. No
 /// dependencies, no network, no bundled dictionaries.
 enum RomajiAnnotator {
     private static let cache = NSCache<NSString, NSString>()
+    private static let segmentCache = NSCache<NSString, NSArray>()
 
     /// Returns space-separated romaji for `text`, or `nil` if nothing
     /// transcribable is present. Cheap (microseconds per sentence) and cached.
@@ -16,35 +32,74 @@ enum RomajiAnnotator {
             return cached as String
         }
 
-        let result = transcribe(trimmed)
-        if let result {
-            cache.setObject(result as NSString, forKey: trimmed as NSString)
+        let joined = segments(for: trimmed)?
+            .compactMap { $0.romaji }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard let joined, !joined.isEmpty else { return nil }
+        cache.setObject(joined as NSString, forKey: trimmed as NSString)
+        return joined
+    }
+
+    /// Returns per-run segments for `text` (surface + romaji), or `nil` for
+    /// empty input. Cheap (microseconds per sentence) and cached.
+    static func segments(for text: String) -> [RomajiSegment]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let cached = segmentCache.object(forKey: trimmed as NSString) as? [RomajiSegment] {
+            return cached
         }
+
+        let result = transcribe(trimmed)
+        segmentCache.setObject(result as NSArray, forKey: trimmed as NSString)
         return result
     }
 
-    private static func transcribe(_ text: String) -> String? {
+    private static func transcribe(_ text: String) -> [RomajiSegment] {
+        let nsText = text as NSString
         let locale = NSLocale(localeIdentifier: "ja_JP") as CFLocale
         let tokenizer = CFStringTokenizerCreate(
             kCFAllocatorDefault,
             text as CFString,
-            CFRange(location: 0, length: (text as NSString).length),
+            CFRange(location: 0, length: nsText.length),
             kCFStringTokenizerUnitWord,
             locale
         )
 
-        var parts: [String] = []
+        var segments: [RomajiSegment] = []
+        // Index of the most recent token segment (gaps don't count): sokuon
+        // fusion must land on the word, not on intervening punctuation.
+        var lastTokenIndex: Int?
+        var cursor = 0
         // The tokenizer marks a sokuon that straddles a token boundary with a
         // literal "~tsu" suffix (e.g. みよっか → "miyo~tsu" | "ka"). Consume it
         // and geminate the next token's leading consonant instead.
         var carriesSokuon = false
+
+        func appendGap(to end: Int) {
+            guard cursor < end else { return }
+            let range = NSRange(location: cursor, length: end - cursor)
+            let gap = nsText.substring(with: range)
+            if gap.trimmingCharacters(in: .whitespaces).isEmpty {
+                // Whitespace-only gap: keep word spacing by folding one space
+                // into the previous run's surface.
+                if let last = segments.last, !gap.isEmpty {
+                    last.surface += " "
+                }
+            } else {
+                segments.append(RomajiSegment(surface: gap, romaji: nil))
+            }
+        }
+
         while true {
             let tokenType = CFStringTokenizerAdvanceToNextToken(tokenizer)
             guard tokenType != [] else { break }
             let tokenRange = CFStringTokenizerGetCurrentTokenRange(tokenizer)
             guard tokenRange.length > 0 else { break }
+            appendGap(to: tokenRange.location)
 
-            let surface = (text as NSString).substring(
+            let surface = nsText.substring(
                 with: NSRange(location: tokenRange.location, length: tokenRange.length)
             )
 
@@ -66,30 +121,33 @@ enum RomajiAnnotator {
 
             if carriesSokuon {
                 if let doubled = geminate(reading) {
-                    reading = doubled
-                    // Fuse with the previous token — the split is artificial.
-                    if let last = parts.last {
-                        parts[parts.count - 1] = last + reading
-                        reading = ""
+                    // Fuse with the previous word — the split is artificial.
+                    if let at = lastTokenIndex {
+                        segments[at].romaji = (segments[at].romaji ?? "") + doubled
                     }
-                } else {
-                    // Next token can't take a geminate (vowel-initial, digit…):
-                    // keep the sokuon as a spoken "tsu".
-                    parts.append("tsu")
+                    reading = ""
+                } else if let at = lastTokenIndex {
+                    // Next token can't take a geminate (vowel-initial,
+                    // digit…): keep the sokuon as a spoken "tsu".
+                    segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
                 }
             }
             if !reading.isEmpty {
-                parts.append(romanize(surface: surface, reading: reading))
+                let segment = RomajiSegment(
+                    surface: surface, romaji: romanize(surface: surface, reading: reading)
+                )
+                segments.append(segment)
+                lastTokenIndex = segments.count - 1
             }
             carriesSokuon = endsWithSokuon
+            cursor = tokenRange.location + tokenRange.length
         }
-        if carriesSokuon {
-            parts.append("tsu")
+        if carriesSokuon, let at = lastTokenIndex {
+            segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
         }
+        appendGap(to: nsText.length)
 
-        let joined = parts.joined(separator: " ")
-            .trimmingCharacters(in: .whitespaces)
-        return joined.isEmpty ? nil : joined
+        return segments
     }
 
     /// Doubles the leading consonant of `reading` to realize a preceding
