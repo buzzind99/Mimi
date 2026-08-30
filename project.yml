@@ -32,4 +32,17 @@ targets:
         INFOPLIST_KEY_NSScreenCaptureUsageDescription: "Mimi captures your Mac's system audio (via ScreenCaptureKit) so it can transcribe and translate it locally on this Mac. Mimi never records or stores your screen. Audio never leaves your machine."
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.utilities"
     scheme:
-      testTargets: []
+      testTargets:
+        - MimiTests
+  MimiTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: MimiTests
+    dependencies:
+      - target: Mimi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.mimi.app.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Mimi.app/Contents/MacOS/Mimi"
+        BUNDLE_LOADER: "$(TEST_HOST)"
