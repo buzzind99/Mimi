@@ -120,8 +120,7 @@ enum SessionExporter {
             sourceLang: metadata?.sourceLang ?? "ja",
             targetLang: metadata?.targetLang ?? "en",
             model: metadata?.model,
-            chunkMS: metadata?.chunkMS ?? 160,
-            streamOffset: metadata?.streamOffset
+            chunkMS: metadata?.chunkMS ?? 160
         )
         let doc = JSONSessionDocument(schemaVersion: 1, session: session, sentences: sentences)
         return try encoder.encode(doc)
@@ -147,7 +146,6 @@ enum SessionExporter {
         let targetLang: String?
         let model: String?
         let chunkMS: Int
-        let streamOffset: Double?
 
         enum CodingKeys: String, CodingKey {
             case startedAt = "started_at"
@@ -155,7 +153,6 @@ enum SessionExporter {
             case targetLang = "target_lang"
             case model
             case chunkMS = "chunk_ms"
-            case streamOffset = "stream_offset"
         }
     }
 

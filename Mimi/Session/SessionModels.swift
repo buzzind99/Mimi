@@ -65,7 +65,6 @@ struct SessionMetadata: Equatable, Codable {
     var targetLang: String?
     var model: String?
     var chunkMS: Int
-    var streamOffset: Double?
 }
 
 enum SessionClock {

@@ -115,8 +115,7 @@ final class SessionController {
             sourceLang: "ja",
             targetLang: "en",
             model: engine.isMock ? "mock" : ModelLocator.modelID,
-            chunkMS: 160,
-            streamOffset: nil
+            chunkMS: 160
         )
 
         return true

@@ -184,7 +184,6 @@ final class SessionExporterTests: XCTestCase {
         XCTAssertEqual(document.session.targetLang, "en")
         XCTAssertNil(document.session.model)
         XCTAssertEqual(document.session.chunkMS, 160)
-        XCTAssertNil(document.session.streamOffset)
         XCTAssertGreaterThanOrEqual(document.session.startedAt, before.addingTimeInterval(-1))
         XCTAssertLessThanOrEqual(document.session.startedAt, Date().addingTimeInterval(1))
     }
@@ -195,8 +194,7 @@ final class SessionExporterTests: XCTestCase {
             sourceLang: nil,
             targetLang: nil,
             model: "test-model",
-            chunkMS: 250,
-            streamOffset: nil
+            chunkMS: 250
         )
 
         let data = try SessionExporter.json(entries: [], metadata: metadata, results: [:])
@@ -211,7 +209,6 @@ final class SessionExporterTests: XCTestCase {
         XCTAssertEqual(document.session.targetLang, "en", "nil targetLang should fall back")
         XCTAssertEqual(document.session.model, "test-model")
         XCTAssertEqual(document.session.chunkMS, 250)
-        XCTAssertNil(document.session.streamOffset)
     }
 
     func test_json_whenMetadataFullyPopulated_shouldCarryAllValues() throws {
@@ -221,8 +218,7 @@ final class SessionExporterTests: XCTestCase {
             sourceLang: "ja",
             targetLang: "en",
             model: "mock",
-            chunkMS: 160,
-            streamOffset: 12.5
+            chunkMS: 160
         )
 
         let data = try SessionExporter.json(entries: [], metadata: metadata, results: [:])
@@ -237,7 +233,6 @@ final class SessionExporterTests: XCTestCase {
         XCTAssertEqual(document.session.targetLang, "en")
         XCTAssertEqual(document.session.model, "mock")
         XCTAssertEqual(document.session.chunkMS, 160)
-        XCTAssertEqual(document.session.streamOffset, 12.5)
     }
 
     // MARK: - Format metadata
