@@ -40,7 +40,8 @@ final class AppModel: ObservableObject {
     let latency = LatencyState()
     let translationQueue = TranslationQueue()
 
-    private let sessionController: SessionController
+    /// Internal (not private) so tests can drive the session callbacks.
+    let sessionController: SessionController
 
     init() {
         sessionController = SessionController(
@@ -81,7 +82,10 @@ final class AppModel: ObservableObject {
             self?.errorMessage = message
         }
         sessionController.onCaptureError = { [weak self] message in
-            guard let self, phase == .running else { return }
+            // A capture failure is fatal in any active phase: mid-session it
+            // means the source is gone; during `.starting` it means the
+            // session can never come up, so surface it instead of swallowing.
+            guard let self, phase == .running || phase == .starting else { return }
             phase = .sourceLost
             errorMessage = message
         }
@@ -117,6 +121,16 @@ final class AppModel: ObservableObject {
 
     private func beginSession() async throws {
         let started = try await sessionController.begin()
+        // The session may have been cancelled (or its capture lost) while
+        // `begin()` was in flight. Tear down whatever begin() brought up so
+        // a stopped session cannot come up anyway.
+        guard phase == .starting else {
+            await sessionController.stop()
+            if phase == .stopping {
+                phase = .idle
+            }
+            return
+        }
         guard started else {
             phase = .needsModel
             return
@@ -136,7 +150,10 @@ final class AppModel: ObservableObject {
     }
 
     func stop() {
-        guard phase == .running || phase == .sourceLost else { return }
+        // `.starting` is stoppable too: begin() is a multi-await operation
+        // (TCC prompt, capture, engine), and a session the user cancels
+        // mid-start must never come up afterwards.
+        guard phase == .starting || phase == .running || phase == .sourceLost else { return }
         phase = .stopping
 
         Task { @MainActor in
@@ -184,7 +201,8 @@ final class AppModel: ObservableObject {
         translationQueue.enqueue(sentence)
     }
 
-    private func applyTranslation(index: Int, translation: SentenceTranslation) {
+    /// Internal (not private) so tests can exercise known/unknown indexes.
+    func applyTranslation(index: Int, translation: SentenceTranslation) {
         if let at = entries.firstIndex(where: { $0.sentence.index == index }) {
             entries[at].appendTranslation(translation)
         }
