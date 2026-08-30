@@ -160,7 +160,12 @@ struct HUDView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
     @ObservedObject var panel: HUDPanel
-    @AppStorage("ShowPerWordRomaji") private var showPerWordRomaji = true
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotationRaw =
+        ReadingAnnotation.romaji.rawValue
+    private var readingAnnotation: ReadingAnnotation {
+        ReadingAnnotation(rawValue: readingAnnotationRaw) ?? .romaji
+    }
+
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
@@ -218,9 +223,10 @@ struct HUDView: View {
         Group {
             if !live.partial.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    if showPerWordRomaji {
+                    if readingAnnotation != .none {
                         RomajiRubyView(
                             text: live.partial,
+                            annotation: readingAnnotation,
                             surfaceFont: .system(size: 15),
                             romajiFont: .system(size: 11, design: .monospaced),
                             romajiColor: .secondary
@@ -232,12 +238,6 @@ struct HUDView: View {
                             .font(.system(size: 15))
                             .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
-                        if let romaji = RomajiAnnotator.romaji(for: live.partial) {
-                            Text(romaji)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
                     }
                 }
             } else {
@@ -285,12 +285,13 @@ struct HUDView: View {
 
     private func entryView(_ entry: SessionEntry) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            if showPerWordRomaji {
+            if readingAnnotation != .none {
                 Text(SessionClock.timestamp(entry.sentence.startS))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
                 RomajiRubyView(
                     text: entry.sentence.text,
+                    annotation: readingAnnotation,
                     surfaceFont: .system(size: 14),
                     romajiFont: .system(size: 11, design: .monospaced),
                     romajiColor: .secondary.opacity(0.8)
@@ -305,12 +306,6 @@ struct HUDView: View {
                     Text(entry.sentence.text)
                         .font(.system(size: 14))
                         .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
-                    Text(romaji)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary.opacity(0.8))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

@@ -51,40 +51,105 @@ private struct FlowLayout: Layout {
     }
 }
 
-/// Ruby-style romaji: each kana/kanji word renders with its romaji directly
-/// beneath it, wrapping like normal text. Runs without a distinct reading
-/// (punctuation, Latin, digits) render inline as plain text, so their
+/// Reading annotation mode. Romaji and furigana are mutually exclusive —
+/// exactly one (or neither) is shown; a shared UserDefaults key backs it.
+enum ReadingAnnotation: String, CaseIterable, Identifiable {
+    case none
+    case romaji
+    case furigana
+
+    static let storageKey = "ReadingAnnotation"
+
+    var id: String {
+        rawValue
+    }
+
+    var label: String {
+        switch self {
+        case .none: "None"
+        case .romaji: "Romaji"
+        case .furigana: "Furigana"
+        }
+    }
+}
+
+/// Ruby-style annotation: each kana/kanji word renders with its romaji
+/// beneath it (or kana furigana above it), wrapping like normal text. Runs
+/// without a distinct reading (punctuation, Latin, digits; kanji runs whose
+/// romaji doesn't reverse to kana) render inline as plain text, so their
 /// surfaces stay top-aligned with annotated words on the same line.
 struct RomajiRubyView: View {
     let text: String
+    var annotation: ReadingAnnotation = .romaji
     var surfaceFont: Font
     var romajiFont: Font
     var romajiColor: Color
     var surfaceItalic = false
 
     var body: some View {
-        if let segments = RomajiAnnotator.segments(for: text),
-           segments.contains(where: { $0.romaji != nil && $0.romaji != $0.surface })
-        {
-            FlowLayout(spacing: 4, lineSpacing: 1) {
-                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                    if let romaji = segment.romaji, romaji != segment.surface {
-                        VStack(spacing: 0) {
-                            Text(verbatim: segment.surface)
-                                .font(surfaceFont)
-                                .italic(surfaceItalic)
-                            Text(verbatim: romaji)
-                                .font(romajiFont)
-                                .foregroundStyle(romajiColor)
-                                .lineLimit(1)
+        if let segments = RomajiAnnotator.segments(for: text) {
+            if annotation != .none,
+               segments.contains(where: { reading(for: $0) != nil && reading(for: $0) != $0.surface })
+            {
+                FlowLayout(spacing: 4, lineSpacing: 1) {
+                    ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                        if let note = reading(for: segment), note != segment.surface {
+                            VStack(spacing: 0) {
+                                if annotation == .furigana {
+                                    Text(verbatim: note)
+                                        .font(romajiFont)
+                                        .foregroundStyle(romajiColor)
+                                        .lineLimit(1)
+                                    Text(verbatim: segment.surface)
+                                        .font(surfaceFont)
+                                        .italic(surfaceItalic)
+                                } else {
+                                    Text(verbatim: segment.surface)
+                                        .font(surfaceFont)
+                                        .italic(surfaceItalic)
+                                    Text(verbatim: note)
+                                        .font(romajiFont)
+                                        .foregroundStyle(romajiColor)
+                                        .lineLimit(1)
+                                }
+                            }
+                        } else {
+                            plainSegment(segment)
                         }
-                    } else {
-                        Text(verbatim: segment.surface)
-                            .font(surfaceFont)
-                            .italic(surfaceItalic)
                     }
                 }
+            } else {
+                // Nothing annotatable: plain text keeps the slot filled.
+                Text(verbatim: text)
+                    .font(surfaceFont)
+                    .italic(surfaceItalic)
             }
+        }
+    }
+
+    private func reading(for segment: RomajiSegment) -> String? {
+        annotation == .furigana ? segment.furigana : segment.romaji
+    }
+
+    /// Furigana sits above the surface, and the flow layout top-aligns its
+    /// children — so an unannotated run must reserve an invisible annotation
+    /// line to keep its surface on the same baseline as annotated words.
+    /// (Romaji sits below the surface, where top alignment already works.)
+    @ViewBuilder
+    private func plainSegment(_ segment: RomajiSegment) -> some View {
+        if annotation == .furigana {
+            VStack(spacing: 0) {
+                Text(verbatim: " ")
+                    .font(romajiFont)
+                    .lineLimit(1)
+                Text(verbatim: segment.surface)
+                    .font(surfaceFont)
+                    .italic(surfaceItalic)
+            }
+        } else {
+            Text(verbatim: segment.surface)
+                .font(surfaceFont)
+                .italic(surfaceItalic)
         }
     }
 }

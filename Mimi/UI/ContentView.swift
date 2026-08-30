@@ -20,7 +20,12 @@ struct ContentView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
     @ObservedObject var latency: LatencyState
-    @AppStorage("ShowPerWordRomaji") private var showPerWordRomaji = true
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotationRaw =
+        ReadingAnnotation.romaji.rawValue
+    private var readingAnnotation: ReadingAnnotation {
+        ReadingAnnotation(rawValue: readingAnnotationRaw) ?? .romaji
+    }
+
     @State private var isAtTop = true
     @State private var pulsing = false
     @State private var scrollPosition = ScrollPosition()
@@ -84,11 +89,16 @@ struct ContentView: View {
             .toggleStyle(.checkbox)
             .help("Floating always-on-top subtitle overlay (click-through, resizable)")
 
-            Toggle(isOn: $showPerWordRomaji) {
-                Label("Align Romaji", systemImage: "character.textbox")
+            Picker("Reading", selection: $readingAnnotationRaw) {
+                ForEach(ReadingAnnotation.allCases) { mode in
+                    Text(mode.label).tag(mode.rawValue)
+                }
             }
-            .toggleStyle(.checkbox)
-            .help("Align romaji under each corresponding word")
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help(
+                "Reading annotation for the Japanese text — romaji and furigana are mutually exclusive"
+            )
 
             Spacer()
 
@@ -155,7 +165,7 @@ struct ContentView: View {
                 DispatchQueue.main.async { pulsing = true }
             }
 
-            if showPerWordRomaji {
+            if readingAnnotation != .none {
                 // The ruby replaces both the partial slot and the romaji
                 // slot. minHeight equals their combined height (22 + 4 + 14)
                 // so empty↔filled transitions don't change the row height.
@@ -168,6 +178,7 @@ struct ContentView: View {
                     } else {
                         RomajiRubyView(
                             text: live.partial,
+                            annotation: readingAnnotation,
                             surfaceFont: .system(size: 17, weight: .medium),
                             romajiFont: .caption.monospaced(),
                             romajiColor: .secondary.opacity(0.55),
@@ -193,19 +204,6 @@ struct ContentView: View {
                         .truncationMode(.head)
                         .frame(height: 22, alignment: .leading)
                 }
-
-                Group {
-                    if let romaji = RomajiAnnotator.romaji(for: live.partial) {
-                        Text(romaji)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                    } else {
-                        Text(verbatim: " ")
-                    }
-                }
-                .font(.caption.monospaced())
-                .foregroundColor(.secondary.opacity(0.55))
-                .frame(height: 14, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -367,11 +365,15 @@ private struct StatusBarView: View {
 }
 
 /// One stacked row: timestamp range header, EN translation (italic),
-/// JP sentence, romaji reading. `Equatable` so SwiftUI skips unchanged rows
-/// when the transcript re-diffs.
+/// JP sentence with the configured reading annotation. `Equatable` so
+/// SwiftUI skips unchanged rows when the transcript re-diffs.
 struct TranscriptRow: View, Equatable {
     let entry: SessionEntry
-    @AppStorage("ShowPerWordRomaji") private var showPerWordRomaji = true
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotationRaw =
+        ReadingAnnotation.romaji.rawValue
+    private var readingAnnotation: ReadingAnnotation {
+        ReadingAnnotation(rawValue: readingAnnotationRaw) ?? .romaji
+    }
 
     static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.entry == rhs.entry
@@ -394,9 +396,10 @@ struct TranscriptRow: View, Equatable {
                     .foregroundColor(.secondary.opacity(0.3))
             }
 
-            if showPerWordRomaji {
+            if readingAnnotation != .none {
                 RomajiRubyView(
                     text: entry.sentence.text,
+                    annotation: readingAnnotation,
                     surfaceFont: .system(size: 17, weight: .medium),
                     romajiFont: .caption.monospaced(),
                     romajiColor: .secondary.opacity(0.55)
@@ -406,13 +409,6 @@ struct TranscriptRow: View, Equatable {
                 Text(entry.sentence.text)
                     .font(.system(size: 17, weight: .medium))
                     .textSelection(.enabled)
-
-                if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
-                    Text(romaji)
-                        .font(.caption.monospaced())
-                        .foregroundColor(.secondary.opacity(0.55))
-                        .textSelection(.enabled)
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
