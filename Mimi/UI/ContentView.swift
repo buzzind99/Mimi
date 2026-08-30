@@ -211,7 +211,7 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.06))
+        .background(Color.teal.opacity(0.12))
     }
 
     // MARK: - Transcript (stacked subtitle-style rows in one virtualized scroll)
