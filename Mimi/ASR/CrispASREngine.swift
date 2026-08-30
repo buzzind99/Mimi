@@ -30,7 +30,7 @@ import Foundation
 /// the partial gate and silence detection). The two job types interlock
 /// only through the state lock; the C library serializes VAD access to the
 /// cached model internally.
-final class CrispASREngine: Transcriber {
+final class CrispASREngine: ASREngine {
     let isMock = false
 
     /// Called on an arbitrary thread when a decode fails. Throttled by the
@@ -300,7 +300,7 @@ final class CrispASREngine: Transcriber {
         return processedCount
     }
 
-    // MARK: - Transcriber
+    // MARK: - ASREngine
 
     func prepare() throws {
         guard FileManager.default.fileExists(atPath: modelPath) else {

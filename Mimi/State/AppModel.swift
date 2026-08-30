@@ -39,7 +39,7 @@ final class AppModel: ObservableObject {
     let translationQueue = TranslationQueue()
 
     private var capture: SystemAudioCapture?
-    private var engine: Transcriber?
+    private var engine: ASREngine?
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
     private var tickTimer: Timer?
