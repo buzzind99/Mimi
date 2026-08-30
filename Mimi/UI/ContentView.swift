@@ -20,6 +20,7 @@ struct ContentView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
     @ObservedObject var latency: LatencyState
+    @AppStorage("ShowPerWordRomaji") private var showPerWordRomaji = true
     @State private var isAtTop = true
     @State private var pulsing = false
     @State private var scrollPosition = ScrollPosition()
@@ -82,6 +83,12 @@ struct ContentView: View {
             }
             .toggleStyle(.checkbox)
             .help("Floating always-on-top subtitle overlay (click-through, resizable)")
+
+            Toggle(isOn: $showPerWordRomaji) {
+                Label("Align Romaji", systemImage: "character.textbox")
+            }
+            .toggleStyle(.checkbox)
+            .help("Align romaji under each corresponding word")
 
             Spacer()
 
@@ -148,34 +155,58 @@ struct ContentView: View {
                 DispatchQueue.main.async { pulsing = true }
             }
 
-            if live.partial.isEmpty {
-                Text("…")
-                    .font(.system(size: 17, weight: .medium))
-                    .italic()
-                    .foregroundColor(.secondary.opacity(0.35))
-                    .frame(height: 22, alignment: .leading)
+            if showPerWordRomaji {
+                // The ruby replaces both the partial slot and the romaji
+                // slot. minHeight equals their combined height (22 + 4 + 14)
+                // so empty↔filled transitions don't change the row height.
+                Group {
+                    if live.partial.isEmpty {
+                        Text("…")
+                            .font(.system(size: 17, weight: .medium))
+                            .italic()
+                            .foregroundColor(.secondary.opacity(0.35))
+                    } else {
+                        RomajiRubyView(
+                            text: live.partial,
+                            surfaceFont: .system(size: 17, weight: .medium),
+                            romajiFont: .caption.monospaced(),
+                            romajiColor: .secondary.opacity(0.55),
+                            surfaceItalic: true
+                        )
+                        .foregroundColor(.teal)
+                    }
+                }
+                .frame(minHeight: 40, alignment: .topLeading)
             } else {
-                Text(live.partial)
-                    .font(.system(size: 17, weight: .medium))
-                    .italic()
-                    .foregroundColor(.teal)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .frame(height: 22, alignment: .leading)
-            }
-
-            Group {
-                if let romaji = RomajiAnnotator.romaji(for: live.partial) {
-                    Text(romaji)
+                if live.partial.isEmpty {
+                    Text("…")
+                        .font(.system(size: 17, weight: .medium))
+                        .italic()
+                        .foregroundColor(.secondary.opacity(0.35))
+                        .frame(height: 22, alignment: .leading)
+                } else {
+                    Text(live.partial)
+                        .font(.system(size: 17, weight: .medium))
+                        .italic()
+                        .foregroundColor(.teal)
                         .lineLimit(1)
                         .truncationMode(.head)
-                } else {
-                    Text(verbatim: " ")
+                        .frame(height: 22, alignment: .leading)
                 }
+
+                Group {
+                    if let romaji = RomajiAnnotator.romaji(for: live.partial) {
+                        Text(romaji)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    } else {
+                        Text(verbatim: " ")
+                    }
+                }
+                .font(.caption.monospaced())
+                .foregroundColor(.secondary.opacity(0.55))
+                .frame(height: 14, alignment: .leading)
             }
-            .font(.caption.monospaced())
-            .foregroundColor(.secondary.opacity(0.55))
-            .frame(height: 14, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -340,6 +371,11 @@ private struct StatusBarView: View {
 /// when the transcript re-diffs.
 struct TranscriptRow: View, Equatable {
     let entry: SessionEntry
+    @AppStorage("ShowPerWordRomaji") private var showPerWordRomaji = true
+
+    static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
+        lhs.entry == rhs.entry
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -358,15 +394,25 @@ struct TranscriptRow: View, Equatable {
                     .foregroundColor(.secondary.opacity(0.3))
             }
 
-            Text(entry.sentence.text)
-                .font(.system(size: 17, weight: .medium))
+            if showPerWordRomaji {
+                RomajiRubyView(
+                    text: entry.sentence.text,
+                    surfaceFont: .system(size: 17, weight: .medium),
+                    romajiFont: .caption.monospaced(),
+                    romajiColor: .secondary.opacity(0.55)
+                )
                 .textSelection(.enabled)
-
-            if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
-                Text(romaji)
-                    .font(.caption.monospaced())
-                    .foregroundColor(.secondary.opacity(0.55))
+            } else {
+                Text(entry.sentence.text)
+                    .font(.system(size: 17, weight: .medium))
                     .textSelection(.enabled)
+
+                if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
+                    Text(romaji)
+                        .font(.caption.monospaced())
+                        .foregroundColor(.secondary.opacity(0.55))
+                        .textSelection(.enabled)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

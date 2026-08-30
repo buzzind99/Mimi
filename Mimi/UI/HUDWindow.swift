@@ -160,6 +160,7 @@ struct HUDView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var live: LivePartialState
     @ObservedObject var panel: HUDPanel
+    @AppStorage("ShowPerWordRomaji") private var showPerWordRomaji = true
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
     var fixedWidth: CGFloat?
@@ -217,15 +218,26 @@ struct HUDView: View {
         Group {
             if !live.partial.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(live.partial)
-                        .font(.system(size: 15))
+                    if showPerWordRomaji {
+                        RomajiRubyView(
+                            text: live.partial,
+                            surfaceFont: .system(size: 15),
+                            romajiFont: .system(size: 11, design: .monospaced),
+                            romajiColor: .secondary
+                        )
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let romaji = RomajiAnnotator.romaji(for: live.partial) {
-                        Text(romaji)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(live.partial)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let romaji = RomajiAnnotator.romaji(for: live.partial) {
+                            Text(romaji)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             } else {
@@ -273,20 +285,34 @@ struct HUDView: View {
 
     private func entryView(_ entry: SessionEntry) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if showPerWordRomaji {
                 Text(SessionClock.timestamp(entry.sentence.startS))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
-                Text(entry.sentence.text)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
-                Text(romaji)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary.opacity(0.8))
-                    .fixedSize(horizontal: false, vertical: true)
+                RomajiRubyView(
+                    text: entry.sentence.text,
+                    surfaceFont: .system(size: 14),
+                    romajiFont: .system(size: 11, design: .monospaced),
+                    romajiColor: .secondary.opacity(0.8)
+                )
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(SessionClock.timestamp(entry.sentence.startS))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                    Text(entry.sentence.text)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let romaji = RomajiAnnotator.romaji(for: entry.sentence.text) {
+                    Text(romaji)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary.opacity(0.8))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if let en = entry.joinedTranslations {
                 Text(en)
