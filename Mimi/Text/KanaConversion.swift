@@ -44,10 +44,11 @@ enum KanaConversion {
                     i += next == "'" ? 2 : 1
                     continue
                 }
-                // Wapuro writes a moraic ん before a vowel as "nn" ("kanna").
+                // Wapuro writes a moraic ん before a vowel as "nn" ("kanna");
+                // the second n starts the next syllable ("na" → な).
                 if next == "n" {
                     kana += "ん"
-                    i += 2
+                    i += 1
                     continue
                 }
                 // ん before a consonant (んた, んで…), but "ny" belongs to a
@@ -59,10 +60,12 @@ enum KanaConversion {
                 }
                 return nil
             }
-            // Doubled consonant: sokuon ("ikki", "roppyaku"). Doubled vowels
-            // and "nn" compose elsewhere.
+            // Doubled consonant: sokuon ("ikki", "roppyaku"), including the
+            // ち-row doubling where っ + ち is spelled "tc…" ("itchi").
+            // Doubled vowels and "nn" compose elsewhere.
             if i + 1 < chars.count,
-               chars[i + 1] == chars[i],
+               chars[i + 1] == chars[i]
+               || (chars[i] == "t" && chars[i + 1] == "c"),
                !"aiueon".contains(chars[i])
             {
                 kana += "っ"
@@ -77,8 +80,9 @@ enum KanaConversion {
     }
 
     /// Three-character forms: three-letter one-mora spellings ("shi",
-    /// "chi", "tsu"), digraphs (きゃ row), geminate+digraph ("cchi" for
-    /// っち), and three-letter foreign spellings.
+    /// "chi", "tsu"), digraphs (きゃ row), and three-letter foreign
+    /// spellings. Sokuon prefixes ("cch"/"tch" for っ + ち-row) are handled
+    /// by the doubling branch before this table.
     private static let kanaTriples: [String: String] = [
         "shi": "し", "chi": "ち", "tsu": "つ",
         "kya": "きゃ", "kyu": "きゅ", "kyo": "きょ",
@@ -91,7 +95,6 @@ enum KanaConversion {
         "gya": "ぎゃ", "gyu": "ぎゅ", "gyo": "ぎょ",
         "bya": "びゃ", "byu": "びゅ", "byo": "びょ",
         "pya": "ぴゃ", "pyu": "ぴゅ", "pyo": "ぴょ",
-        "cch": "っち", "tch": "っち",
         "tsa": "つぁ", "tsi": "つぃ", "tse": "つぇ", "tso": "つぉ"
     ]
 
