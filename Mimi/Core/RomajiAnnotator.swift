@@ -76,6 +76,19 @@ enum RomajiAnnotator {
         // literal "~tsu" suffix (e.g. みよっか → "miyo~tsu" | "ka"). Consume it
         // and geminate the next token's leading consonant instead.
         var carriesSokuon = false
+        // A number token (一, 十, 8, 20…) is held back one token: when the
+        // next token is a counter with an unvoiced onset, the pair fuses
+        // with sokuon gemination (一回 → "ikkai", 一本 → "ippon") instead
+        // of the tokenizer's plain "ichi kai".
+        var pendingNumber: (surface: String, romaji: String)?
+
+        func appendNumber(_ pending: (surface: String, romaji: String)) {
+            segments.append(RomajiSegment(
+                surface: pending.surface,
+                romaji: romanize(surface: pending.surface, reading: pending.romaji)
+            ))
+            lastTokenIndex = segments.count - 1
+        }
 
         func appendGap(to end: Int) {
             guard cursor < end else { return }
@@ -97,6 +110,11 @@ enum RomajiAnnotator {
             guard tokenType != [] else { break }
             let tokenRange = CFStringTokenizerGetCurrentTokenRange(tokenizer)
             guard tokenRange.length > 0 else { break }
+            // Don't fuse a held-back number across a gap.
+            if pendingNumber != nil, tokenRange.location > cursor {
+                appendNumber(pendingNumber!)
+                pendingNumber = nil
+            }
             appendGap(to: tokenRange.location)
 
             let surface = nsText.substring(
@@ -113,18 +131,41 @@ enum RomajiAnnotator {
                     reading = String(reading.dropLast(4))
                     endsWithSokuon = true
                 }
+                // The ヴ row is transcribed with a morpheme break
+                // (ヴァイオリン → "vu~aiorin"); fuse it into the proper
+                // Hepburn spelling ("vaiorin").
+                reading = reading.replacingOccurrences(of: "vu~", with: "v")
                 reading = reading.replacingOccurrences(of: "~", with: "")
             } else {
                 // Digits, Latin runs, symbols: keep the surface text as-is.
                 reading = surface
             }
 
+            if let pending = pendingNumber {
+                pendingNumber = nil
+                if let fused = fuseNumber(number: pending, counterReading: reading) {
+                    segments.append(RomajiSegment(surface: pending.surface + surface, romaji: fused))
+                    lastTokenIndex = segments.count - 1
+                    carriesSokuon = endsWithSokuon
+                    cursor = tokenRange.location + tokenRange.length
+                    continue
+                }
+                // The tokenizer pre-assimilates 本's counter reading to
+                // "pon" even where no p-sound occurs (二本 → "ni hon",
+                // 三本 → "san bon"); restore the base sound.
+                if reading.lowercased().hasPrefix("pon") {
+                    let voiced = ["san", "sen", "man"].contains { pending.romaji.hasSuffix($0) }
+                    reading = (voiced ? "bon" : "hon") + reading.dropFirst(3)
+                }
+                appendNumber(pending)
+            }
+
             if carriesSokuon {
-                if let doubled = geminate(reading) {
-                    // Fuse with the previous word — the split is artificial.
-                    if let at = lastTokenIndex {
-                        segments[at].romaji = (segments[at].romaji ?? "") + doubled
-                    }
+                if let doubled = geminate(reading), let at = lastTokenIndex {
+                    // Fuse with the previous word — the split is artificial —
+                    // absorbing the counter's glyphs into the run's surface.
+                    segments[at].romaji = (segments[at].romaji ?? "") + doubled
+                    segments[at].surface += surface
                     reading = ""
                 } else if let at = lastTokenIndex {
                     // Next token can't take a geminate (vowel-initial,
@@ -133,14 +174,23 @@ enum RomajiAnnotator {
                 }
             }
             if !reading.isEmpty {
-                let segment = RomajiSegment(
-                    surface: surface, romaji: romanize(surface: surface, reading: reading)
-                )
-                segments.append(segment)
-                lastTokenIndex = segments.count - 1
+                if !endsWithSokuon,
+                   let numReading = numberReading(surface: surface, reading: reading) {
+                    pendingNumber = (surface, numReading)
+                } else {
+                    let segment = RomajiSegment(
+                        surface: surface, romaji: romanize(surface: surface, reading: reading)
+                    )
+                    segments.append(segment)
+                    lastTokenIndex = segments.count - 1
+                }
             }
             carriesSokuon = endsWithSokuon
             cursor = tokenRange.location + tokenRange.length
+        }
+        if let pending = pendingNumber {
+            appendNumber(pending)
+            pendingNumber = nil
         }
         if carriesSokuon, let at = lastTokenIndex {
             segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
@@ -151,15 +201,115 @@ enum RomajiAnnotator {
     }
 
     /// Doubles the leading consonant of `reading` to realize a preceding
-    /// sokuon (か→"kka", さ→"ssa", ち→"cchi", ぱ→"ppa"). Returns `nil` when
-    /// the reading can't take a geminate (vowel-initial, empty, digits…).
+    /// sokuon (か→"kka", さ→"ssa", ち→"cchi", ぱ→"ppa"). The は行 and ば行
+    /// realize the geminate as the p-series (ひ→"ppiki", ば→"ppai",
+    /// ふ→"ppuku"). Returns `nil` when the reading can't take a geminate
+    /// (vowel-initial, empty, digits…).
     private static func geminate(_ reading: String) -> String? {
-        guard let first = reading.first else { return nil }
+        guard let first = reading.first?.lowercased().first else { return nil }
         if reading.lowercased().hasPrefix("ch") {
             return "c" + reading
         }
-        guard "kstpc".contains(String(first).lowercased()) else { return nil }
-        return String(first) + reading
+        switch first {
+        case "h", "b", "f":
+            return "pp" + reading.dropFirst()
+        case "k", "s", "t", "p", "c":
+            return String(reading.first!) + reading
+        default:
+            return nil
+        }
+    }
+
+    /// Digits whose readings geminate before a counter, with the reading
+    /// used when fusing (1回 → "ikkai", 8歳 → "hassai", 600回 →
+    /// "roppyakkai"). Digits outside this table never geminate but still
+    /// count as numbers for counter assimilation.
+    private static let digitNumberReadings: [String: String] = [
+        "1": "ichi", "2": "ni", "3": "san", "4": "yon", "5": "go",
+        "6": "roku", "7": "nana", "8": "hachi", "9": "kyuu", "10": "juu",
+        "20": "nijuu", "30": "sanjuu", "40": "yonjuu", "50": "gojuu",
+        "60": "rokujuu", "70": "nanajuu", "80": "hachijuu", "90": "kyuujuu",
+        "100": "hyaku", "200": "nihyaku", "300": "sanbyaku", "400": "yonhyaku",
+        "500": "gohyaku", "600": "roppyaku", "700": "nanahyaku",
+        "800": "happyaku", "900": "kyuuhyaku", "1000": "sen", "10000": "man"
+    ]
+
+    /// Calendar days where the tokenizer splits the native numeral from a
+    /// 日 read "ka" (二日 → "futa"|"ka", 六日 → "mui"|"ka", 二十日 →
+    /// "hatsu"|"ka"): the stems fused with "ka". The sokuon-fusing days
+    /// (三日 → "mi~tsu"|"ka") are handled by the existing sokuon path.
+    private static let dateCounterStems: [String: String] = [
+        "futa": "futsu", "mi": "mi", "yo": "yo", "itsu": "itsu",
+        "mui": "mui", "nana": "nana", "you": "you", "kokono": "kokono",
+        "too": "tou", "hatsu": "hatsu"
+    ]
+
+    /// 四日 and 七日 keep the plain "nichi" reading of 日; fuse the pair
+    /// into the correct calendar forms.
+    private static let datePairOverrides: [String: String] = [
+        "yon nichi": "yokka", "nana nichi": "nanoka"
+    ]
+
+    /// Returns the romaji a number token is held back under, or nil when
+    /// the token isn't a number that may fuse with a following counter.
+    private static func numberReading(surface: String, reading: String) -> String? {
+        guard surface.range(
+            of: "^[一二三四五六七八九十百千万0-9]+$", options: .regularExpression
+        ) != nil else { return nil }
+        let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false)
+            ?? surface
+        if let mapped = digitNumberReadings[ascii] { return mapped }
+        return reading.lowercased()
+    }
+
+    /// Fuses a held-back number with the next token's reading, returning
+    /// the combined romaji, or nil when the pair reads as separate words.
+    private static func fuseNumber(
+        number: (surface: String, romaji: String),
+        counterReading: String
+    ) -> String? {
+        let lower = counterReading.lowercased()
+        guard !lower.isEmpty else { return nil }
+
+        if let fused = datePairOverrides[number.romaji + " " + lower] {
+            return fused
+        }
+
+        // 二日/五日/…: only the "ka" reading of 日 participates; 三日 and
+        // 四日 geminate (mikka, yokka), the rest elide or keep their mora.
+        if let stem = dateCounterStems[number.romaji] {
+            guard lower == "ka" else { return nil }
+            switch number.romaji {
+            case "mi", "yo":
+                return stem + (geminate("ka") ?? "ka")
+            default:
+                return stem + "ka"
+            }
+        }
+
+        guard let stem = geminationStem(of: number.romaji),
+              let doubled = geminate(counterReading) else { return nil }
+        // Lexical, not phonological: 六歳 "rokusai", 六等 "rokutou" and
+        // 六千 "rokusen" keep their plain readings.
+        if number.romaji == "roku",
+           ["sai", "tou", "sen"].contains(where: lower.hasPrefix) {
+            return nil
+        }
+        return stem + doubled
+    }
+
+    /// Drops the number's closing mora so the counter can geminate
+    /// (ichi → "i", roku → "ro", hyaku → "hya", juu → "ju").
+    private static func geminationStem(of romaji: String) -> String? {
+        for suffix in ["chi", "tsu", "ku"] where romaji.hasSuffix(suffix) {
+            return String(romaji.dropLast(suffix.count))
+        }
+        // じゅう geminates to じゅっ: only the trailing vowel elides
+        // (juu → "ju", nijuu → "niju").
+        if romaji.hasSuffix("juu") {
+            return String(romaji.dropLast(1))
+        }
+        return nil
     }
 
     /// Common lexicalized greetings where the topic particle is fused into a
@@ -168,7 +318,9 @@ enum RomajiAnnotator {
     private static let lexicalOverrides = [
         "こんにちは": "konnichiwa",
         "こんばんは": "konbanwa",
-        "抹茶": "matcha"
+        "抹茶": "matcha",
+        // Fused by the tokenizer under its family reading ("mimoto").
+        "三本": "sanbon"
     ]
 
     /// The tokenizer emits mixed wapuro/macron vowels ("tou", "tawā");
@@ -184,8 +336,12 @@ enum RomajiAnnotator {
         }
         let lower = reading.lowercased()
         // The tokenizer spells っち as "tch" (めっちゃ→"metcha"); normalize to
-        // the doubled-consonant "cch" (meccha, kocchi, macchi).
-        let sokuonCorrected = reading.replacingOccurrences(of: "tch", with: "cch")
+        // the doubled-consonant "cch" (meccha, kocchi, macchi). ん + な行 is
+        // written "nn" in Hepburn (かん'な → kanna), not with an apostrophe;
+        // ん + vowels/や行 keeps the apostrophe (まん'いん → man'in).
+        let sokuonCorrected = reading
+            .replacingOccurrences(of: "tch", with: "cch")
+            .replacingOccurrences(of: "n'n", with: "nn")
         let particleCorrected: String
         switch surface {
         case "は":
