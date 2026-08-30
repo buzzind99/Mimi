@@ -51,43 +51,21 @@ private struct FlowLayout: Layout {
     }
 }
 
-/// Reading annotation mode. Romaji and furigana are mutually exclusive —
-/// exactly one (or neither) is shown; a shared UserDefaults key backs it.
-enum ReadingAnnotation: String, CaseIterable, Identifiable {
-    case none
-    case romaji
-    case furigana
-
-    static let storageKey = "ReadingAnnotation"
-
-    var id: String {
-        rawValue
-    }
-
-    var label: String {
-        switch self {
-        case .none: "None"
-        case .romaji: "Romaji"
-        case .furigana: "Furigana"
-        }
-    }
-}
-
 /// Ruby-style annotation: each kana/kanji word renders with its romaji
 /// beneath it (or kana furigana above it), wrapping like normal text. Runs
 /// without a distinct reading (punctuation, Latin, digits; kanji runs whose
 /// romaji doesn't reverse to kana) render inline as plain text, so their
 /// surfaces stay top-aligned with annotated words on the same line.
-struct RomajiRubyView: View {
+struct RubyTextView: View {
     let text: String
     var annotation: ReadingAnnotation = .romaji
     var surfaceFont: Font
-    var romajiFont: Font
-    var romajiColor: Color
+    var annotationFont: Font
+    var annotationColor: Color
     var surfaceItalic = false
 
     var body: some View {
-        if let segments = RomajiAnnotator.segments(for: text) {
+        if let segments = ReadingAnnotator.segments(for: text) {
             if annotation != .none,
                segments.contains(where: { reading(for: $0) != nil && reading(for: $0) != $0.surface })
             {
@@ -97,8 +75,8 @@ struct RomajiRubyView: View {
                             VStack(spacing: 0) {
                                 if annotation == .furigana {
                                     Text(verbatim: note)
-                                        .font(romajiFont)
-                                        .foregroundStyle(romajiColor)
+                                        .font(annotationFont)
+                                        .foregroundStyle(annotationColor)
                                         .lineLimit(1)
                                     Text(verbatim: segment.surface)
                                         .font(surfaceFont)
@@ -108,8 +86,8 @@ struct RomajiRubyView: View {
                                         .font(surfaceFont)
                                         .italic(surfaceItalic)
                                     Text(verbatim: note)
-                                        .font(romajiFont)
-                                        .foregroundStyle(romajiColor)
+                                        .font(annotationFont)
+                                        .foregroundStyle(annotationColor)
                                         .lineLimit(1)
                                 }
                             }
@@ -127,7 +105,7 @@ struct RomajiRubyView: View {
         }
     }
 
-    private func reading(for segment: RomajiSegment) -> String? {
+    private func reading(for segment: ReadingSegment) -> String? {
         annotation == .furigana ? segment.furigana : segment.romaji
     }
 
@@ -136,11 +114,11 @@ struct RomajiRubyView: View {
     /// line to keep its surface on the same baseline as annotated words.
     /// (Romaji sits below the surface, where top alignment already works.)
     @ViewBuilder
-    private func plainSegment(_ segment: RomajiSegment) -> some View {
+    private func plainSegment(_ segment: ReadingSegment) -> some View {
         if annotation == .furigana {
             VStack(spacing: 0) {
                 Text(verbatim: " ")
-                    .font(romajiFont)
+                    .font(annotationFont)
                     .lineLimit(1)
                 Text(verbatim: segment.surface)
                     .font(surfaceFont)

@@ -6,7 +6,7 @@ import Foundation
 /// annotations). A run whose romaji equals its surface (Latin, digits) is
 /// self-transcribed; renderers skip annotating those. `furigana` is only
 /// populated for kanji-bearing runs whose romaji reverses cleanly to kana.
-final class RomajiSegment {
+final class ReadingSegment {
     var surface: String
     var romaji: String?
     var furigana: String?
@@ -21,16 +21,16 @@ final class RomajiSegment {
 /// Produces romaji (Hepburn-style Latin transcription) and kana furigana for
 /// Japanese text using the system tokenizer's built-in `LatinTranscription`
 /// attribute. No dependencies, no network, no bundled dictionaries.
-enum RomajiAnnotator {
+enum ReadingAnnotator {
     private static let segmentCache = NSCache<NSString, NSArray>()
 
     /// Returns per-run segments for `text` (surface + romaji + furigana), or
     /// `nil` for empty input. Cheap (microseconds per sentence) and cached.
-    static func segments(for text: String) -> [RomajiSegment]? {
+    static func segments(for text: String) -> [ReadingSegment]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        if let cached = segmentCache.object(forKey: trimmed as NSString) as? [RomajiSegment] {
+        if let cached = segmentCache.object(forKey: trimmed as NSString) as? [ReadingSegment] {
             return cached
         }
 
@@ -39,7 +39,7 @@ enum RomajiAnnotator {
         return result
     }
 
-    private static func transcribe(_ text: String) -> [RomajiSegment] {
+    private static func transcribe(_ text: String) -> [ReadingSegment] {
         let nsText = text as NSString
         let locale = NSLocale(localeIdentifier: "ja_JP") as CFLocale
         guard let tokenizer = CFStringTokenizerCreate(
@@ -50,7 +50,7 @@ enum RomajiAnnotator {
             locale
         ) else { return [] }
 
-        var segments: [RomajiSegment] = []
+        var segments: [ReadingSegment] = []
         // Index of the most recent token segment (gaps don't count): sokuon
         // fusion must land on the word, not on intervening punctuation.
         var lastTokenIndex: Int?
@@ -67,7 +67,7 @@ enum RomajiAnnotator {
 
         func appendNumber(_ pending: (surface: String, romaji: String)) {
             let romaji = romanize(surface: pending.surface, reading: pending.romaji)
-            segments.append(RomajiSegment(
+            segments.append(ReadingSegment(
                 surface: pending.surface,
                 romaji: romaji,
                 furigana: furigana(surface: pending.surface, romaji: romaji)
@@ -86,7 +86,7 @@ enum RomajiAnnotator {
                     last.surface += " "
                 }
             } else {
-                segments.append(RomajiSegment(surface: gap, romaji: nil))
+                segments.append(ReadingSegment(surface: gap, romaji: nil))
             }
         }
 
@@ -112,7 +112,7 @@ enum RomajiAnnotator {
                 pendingNumber = nil
                 if let fused = fuseNumber(number: pending, counterReading: reading) {
                     let fusedSurface = pending.surface + surface
-                    segments.append(RomajiSegment(
+                    segments.append(ReadingSegment(
                         surface: fusedSurface,
                         romaji: fused,
                         furigana: furigana(surface: fusedSurface, romaji: fused)
@@ -158,7 +158,7 @@ enum RomajiAnnotator {
                     pendingNumber = (surface, numReading)
                 } else {
                     let romaji = romanize(surface: surface, reading: reading)
-                    segments.append(RomajiSegment(
+                    segments.append(ReadingSegment(
                         surface: surface,
                         romaji: romaji,
                         furigana: furigana(surface: surface, romaji: romaji)

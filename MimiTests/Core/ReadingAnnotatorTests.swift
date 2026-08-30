@@ -1,10 +1,10 @@
 @testable import Mimi
 import XCTest
 
-/// Tests the public `RomajiAnnotator.segments(for:)` entry point. Expected
+/// Tests the public `ReadingAnnotator.segments(for:)` entry point. Expected
 /// values are pinned to the system tokenizer's `LatinTranscription` output
 /// as verified on macOS 15+.
-final class RomajiAnnotatorTests: XCTestCase {
+final class ReadingAnnotatorTests: XCTestCase {
 
     // MARK: - Fixtures
 
@@ -32,20 +32,20 @@ final class RomajiAnnotatorTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func firstSegment(of text: String) -> RomajiSegment? {
-        RomajiAnnotator.segments(for: text)?.first
+    private func firstSegment(of text: String) -> ReadingSegment? {
+        ReadingAnnotator.segments(for: text)?.first
     }
 
     // MARK: - Empty input
 
     func test_segments_whenTextIsEmpty_shouldReturnNil() {
-        let result = RomajiAnnotator.segments(for: emptyText)
+        let result = ReadingAnnotator.segments(for: emptyText)
 
         XCTAssertNil(result)
     }
 
     func test_segments_whenTextIsWhitespaceOnly_shouldReturnNil() {
-        let result = RomajiAnnotator.segments(for: whitespaceText)
+        let result = ReadingAnnotator.segments(for: whitespaceText)
 
         XCTAssertNil(result)
     }
@@ -65,7 +65,7 @@ final class RomajiAnnotatorTests: XCTestCase {
     }
 
     func test_segments_whenParticleSurface_shouldRomanizeTopicParticle() {
-        let segments = RomajiAnnotator.segments(for: particleSentence)
+        let segments = ReadingAnnotator.segments(for: particleSentence)
         let particle = segments?.first { $0.surface == particleSurface }
 
         let romaji = particle?.romaji
@@ -74,7 +74,7 @@ final class RomajiAnnotatorTests: XCTestCase {
     }
 
     func test_segments_whenPunctuatedSentence_shouldSplitIntoWordRuns() {
-        let segments = RomajiAnnotator.segments(for: weatherSentence)
+        let segments = ReadingAnnotator.segments(for: weatherSentence)
         let surfaces = segments?.map(\.surface)
 
         XCTAssertEqual(surfaces, expectedWeatherSurfaces)
@@ -103,7 +103,7 @@ final class RomajiAnnotatorTests: XCTestCase {
     // MARK: - Number + counter fusion
 
     func test_segments_whenNumberFusesWithCounter_shouldEmitSingleFusedSegment() {
-        let segments = RomajiAnnotator.segments(for: numberCounter)
+        let segments = ReadingAnnotator.segments(for: numberCounter)
 
         let surface = segments?.first?.surface
 
@@ -137,7 +137,7 @@ final class RomajiAnnotatorTests: XCTestCase {
     }
 
     func test_segments_whenPunctuationRun_shouldLeaveRomajiNil() {
-        let segments = RomajiAnnotator.segments(for: weatherSentence)
+        let segments = ReadingAnnotator.segments(for: weatherSentence)
         let punctuation = segments?.last
 
         let romaji = punctuation?.romaji

@@ -224,12 +224,12 @@ struct HUDView: View {
             if !live.partial.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     if readingAnnotation != .none {
-                        RomajiRubyView(
+                        RubyTextView(
                             text: live.partial,
                             annotation: readingAnnotation,
                             surfaceFont: .system(size: 15),
-                            romajiFont: .system(size: 11, design: .monospaced),
-                            romajiColor: .secondary
+                            annotationFont: .system(size: 11, design: .monospaced),
+                            annotationColor: .secondary
                         )
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
@@ -289,12 +289,12 @@ struct HUDView: View {
                 Text(SessionClock.timestamp(entry.sentence.startS))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
-                RomajiRubyView(
+                RubyTextView(
                     text: entry.sentence.text,
                     annotation: readingAnnotation,
                     surfaceFont: .system(size: 14),
-                    romajiFont: .system(size: 11, design: .monospaced),
-                    romajiColor: .secondary.opacity(0.8)
+                    annotationFont: .system(size: 11, design: .monospaced),
+                    annotationColor: .secondary.opacity(0.8)
                 )
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)

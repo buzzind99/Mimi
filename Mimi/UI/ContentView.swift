@@ -176,12 +176,12 @@ struct ContentView: View {
                             .italic()
                             .foregroundColor(.secondary.opacity(0.35))
                     } else {
-                        RomajiRubyView(
+                        RubyTextView(
                             text: live.partial,
                             annotation: readingAnnotation,
                             surfaceFont: .system(size: 17, weight: .medium),
-                            romajiFont: .caption.monospaced(),
-                            romajiColor: .secondary.opacity(0.55),
+                            annotationFont: .caption.monospaced(),
+                            annotationColor: .secondary.opacity(0.55),
                             surfaceItalic: true
                         )
                         .foregroundColor(.teal)
@@ -397,12 +397,12 @@ struct TranscriptRow: View, Equatable {
             }
 
             if readingAnnotation != .none {
-                RomajiRubyView(
+                RubyTextView(
                     text: entry.sentence.text,
                     annotation: readingAnnotation,
                     surfaceFont: .system(size: 17, weight: .medium),
-                    romajiFont: .caption.monospaced(),
-                    romajiColor: .secondary.opacity(0.55)
+                    annotationFont: .caption.monospaced(),
+                    annotationColor: .secondary.opacity(0.55)
                 )
                 .textSelection(.enabled)
             } else {
