@@ -1,48 +1,31 @@
 import Foundation
 
-/// One rendered run of text plus its optional romaji annotation. The
+/// One rendered run of text plus its optional romaji/kana annotations. The
 /// `surface` strings concatenate back to the original text (gaps between
-/// tokenizer tokens — punctuation, symbols — become plain runs with a nil
-/// `romaji`). A run whose romaji equals its surface (Latin, digits) is
-/// self-transcribed; renderers skip annotating those.
+/// tokenizer tokens — punctuation, symbols — become plain runs with nil
+/// annotations). A run whose romaji equals its surface (Latin, digits) is
+/// self-transcribed; renderers skip annotating those. `furigana` is only
+/// populated for kanji-bearing runs whose romaji reverses cleanly to kana.
 final class RomajiSegment {
     var surface: String
     var romaji: String?
+    var furigana: String?
 
-    init(surface: String, romaji: String?) {
+    init(surface: String, romaji: String?, furigana: String? = nil) {
         self.surface = surface
         self.romaji = romaji
+        self.furigana = furigana
     }
 }
 
-/// Produces romaji (Hepburn-style Latin transcription) for Japanese text using
-/// the system tokenizer's built-in `LatinTranscription` attribute. No
-/// dependencies, no network, no bundled dictionaries.
+/// Produces romaji (Hepburn-style Latin transcription) and kana furigana for
+/// Japanese text using the system tokenizer's built-in `LatinTranscription`
+/// attribute. No dependencies, no network, no bundled dictionaries.
 enum RomajiAnnotator {
-    private static let cache = NSCache<NSString, NSString>()
     private static let segmentCache = NSCache<NSString, NSArray>()
 
-    /// Returns space-separated romaji for `text`, or `nil` if nothing
-    /// transcribable is present. Cheap (microseconds per sentence) and cached.
-    static func romaji(for text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        if let cached = cache.object(forKey: trimmed as NSString) {
-            return cached as String
-        }
-
-        let joined = segments(for: trimmed)?
-            .compactMap { $0.romaji }
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespaces)
-        guard let joined, !joined.isEmpty else { return nil }
-        cache.setObject(joined as NSString, forKey: trimmed as NSString)
-        return joined
-    }
-
-    /// Returns per-run segments for `text` (surface + romaji), or `nil` for
-    /// empty input. Cheap (microseconds per sentence) and cached.
+    /// Returns per-run segments for `text` (surface + romaji + furigana), or
+    /// `nil` for empty input. Cheap (microseconds per sentence) and cached.
     static func segments(for text: String) -> [RomajiSegment]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -59,13 +42,13 @@ enum RomajiAnnotator {
     private static func transcribe(_ text: String) -> [RomajiSegment] {
         let nsText = text as NSString
         let locale = NSLocale(localeIdentifier: "ja_JP") as CFLocale
-        let tokenizer = CFStringTokenizerCreate(
+        guard let tokenizer = CFStringTokenizerCreate(
             kCFAllocatorDefault,
             text as CFString,
             CFRange(location: 0, length: nsText.length),
             kCFStringTokenizerUnitWord,
             locale
-        )
+        ) else { return [] }
 
         var segments: [RomajiSegment] = []
         // Index of the most recent token segment (gaps don't count): sokuon
@@ -83,9 +66,11 @@ enum RomajiAnnotator {
         var pendingNumber: (surface: String, romaji: String)?
 
         func appendNumber(_ pending: (surface: String, romaji: String)) {
+            let romaji = romanize(surface: pending.surface, reading: pending.romaji)
             segments.append(RomajiSegment(
                 surface: pending.surface,
-                romaji: romanize(surface: pending.surface, reading: pending.romaji)
+                romaji: romaji,
+                furigana: furigana(surface: pending.surface, romaji: romaji)
             ))
             lastTokenIndex = segments.count - 1
         }
@@ -121,30 +106,17 @@ enum RomajiAnnotator {
                 with: NSRange(location: tokenRange.location, length: tokenRange.length)
             )
 
-            var reading: String
-            var endsWithSokuon = false
-            if let transcription = CFStringTokenizerCopyCurrentTokenAttribute(
-                tokenizer, kCFStringTokenizerAttributeLatinTranscription
-            ) as? String {
-                reading = transcription
-                if reading.lowercased().hasSuffix("~tsu") {
-                    reading = String(reading.dropLast(4))
-                    endsWithSokuon = true
-                }
-                // The ヴ row is transcribed with a morpheme break
-                // (ヴァイオリン → "vu~aiorin"); fuse it into the proper
-                // Hepburn spelling ("vaiorin").
-                reading = reading.replacingOccurrences(of: "vu~", with: "v")
-                reading = reading.replacingOccurrences(of: "~", with: "")
-            } else {
-                // Digits, Latin runs, symbols: keep the surface text as-is.
-                reading = surface
-            }
+            var (reading, endsWithSokuon) = tokenReading(tokenizer: tokenizer, surface: surface)
 
             if let pending = pendingNumber {
                 pendingNumber = nil
                 if let fused = fuseNumber(number: pending, counterReading: reading) {
-                    segments.append(RomajiSegment(surface: pending.surface + surface, romaji: fused))
+                    let fusedSurface = pending.surface + surface
+                    segments.append(RomajiSegment(
+                        surface: fusedSurface,
+                        romaji: fused,
+                        furigana: furigana(surface: fusedSurface, romaji: fused)
+                    ))
                     lastTokenIndex = segments.count - 1
                     carriesSokuon = endsWithSokuon
                     cursor = tokenRange.location + tokenRange.length
@@ -166,22 +138,31 @@ enum RomajiAnnotator {
                     // absorbing the counter's glyphs into the run's surface.
                     segments[at].romaji = (segments[at].romaji ?? "") + doubled
                     segments[at].surface += surface
+                    segments[at].furigana = furigana(
+                        surface: segments[at].surface, romaji: segments[at].romaji ?? ""
+                    )
                     reading = ""
                 } else if let at = lastTokenIndex {
                     // Next token can't take a geminate (vowel-initial,
                     // digit…): keep the sokuon as a spoken "tsu".
                     segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
+                    segments[at].furigana = furigana(
+                        surface: segments[at].surface, romaji: segments[at].romaji ?? ""
+                    )
                 }
             }
             if !reading.isEmpty {
                 if !endsWithSokuon,
-                   let numReading = numberReading(surface: surface, reading: reading) {
+                   let numReading = numberReading(surface: surface, reading: reading)
+                {
                     pendingNumber = (surface, numReading)
                 } else {
-                    let segment = RomajiSegment(
-                        surface: surface, romaji: romanize(surface: surface, reading: reading)
-                    )
-                    segments.append(segment)
+                    let romaji = romanize(surface: surface, reading: reading)
+                    segments.append(RomajiSegment(
+                        surface: surface,
+                        romaji: romaji,
+                        furigana: furigana(surface: surface, romaji: romaji)
+                    ))
                     lastTokenIndex = segments.count - 1
                 }
             }
@@ -198,6 +179,30 @@ enum RomajiAnnotator {
         appendGap(to: nsText.length)
 
         return segments
+    }
+
+    /// The tokenizer's Latin transcription for the current token, with the
+    /// "~tsu" straddling-sokuon marker consumed and the ヴ row's morpheme
+    /// break fused ("vu~aiorin" → "vaiorin"). Falls back to the surface text
+    /// for tokens without a transcription (digits, Latin runs, symbols).
+    private static func tokenReading(
+        tokenizer: CFStringTokenizer,
+        surface: String
+    ) -> (reading: String, endsWithSokuon: Bool) {
+        guard let transcription = CFStringTokenizerCopyCurrentTokenAttribute(
+            tokenizer, kCFStringTokenizerAttributeLatinTranscription
+        ) as? String else {
+            return (surface, false)
+        }
+        var reading = transcription
+        var endsWithSokuon = false
+        if reading.lowercased().hasSuffix("~tsu") {
+            reading = String(reading.dropLast(4))
+            endsWithSokuon = true
+        }
+        reading = reading.replacingOccurrences(of: "vu~", with: "v")
+        reading = reading.replacingOccurrences(of: "~", with: "")
+        return (reading, endsWithSokuon)
     }
 
     /// Doubles the leading consonant of `reading` to realize a preceding
@@ -258,7 +263,9 @@ enum RomajiAnnotator {
         ) != nil else { return nil }
         let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false)
             ?? surface
-        if let mapped = digitNumberReadings[ascii] { return mapped }
+        if let mapped = digitNumberReadings[ascii] {
+            return mapped
+        }
         return reading.lowercased()
     }
 
@@ -292,7 +299,8 @@ enum RomajiAnnotator {
         // Lexical, not phonological: 六歳 "rokusai", 六等 "rokutou" and
         // 六千 "rokusen" keep their plain readings.
         if number.romaji == "roku",
-           ["sai", "tou", "sen"].contains(where: lower.hasPrefix) {
+           ["sai", "tou", "sen"].contains(where: lower.hasPrefix)
+        {
             return nil
         }
         return stem + doubled
@@ -356,4 +364,131 @@ enum RomajiAnnotator {
         return particleCorrected.map { macronExpansion[$0] ?? String($0) }
             .joined()
     }
+
+    /// Kana furigana for a run: only kanji-bearing surfaces are annotated
+    /// (kana, katakana loanwords and particles need no furigana), and only
+    /// when the run's romaji reverses cleanly to kana (fused digit+counter
+    /// runs containing digits, or stray symbols, stay unannotated).
+    private static func furigana(surface: String, romaji: String) -> String? {
+        guard containsKanji(surface) else { return nil }
+        return kanaReading(from: romaji)
+    }
+
+    private static func containsKanji(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            (0x4E00 ... 0x9FFF).contains(scalar.value)
+                || (0x3400 ... 0x4DBF).contains(scalar.value)
+                || scalar.value == 0x3005 // 々
+        }
+    }
+
+    /// Wapuro-romaji → hiragana. Longest-prefix matching over the annotator's
+    /// already-normalized romaji (macrons expanded, "tch"→"cch", particles).
+    /// Returns nil when any character can't convert (digits, Latin, stray
+    /// symbols), so unmappable runs simply get no furigana.
+    private static func kanaReading(from romaji: String) -> String? {
+        guard !romaji.isEmpty else { return nil }
+        let expanded = romaji.lowercased()
+            .map { macronExpansion[$0] ?? String($0) }
+            .joined()
+        let chars = Array(expanded)
+        var kana = ""
+        var i = 0
+        while i < chars.count {
+            if i + 2 < chars.count, let mapped = kanaTriples[String(chars[i ... i + 2])] {
+                kana += mapped
+                i += 3
+                continue
+            }
+            if i + 1 < chars.count, let mapped = kanaPairs[String(chars[i ... i + 1])] {
+                kana += mapped
+                i += 2
+                continue
+            }
+            if chars[i] == "n" {
+                let isFinal = i + 1 == chars.count
+                let next = isFinal ? nil : chars[i + 1]
+                if isFinal || next == "'" {
+                    kana += "ん"
+                    i += next == "'" ? 2 : 1
+                    continue
+                }
+                // Wapuro writes a moraic ん before a vowel as "nn" ("kanna").
+                if next == "n" {
+                    kana += "ん"
+                    i += 2
+                    continue
+                }
+                // ん before a consonant (んた, んで…), but "ny" belongs to a
+                // digraph that failed to match — unknown sequence.
+                if let next, !"aiueoy".contains(next) {
+                    kana += "ん"
+                    i += 1
+                    continue
+                }
+                return nil
+            }
+            // Doubled consonant: sokuon ("ikki", "roppyaku"). Doubled vowels
+            // and "nn" compose elsewhere.
+            if i + 1 < chars.count,
+               chars[i + 1] == chars[i],
+               !"aiueon".contains(chars[i])
+            {
+                kana += "っ"
+                i += 1
+                continue
+            }
+            guard let mapped = kanaSingles[String(chars[i])] else { return nil }
+            kana += mapped
+            i += 1
+        }
+        return kana
+    }
+
+    /// Three-character forms: three-letter one-mora spellings ("shi",
+    /// "chi", "tsu"), digraphs (きゃ row), geminate+digraph ("cchi" for
+    /// っち), and three-letter foreign spellings.
+    private static let kanaTriples: [String: String] = [
+        "shi": "し", "chi": "ち", "tsu": "つ",
+        "kya": "きゃ", "kyu": "きゅ", "kyo": "きょ",
+        "sha": "しゃ", "shu": "しゅ", "she": "しぇ", "sho": "しょ",
+        "cha": "ちゃ", "chu": "ちゅ", "che": "ちぇ", "cho": "ちょ",
+        "nya": "にゃ", "nyu": "にゅ", "nyo": "にょ",
+        "hya": "ひゃ", "hyu": "ひゅ", "hyo": "ひょ",
+        "mya": "みゃ", "myu": "みゅ", "myo": "みょ",
+        "rya": "りゃ", "ryu": "りゅ", "ryo": "りょ",
+        "gya": "ぎゃ", "gyu": "ぎゅ", "gyo": "ぎょ",
+        "bya": "びゃ", "byu": "びゅ", "byo": "びょ",
+        "pya": "ぴゃ", "pyu": "ぴゅ", "pyo": "ぴょ",
+        "cch": "っち", "tch": "っち",
+        "tsa": "つぁ", "tsi": "つぃ", "tse": "つぇ", "tso": "つぉ"
+    ]
+
+    /// Two-character spellings: CV pairs and two-letter foreign forms.
+    /// Long vowels need no entries ("tou" = と+う).
+    private static let kanaPairs: [String: String] = [
+        "ka": "か", "ki": "き", "ku": "く", "ke": "け", "ko": "こ",
+        "sa": "さ", "si": "し", "su": "す", "se": "せ", "so": "そ",
+        "ta": "た", "te": "て", "to": "と", "ti": "てぃ", "tu": "とぅ",
+        "na": "な", "ni": "に", "nu": "ぬ", "ne": "ね", "no": "の",
+        "ha": "は", "hi": "ひ", "fu": "ふ", "he": "へ", "ho": "ほ",
+        "ma": "ま", "mi": "み", "mu": "む", "me": "め", "mo": "も",
+        "ya": "や", "yu": "ゆ", "yo": "よ",
+        "ra": "ら", "ri": "り", "ru": "る", "re": "れ", "ro": "ろ",
+        "wa": "わ", "wi": "うぃ", "we": "うぇ", "wo": "を",
+        "ga": "が", "gi": "ぎ", "gu": "ぐ", "ge": "げ", "go": "ご",
+        "za": "ざ", "zi": "じ", "ji": "じ", "zu": "ず", "ze": "ぜ", "zo": "ぞ",
+        "da": "だ", "de": "で", "do": "ど", "di": "でぃ", "du": "どぅ",
+        "ba": "ば", "bi": "び", "bu": "ぶ", "be": "べ", "bo": "ぼ",
+        "pa": "ぱ", "pi": "ぴ", "pu": "ぷ", "pe": "ぺ", "po": "ぽ",
+        "vu": "ゔ", "ye": "いぇ",
+        "ja": "じゃ", "ju": "じゅ", "je": "じぇ", "jo": "じょ",
+        "fa": "ふぁ", "fi": "ふぃ", "fe": "ふぇ", "fo": "ふぉ",
+        "va": "ゔぁ", "vi": "ゔぃ", "ve": "ゔぇ", "vo": "ゔぉ"
+    ]
+
+    private static let kanaSingles: [String: String] = [
+        "a": "あ", "i": "い", "u": "う", "e": "え", "o": "お",
+        "n": "ん"
+    ]
 }
