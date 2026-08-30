@@ -72,14 +72,15 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     }
 
     func cancel() {
-        task?.cancel(byProducingResumeData: { [weak self] data in
+        guard let task else { return } // idle/terminal: nothing in flight
+        self.task = nil
+        task.cancel(byProducingResumeData: { [weak self] data in
             guard let self else { return }
             Task { @MainActor in
                 self.resumeData = data
                 self.invalidateSession()
             }
         })
-        task = nil
         setState(.idle)
     }
 
