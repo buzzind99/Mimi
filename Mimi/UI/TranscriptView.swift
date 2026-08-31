@@ -19,7 +19,7 @@ struct TranscriptView: View {
     private static let bottomAnchorID = "transcript-bottom-anchor"
     /// Distance from the viewport bottom within which the view still counts
     /// as "at the bottom" (absorbs divider and animation slack).
-    private static let pinnedTolerance: CGFloat = 100
+    private static let pinnedTolerance: CGFloat = 400
 
     var body: some View {
         ScrollViewReader { proxy in
