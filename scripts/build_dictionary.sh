@@ -8,6 +8,9 @@
 # Outputs:
 #   local/frameworks/libdictionary.dylib   FFI dylib (SQLite compiled in)
 #   local/frameworks/dictionary            CLI for debugging
+#   local/dictionaries/JMdict_e.gz         pinned JMdict data (bundled into
+#                                          the app by package.sh; the SQLite
+#                                          DB itself is built on first launch)
 #
 # The vendored source lives at vendor/tentoku-rs (cloned on first run) with a
 # small local FFI addition (a database-build export) applied from
@@ -80,6 +83,31 @@ echo "${symbols}"
 count="$(echo "${symbols}" | grep -c '^tentoku_' || true)"
 if [[ "${count}" -ne 6 ]]; then
   echo "ERROR: expected 6 exported tentoku_* symbols, found ${count}" >&2
+  exit 1
+fi
+
+# 7. Fetch the JMdict dictionary data (~10 MB gz, EDRDG, CC BY-SA 4.0).
+#    package.sh bundles this file into Contents/Resources; the app builds the
+#    SQLite DB from it locally on first launch (no network). The bundled copy
+#    ships in release DMGs, so its integrity is enforced on every build —
+#    refreshing to a newer JMdict is a deliberate digest bump.
+DICT_DIR="${REPO_ROOT}/local/dictionaries"
+JMDICT_GZ="${DICT_DIR}/JMdict_e.gz"
+JMDICT_URL="https://www.edrdg.org/pub/Nihongo/JMdict_e.gz"
+# Pinned digest (JMdict_e fetched 2026-08-31 from EDRDG).
+TENTOKU_JMDICT_SHA256="${TENTOKU_JMDICT_SHA256:-5f89bc7db70f2656ba78535d83e4bfe9d56fb5f0fe08290e99ecebc3d1386812}"
+mkdir -p "${DICT_DIR}"
+if [[ ! -f "${JMDICT_GZ}" ]]; then
+  echo "==> Fetching JMdict_e.gz"
+  curl -fL --retry 3 -o "${JMDICT_GZ}" "${JMDICT_URL}"
+fi
+echo "==> Verifying JMdict_e.gz"
+jmdict_actual="$(shasum -a 256 "${JMDICT_GZ}" | awk '{print $1}')"
+if [[ "${jmdict_actual}" != "${TENTOKU_JMDICT_SHA256}" ]]; then
+  echo "ERROR: JMdict_e.gz SHA-256 mismatch" >&2
+  echo "       expected ${TENTOKU_JMDICT_SHA256}" >&2
+  echo "       got      ${jmdict_actual}" >&2
+  rm -f "${JMDICT_GZ}"
   exit 1
 fi
 
