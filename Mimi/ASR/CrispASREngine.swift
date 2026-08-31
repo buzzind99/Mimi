@@ -47,7 +47,7 @@ final class CrispASREngine: ASREngine {
     /// How much confirmed silence after the last VAD speech span triggers a
     /// final. Must stay ≥ the VAD's `min_silence_ms` (below) — that is what
     /// makes a span end + this much analyzed audio a *confirmed* silence gap.
-    private static let endpointSamples = 800 * sampleRate / 1000
+    private static let endpointSamples = 1250 * sampleRate / 1000
     /// Forced-final cap: safety net under VAD, and the only endpoint when the
     /// VAD model is unavailable (degraded mode).
     private static let utteranceCapSamples = 12 * sampleRate
@@ -72,7 +72,7 @@ final class CrispASREngine: ASREngine {
     private static let vadThreshold: Float = 0.5
     private static let vadMinSpeechMS = 250
     /// Must equal `endpointSamples` — see the comment there.
-    private static let vadMinSilenceMS = 600
+    private static let vadMinSilenceMS = 1000
     private static let vadPadMS = 30
     /// Don't discard a short speechless buffer on a single VAD pass — onsets
     /// can be missed on very short windows; wait until the buffer is at
