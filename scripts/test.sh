@@ -39,6 +39,7 @@ with open("build/cov.json") as f:
 prefixes = [
     ("State/",       "Mimi/State/"),
     ("Export/",      "Mimi/Export/"),
+    ("Dictionary/",  "Mimi/Dictionary/"),
     ("Text/",        "Mimi/Text/"),
     ("Session/",     "Mimi/Session/"),
     ("Translation/", "Mimi/Translation/"),
@@ -72,6 +73,7 @@ print("-" * 47)
 floors = {
     "State/":       77.5,
     "Export/":     100.0,
+    "Dictionary/":  98.0,
     "Text/":        98.0,
     "Session/":     65.0,
     "Translation/": 96.5,
