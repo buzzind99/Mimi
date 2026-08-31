@@ -41,9 +41,9 @@ struct ContentView: View {
         VStack(spacing: 0) {
             MainHeaderView(model: model)
             Divider()
-            LiveSubtitleView(live: live)
-            Divider()
             TranscriptView(model: model)
+            Divider()
+            LiveSubtitleView(live: live)
         }
         .safeAreaInset(edge: .bottom) {
             StatusBarView(model: model, latency: latency)

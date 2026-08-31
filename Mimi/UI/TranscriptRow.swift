@@ -36,7 +36,6 @@ struct TranscriptRow: View, Equatable {
                     annotationFont: .caption.monospaced(),
                     annotationColor: .secondary.opacity(0.55)
                 )
-                .textSelection(.enabled)
             } else {
                 Text(entry.sentence.text)
                     .font(.system(size: 17, weight: .medium))

@@ -1,19 +1,25 @@
 import SwiftUI
 
-/// Stacked transcript rows, newest first, in one virtualized scroll. While
-/// the user is at the top, finalizing a sentence pushes older rows down
-/// with a spring; scrolled down, the scroll offset is compensated by the
-/// inserted row's height so the visible content doesn't move at all.
+/// Chronological transcript, oldest first, newest appended at the bottom.
+/// `.defaultScrollAnchor(.bottom)` pins the view to the newest sentence on
+/// first appearance; manual tracking keeps that pin alive where the
+/// framework's default loses it. Only scroll-offset movement (the user's
+/// gesture, or our own re-anchor) may re-evaluate the pin; growth of the
+/// content under a stationary offset — a translation landing on any row, a
+/// new entry, a viewport resize — re-anchors to the bottom marker while
+/// pinned instead, because measuring distance from freshly grown content
+/// would read the growth itself and drop the pin exactly when it must act.
+/// Re-anchoring re-fires on every geometry tick, so it rides out the
+/// insertion spring until the content settles at the bottom.
 struct TranscriptView: View {
     @ObservedObject var model: AppModel
-    @State private var isAtTop = true
-    @State private var scrollPosition = ScrollPosition()
-    @State private var pendingInsertCompensation = false
+    @ReadingAnnotationSetting private var readingAnnotation
+    @State private var pinnedToBottom = true
 
-    private struct ScrollSnapshot: Equatable {
-        let offset: CGFloat
-        let contentHeight: CGFloat
-    }
+    private static let bottomAnchorID = "transcript-bottom-anchor"
+    /// Distance from the viewport bottom within which the view still counts
+    /// as "at the bottom" (absorbs divider and animation slack).
+    private static let pinnedTolerance: CGFloat = 100
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -22,47 +28,80 @@ struct TranscriptView: View {
                     if model.entries.isEmpty {
                         emptyState
                     }
-                    ForEach(model.entries.reversed()) { entry in
+                    ForEach(model.entries) { entry in
                         TranscriptRow(entry: entry)
                             .id(entry.id)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .top).combined(with: .opacity),
-                                removal: .opacity
-                            ))
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                         Divider().opacity(0.15)
                     }
+                    Color.clear
+                        .frame(height: 1)
+                        .id(Self.bottomAnchorID)
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
                 .animation(
-                    isAtTop ? .spring(response: 0.35, dampingFraction: 0.85) : nil,
+                    .spring(response: 0.35, dampingFraction: 0.85),
                     value: model.entries.count
                 )
             }
-            .scrollPosition($scrollPosition)
-            .onScrollGeometryChange(for: ScrollSnapshot.self) { geo in
-                ScrollSnapshot(offset: geo.contentOffset.y, contentHeight: geo.contentSize.height)
-            } action: { old, new in
-                isAtTop = new.offset < 1
-                guard pendingInsertCompensation, new.contentHeight > old.contentHeight else { return }
-                pendingInsertCompensation = false
-                scrollPosition.scrollTo(
-                    x: 0,
-                    y: new.offset + (new.contentHeight - old.contentHeight)
+            .defaultScrollAnchor(.bottom)
+            .onScrollGeometryChange(for: ScrollSnapshot.self) { geometry in
+                ScrollSnapshot(
+                    offsetY: geometry.contentOffset.y,
+                    contentHeight: geometry.contentSize.height,
+                    containerHeight: geometry.containerSize.height,
+                    insetBottom: geometry.contentInsets.bottom
                 )
-            }
-            .onChange(of: model.entries.count) { _, _ in
-                if isAtTop {
-                    guard let newest = model.entries.last else { return }
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        proxy.scrollTo(newest.id, anchor: .top)
-                    }
-                } else {
-                    // A row is being inserted above the viewport; grow the
-                    // offset by the same amount so content stays visually put.
-                    pendingInsertCompensation = true
+            } action: { old, new in
+                if new.offsetY != old.offsetY {
+                    // The offset actually moved (user gesture, or our own
+                    // re-anchor): re-evaluate the pin from where the content
+                    // now sits. Our re-anchor lands within tolerance, so the
+                    // pin holds; a user drag away drops it.
+                    pinnedToBottom = new.distanceToBottom <= Self.pinnedTolerance
+                } else if pinnedToBottom {
+                    // The offset didn't move but the content or viewport
+                    // changed size (row grew, entry appended, window or live
+                    // row resized): keep the bottom edge in view without
+                    // dropping the pin. Distance here is the growth itself,
+                    // so it must never feed the pin decision.
+                    reAnchor(proxy)
                 }
             }
+            .onChange(of: model.entries) { _, _ in
+                // Covers appends and rows growing when a translation lands.
+                reAnchor(proxy)
+            }
+            .onChange(of: readingAnnotation) { _, _ in
+                // Mode toggles resize every row; re-anchor if pinned.
+                reAnchor(proxy)
+            }
+        }
+    }
+
+    /// Scrolls to the bottom marker on the next runloop tick, once the
+    /// layout that triggered the call has landed. The pin is re-checked at
+    /// execution time so a user drag that slipped in between still wins.
+    private func reAnchor(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            if pinnedToBottom {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            }
+        }
+    }
+
+    /// The scroll values that separate offset movement (the pin is
+    /// re-evaluated) from stationary content or viewport growth (the pin
+    /// re-anchors).
+    private struct ScrollSnapshot: Equatable {
+        var offsetY: CGFloat
+        var contentHeight: CGFloat
+        var containerHeight: CGFloat
+        var insetBottom: CGFloat
+
+        var distanceToBottom: CGFloat {
+            contentHeight + insetBottom - (offsetY + containerHeight)
         }
     }
 
