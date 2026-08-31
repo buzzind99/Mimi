@@ -45,9 +45,10 @@ struct LiveSubtitleView: View {
         .background(Color.teal.opacity(0.12))
     }
 
-    /// The ruby replaces both the partial slot and the romaji slot.
-    /// minHeight equals their combined height (22 + 4 + 14) so empty↔filled
-    /// transitions don't change the row height.
+    /// All annotation modes hold the same total slot height — surface 22 +
+    /// spacing 4 + annotation 14 = 40 — so empty↔filled transitions and
+    /// None↔Romaji↔Furigana toggles never change the row height (which would
+    /// resize the transcript viewport above).
     private var annotatedPartial: some View {
         Group {
             if live.partial.isEmpty {
@@ -59,7 +60,8 @@ struct LiveSubtitleView: View {
                     surfaceFont: .system(size: 17, weight: .medium),
                     annotationFont: .caption.monospaced(),
                     annotationColor: .secondary.opacity(0.55),
-                    surfaceItalic: true
+                    surfaceItalic: true,
+                    reservesAnnotationLine: true
                 )
                 .foregroundColor(.teal)
             }
@@ -67,11 +69,13 @@ struct LiveSubtitleView: View {
         .frame(minHeight: 40, alignment: .topLeading)
     }
 
+    /// None mode: surface only, top-aligned to match the romaji surface
+    /// position, in the same 40pt slot.
     @ViewBuilder
     private var plainPartial: some View {
         if live.partial.isEmpty {
             placeholder
-                .frame(height: 22, alignment: .leading)
+                .frame(height: 40, alignment: .topLeading)
         } else {
             Text(live.partial)
                 .font(.system(size: 17, weight: .medium))
@@ -79,7 +83,7 @@ struct LiveSubtitleView: View {
                 .foregroundColor(.teal)
                 .lineLimit(1)
                 .truncationMode(.head)
-                .frame(height: 22, alignment: .leading)
+                .frame(height: 40, alignment: .topLeading)
         }
     }
 
