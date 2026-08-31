@@ -64,6 +64,11 @@ enum ReadingAnnotator {
         // with sokuon gemination (一回 → "ikkai", 一本 → "ippon") instead
         // of the tokenizer's plain "ichi kai".
         var pendingNumber: (surface: String, romaji: String)?
+        // A family term (母, 父, 祖父…) is held back one token: when the
+        // next token is an honorific suffix (さん, ちゃん, 様…), the pair
+        // fuses with the honorific stem (お母さん → "okaasan") instead of
+        // the tokenizer's standalone headword readings ("ohahasan").
+        var pendingFamily: (surface: String, plainRomaji: String, stemRomaji: String)?
 
         func appendNumber(_ pending: (surface: String, romaji: String)) {
             let romaji = romanize(surface: pending.surface, reading: pending.romaji)
@@ -71,6 +76,15 @@ enum ReadingAnnotator {
                 surface: pending.surface,
                 romaji: romaji,
                 furigana: furigana(surface: pending.surface, romaji: romaji)
+            ))
+            lastTokenIndex = segments.count - 1
+        }
+
+        func appendFamily(_ pending: (surface: String, plainRomaji: String, stemRomaji: String)) {
+            segments.append(ReadingSegment(
+                surface: pending.surface,
+                romaji: pending.plainRomaji,
+                furigana: furigana(surface: pending.surface, romaji: pending.plainRomaji)
             ))
             lastTokenIndex = segments.count - 1
         }
@@ -100,6 +114,11 @@ enum ReadingAnnotator {
                 appendNumber(pendingNumber!)
                 pendingNumber = nil
             }
+            // Same for a held-back family term (お、母さん reads plain).
+            if pendingFamily != nil, tokenRange.location > cursor {
+                appendFamily(pendingFamily!)
+                pendingFamily = nil
+            }
             appendGap(to: tokenRange.location)
 
             let surface = nsText.substring(
@@ -107,6 +126,27 @@ enum ReadingAnnotator {
             )
 
             var (reading, endsWithSokuon) = tokenReading(tokenizer: tokenizer, surface: surface)
+
+            // The honorific 方 ("kata") after あの/どの: the tokenizer
+            // transcribes the person reading as the direction reading
+            // "hou" (あの方は → "hou"). Only あの/どの participate —
+            // この方/その方 already transcribe "kata", and their 方がいい
+            // comparative ("that way is better") reads "hou", which this
+            // guard would wrongly rewrite. The こっち/そっち/あっち/どっち
+            // (+ こちら/あちら/どちら) + の方 phrases are always
+            // directional. (どの方 already transcribes "kata"; the
+            // reading guard leaves it untouched.)
+            var followsAnoDono = false
+            if let at = lastTokenIndex,
+               ["あの", "どの"].contains(segments[at].surface)
+            {
+                followsAnoDono = true
+            }
+            if surface == "方", reading.lowercased() == "hou",
+               tokenRange.location == cursor, followsAnoDono
+            {
+                reading = "kata"
+            }
 
             if let pending = pendingNumber {
                 pendingNumber = nil
@@ -130,6 +170,43 @@ enum ReadingAnnotator {
                     reading = (voiced ? "bon" : "hon") + reading.dropFirst(3)
                 }
                 appendNumber(pending)
+            }
+
+            if let pending = pendingFamily {
+                pendingFamily = nil
+                if let suffixRomaji = familySuffixRomaji[surface] {
+                    let fusedSurface = pending.surface + surface
+                    let fusedRomaji = pending.stemRomaji + suffixRomaji
+                    // A directly adjacent お/御 already sits in its own
+                    // segment (お|母|さん): fold it into the fused run so
+                    // お母さん becomes one "okaasan" segment. 御 merges the
+                    // same way; a different transcription (e.g. "on") or an
+                    // intervening gap leaves the prefix as its own run.
+                    if let at = lastTokenIndex, at == segments.count - 1,
+                       ["お", "御"].contains(segments[at].surface),
+                       let prefixRomaji = segments[at].romaji,
+                       prefixRomaji.lowercased() == "o"
+                    {
+                        let prefix = segments[at]
+                        let mergedRomaji = prefixRomaji + fusedRomaji
+                        prefix.surface += fusedSurface
+                        prefix.romaji = mergedRomaji
+                        prefix.furigana = furigana(
+                            surface: prefix.surface, romaji: mergedRomaji
+                        )
+                    } else {
+                        segments.append(ReadingSegment(
+                            surface: fusedSurface,
+                            romaji: fusedRomaji,
+                            furigana: furigana(surface: fusedSurface, romaji: fusedRomaji)
+                        ))
+                        lastTokenIndex = segments.count - 1
+                    }
+                    carriesSokuon = endsWithSokuon
+                    cursor = tokenRange.location + tokenRange.length
+                    continue
+                }
+                appendFamily(pending)
             }
 
             if carriesSokuon {
@@ -156,6 +233,12 @@ enum ReadingAnnotator {
                    let numReading = numberReading(surface: surface, reading: reading)
                 {
                     pendingNumber = (surface, numReading)
+                } else if !endsWithSokuon, let stem = familyHonorificStems[surface] {
+                    pendingFamily = (
+                        surface: surface,
+                        plainRomaji: romanize(surface: surface, reading: reading),
+                        stemRomaji: stem
+                    )
                 } else {
                     let romaji = romanize(surface: surface, reading: reading)
                     segments.append(ReadingSegment(
@@ -172,6 +255,10 @@ enum ReadingAnnotator {
         if let pending = pendingNumber {
             appendNumber(pending)
             pendingNumber = nil
+        }
+        if let pending = pendingFamily {
+            appendFamily(pending)
+            pendingFamily = nil
         }
         if carriesSokuon, let at = lastTokenIndex {
             segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
@@ -254,9 +341,28 @@ enum ReadingAnnotator {
     ]
 
     /// 四日 and 七日 keep the plain "nichi" reading of 日; fuse the pair
-    /// into the correct calendar forms.
+    /// into the correct calendar forms. 二十歳 is likewise split by the
+    /// tokenizer ("nijuu"|"sai") and would geminate on the generic path;
+    /// the coming-of-age form is "hatachi".
     private static let datePairOverrides: [String: String] = [
-        "yon nichi": "yokka", "nana nichi": "nanoka"
+        "yon nichi": "yokka", "nana nichi": "nanoka",
+        "nijuu sai": "hatachi"
+    ]
+
+    /// Family terms whose honorific form the tokenizer can't see: it
+    /// transcribes each kanji with its standalone headword reading (母 →
+    /// "haha", correct in 私の母 but wrong before an honorific suffix,
+    /// where 母さん reads "kaasan"). Maps the term to the honorific stem.
+    private static let familyHonorificStems = [
+        "母": "kaa", "父": "tou", "姉": "nee", "兄": "nii",
+        "祖父": "jii", "祖母": "baa"
+    ]
+
+    /// Honorific suffixes that trigger the family fusion, with the romaji
+    /// they contribute (母さん → "kaasan", お母ちゃん → "okaachan",
+    /// お母様 → "okaasama").
+    private static let familySuffixRomaji = [
+        "さん": "san", "ちゃん": "chan", "様": "sama", "さま": "sama"
     ]
 
     /// Returns the romaji a number token is held back under, or nil when
@@ -327,7 +433,10 @@ enum ReadingAnnotator {
         "こんばんは": "konbanwa",
         "抹茶": "matcha",
         // Fused by the tokenizer under its family reading ("mimoto").
-        "三本": "sanbon"
+        "三本": "sanbon",
+        // Headword reading "watakushi"; the default is the colloquial
+        // "watashi" (私達 → "watashi" | "tachi" comes out right per-token).
+        "私": "watashi"
     ]
 
     private static func romanize(surface: String, reading: String) -> String {

@@ -68,6 +68,62 @@ final class ReadingAnnotatorTests: XCTestCase {
     private let expectedNunInsertionRomaji = "kanna"
     private let vuFusionWord = "ヴァイオリン"
     private let expectedVuFusionRomaji = "vaiorin"
+    private let familyHonorificWord = "お母さん"
+    private let expectedFamilyHonorificSurface = "お母さん"
+    private let expectedFamilyHonorificRomaji = "okaasan"
+    private let expectedFamilyHonorificFurigana = "おかあさん"
+    private let bareFamilyHonorificWord = "母さん"
+    private let expectedBareFamilyHonorificRomaji = "kaasan"
+    private let fatherHonorificWord = "お父さん"
+    private let expectedFatherHonorificRomaji = "otousan"
+    private let elderSisterHonorificWord = "お姉さん"
+    private let expectedElderSisterHonorificRomaji = "oneesan"
+    private let elderBrotherHonorificWord = "お兄さん"
+    private let expectedElderBrotherHonorificRomaji = "oniisan"
+    private let chanSuffixWord = "お母ちゃん"
+    private let expectedChanSuffixRomaji = "okaachan"
+    private let samaSuffixWord = "お母様"
+    private let expectedSamaSuffixRomaji = "okaasama"
+    private let grandfatherHonorificWord = "祖父さん"
+    private let expectedGrandfatherHonorificRomaji = "jiisan"
+    private let grandmotherHonorificWord = "祖母さん"
+    private let expectedGrandmotherHonorificRomaji = "baasan"
+    private let goPrefixHonorificWord = "御母さん"
+    private let plainFamilyContextSentence = "私の母です"
+    private let plainFamilySurface = "母"
+    private let expectedPlainFamilyRomaji = "haha"
+    private let expectedPlainFamilyFurigana = "はは"
+    private let trailingFamilySentence = "私の母"
+    private let pronounWord = "私"
+    private let expectedPronounRomaji = "watashi"
+    private let pronounPluralWord = "私達"
+    private let expectedPronounPluralRomaji = ["watashi", "tachi"]
+    private let demonstrativePersonWord = "あの方"
+    private let expectedDemonstrativePersonRomaji = ["ano", "kata"]
+    private let directionalPersonWord = "こっちの方"
+    private let expectedDirectionalPersonRomaji = ["kocchi", "no", "hou"]
+    private let ambiguousKataSentence = "その方がいい"
+    private let expectedAmbiguousKataRomaji = ["sono", "hou", "ga", "ii"]
+    private let konoPersonWord = "この方"
+    private let expectedKonoPersonRomaji = ["kono", "kata"]
+    private let sonoPersonWord = "その方"
+    private let expectedSonoPersonRomaji = ["sono", "kata"]
+    private let sotchiDirectionWord = "そっちの方"
+    private let expectedSotchiDirectionRomaji = ["socchi", "no", "hou"]
+    private let atchiDirectionWord = "あっちの方"
+    private let expectedAtchiDirectionRomaji = ["acchi", "no", "hou"]
+    private let dotchiDirectionWord = "どっちの方"
+    private let expectedDotchiDirectionRomaji = ["docchi", "no", "hou"]
+    private let adultAgeWord = "二十歳"
+    private let expectedAdultAgeRomaji = "hatachi"
+    private let expectedAdultAgeFurigana = "はたち"
+    private let fourteenthDayWord = "十四日"
+    private let expectedFourteenthDayRomaji = ["juu", "yokka"]
+    private let familySentence = "お母さんに聞いて"
+    private let punctuatedFamilySentence = "お、母さん"
+    private let expectedPunctuatedFamilyRomaji: [String?] = ["o", nil, "kaasan"]
+    private let interruptedFamilyWord = "母、さん"
+    private let expectedInterruptedFamilyRomaji: [String?] = ["haha", nil, "san"]
 
     // MARK: - Helpers
 
@@ -191,7 +247,14 @@ final class ReadingAnnotatorTests: XCTestCase {
     // MARK: - Surfaces-concatenate-back invariant
 
     func test_segments_whenConcatenated_shouldReproduceTheOriginalText() {
-        let texts = [weatherSentence, particleSentence, latinSentence, sokuonFusionSentence]
+        let texts = [
+            weatherSentence, particleSentence, latinSentence, sokuonFusionSentence,
+            familyHonorificWord, goPrefixHonorificWord, plainFamilyContextSentence,
+            demonstrativePersonWord, konoPersonWord, sonoPersonWord,
+            directionalPersonWord, sotchiDirectionWord, atchiDirectionWord,
+            dotchiDirectionWord, adultAgeWord, fourteenthDayWord,
+            familySentence, punctuatedFamilySentence
+        ]
 
         for text in texts {
             let surfaces = ReadingAnnotator.segments(for: text)?.map(\.surface).joined()
@@ -428,6 +491,211 @@ final class ReadingAnnotatorTests: XCTestCase {
         let segment = firstSegment(of: "一致")
 
         XCTAssertEqual(segment?.furigana, "いっち")
+    }
+
+    // MARK: - Family honorific fusion
+
+    func test_segments_whenFamilyHonorificSuffix_shouldFuseIntoSingleRun() {
+        let segments = ReadingAnnotator.segments(for: familyHonorificWord)
+        let surfaces = segments?.map(\.surface)
+
+        XCTAssertEqual(surfaces, [expectedFamilyHonorificSurface])
+    }
+
+    func test_segments_whenFamilyHonorificSuffix_shouldUseHonorificStem() {
+        let segment = firstSegment(of: familyHonorificWord)
+
+        XCTAssertEqual(segment?.romaji, expectedFamilyHonorificRomaji)
+    }
+
+    func test_segments_whenFamilyHonorificSuffix_shouldAnnotateFusedFurigana() {
+        let segment = firstSegment(of: familyHonorificWord)
+
+        XCTAssertEqual(segment?.furigana, expectedFamilyHonorificFurigana)
+    }
+
+    func test_segments_whenFamilyTermWithoutPrefix_shouldFuseWithStem() {
+        let segment = firstSegment(of: bareFamilyHonorificWord)
+
+        XCTAssertEqual(segment?.surface, bareFamilyHonorificWord)
+        XCTAssertEqual(segment?.romaji, expectedBareFamilyHonorificRomaji)
+        XCTAssertEqual(segment?.furigana, "かあさん")
+    }
+
+    func test_segments_whenFatherHonorific_shouldFuseWithStem() {
+        let segment = firstSegment(of: fatherHonorificWord)
+
+        XCTAssertEqual(segment?.romaji, expectedFatherHonorificRomaji)
+    }
+
+    func test_segments_whenElderSisterHonorific_shouldFuseWithStem() {
+        let segment = firstSegment(of: elderSisterHonorificWord)
+
+        XCTAssertEqual(segment?.romaji, expectedElderSisterHonorificRomaji)
+    }
+
+    func test_segments_whenElderBrotherHonorific_shouldFuseWithStem() {
+        let segment = firstSegment(of: elderBrotherHonorificWord)
+
+        XCTAssertEqual(segment?.romaji, expectedElderBrotherHonorificRomaji)
+    }
+
+    func test_segments_whenChanSuffix_shouldFuseWithStem() {
+        let segment = firstSegment(of: chanSuffixWord)
+
+        XCTAssertEqual(segment?.romaji, expectedChanSuffixRomaji)
+    }
+
+    func test_segments_whenSamaSuffix_shouldFuseWithStem() {
+        let segment = firstSegment(of: samaSuffixWord)
+
+        XCTAssertEqual(segment?.romaji, expectedSamaSuffixRomaji)
+    }
+
+    func test_segments_whenGrandfatherHonorific_shouldFuseWithStem() {
+        let segment = firstSegment(of: grandfatherHonorificWord)
+
+        XCTAssertEqual(segment?.surface, grandfatherHonorificWord)
+        XCTAssertEqual(segment?.romaji, expectedGrandfatherHonorificRomaji)
+    }
+
+    func test_segments_whenGrandmotherHonorific_shouldFuseWithStem() {
+        let segment = firstSegment(of: grandmotherHonorificWord)
+
+        XCTAssertEqual(segment?.romaji, expectedGrandmotherHonorificRomaji)
+    }
+
+    func test_segments_whenGoPrefixHonorific_shouldFoldPrefixIntoFusedRun() {
+        let segment = firstSegment(of: goPrefixHonorificWord)
+
+        XCTAssertEqual(segment?.surface, goPrefixHonorificWord)
+        XCTAssertEqual(segment?.romaji, expectedFamilyHonorificRomaji)
+        XCTAssertEqual(segment?.furigana, expectedFamilyHonorificFurigana)
+    }
+
+    func test_segments_whenFamilyTermOutsideHonorific_shouldKeepHeadwordReading() {
+        let segment = segment(plainFamilySurface, in: plainFamilyContextSentence)
+
+        XCTAssertEqual(segment?.romaji, expectedPlainFamilyRomaji)
+        XCTAssertEqual(segment?.furigana, expectedPlainFamilyFurigana)
+    }
+
+    func test_segments_whenFamilyTermEndsInput_shouldFlushHeadwordReading() {
+        let segments = ReadingAnnotator.segments(for: trailingFamilySentence)
+        let last = segments?.last
+
+        XCTAssertEqual(last?.surface, plainFamilySurface)
+        XCTAssertEqual(last?.romaji, expectedPlainFamilyRomaji)
+    }
+
+    func test_segments_whenPunctuationInterruptsHonorific_shouldNotMergePrefix() {
+        let segments = ReadingAnnotator.segments(for: punctuatedFamilySentence)
+        let romajiList = segments?.map { $0.romaji }
+
+        XCTAssertEqual(romajiList, expectedPunctuatedFamilyRomaji)
+    }
+
+    func test_segments_whenPunctuationInterruptsFamilyTerm_shouldFlushHeadwordReading() {
+        let segments = ReadingAnnotator.segments(for: interruptedFamilyWord)
+        let romajiList = segments?.map { $0.romaji }
+
+        XCTAssertEqual(romajiList, expectedInterruptedFamilyRomaji)
+    }
+
+    func test_segments_whenFamilyHonorificInSentence_shouldFuseRunInPlace() {
+        let segments = ReadingAnnotator.segments(for: familySentence)
+        let first = segments?.first
+
+        XCTAssertEqual(first?.surface, familyHonorificWord)
+        XCTAssertEqual(first?.romaji, expectedFamilyHonorificRomaji)
+    }
+
+    // MARK: - Pronoun and demonstrative readings
+
+    func test_segments_whenPronounSurface_shouldUseColloquialReading() {
+        let segment = firstSegment(of: pronounWord)
+
+        XCTAssertEqual(segment?.romaji, expectedPronounRomaji)
+    }
+
+    func test_segments_whenPronounPlural_shouldUseColloquialReadingPerToken() {
+        let segments = ReadingAnnotator.segments(for: pronounPluralWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedPronounPluralRomaji)
+    }
+
+    func test_segments_whenKataFollowsAno_shouldUseHonorificReading() {
+        let segments = ReadingAnnotator.segments(for: demonstrativePersonWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedDemonstrativePersonRomaji)
+    }
+
+    func test_segments_whenKataFollowsKocchiNo_shouldKeepDirectionReading() {
+        let segments = ReadingAnnotator.segments(for: directionalPersonWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedDirectionalPersonRomaji)
+    }
+
+    func test_segments_whenKataFollowsSono_shouldKeepDirectionReading() {
+        let segments = ReadingAnnotator.segments(for: ambiguousKataSentence)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedAmbiguousKataRomaji)
+    }
+
+    func test_segments_whenKataFollowsKono_shouldKeepPersonReading() {
+        let segments = ReadingAnnotator.segments(for: konoPersonWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedKonoPersonRomaji)
+    }
+
+    func test_segments_whenKataFollowsSonoAlone_shouldKeepPersonReading() {
+        let segments = ReadingAnnotator.segments(for: sonoPersonWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedSonoPersonRomaji)
+    }
+
+    func test_segments_whenKataFollowsSotchiNo_shouldKeepDirectionReading() {
+        let segments = ReadingAnnotator.segments(for: sotchiDirectionWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedSotchiDirectionRomaji)
+    }
+
+    func test_segments_whenKataFollowsAtchiNo_shouldKeepDirectionReading() {
+        let segments = ReadingAnnotator.segments(for: atchiDirectionWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedAtchiDirectionRomaji)
+    }
+
+    func test_segments_whenKataFollowsDotchiNo_shouldKeepDirectionReading() {
+        let segments = ReadingAnnotator.segments(for: dotchiDirectionWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedDotchiDirectionRomaji)
+    }
+
+    // MARK: - Rare-form pair overrides
+
+    func test_segments_whenTwentyYearsOld_shouldFuseToHatachi() {
+        let segment = firstSegment(of: adultAgeWord)
+
+        XCTAssertEqual(segment?.surface, adultAgeWord)
+        XCTAssertEqual(segment?.romaji, expectedAdultAgeRomaji)
+        XCTAssertEqual(segment?.furigana, expectedAdultAgeFurigana)
+    }
+
+    func test_segments_whenFourteenthDay_shouldFuseYonNichiPair() {
+        let segments = ReadingAnnotator.segments(for: fourteenthDayWord)
+        let romajiList = segments?.map { $0.romaji ?? "" }
+
+        XCTAssertEqual(romajiList, expectedFourteenthDayRomaji)
     }
 
     // MARK: - Cache
