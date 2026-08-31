@@ -3,8 +3,9 @@
 #   scripts/test.sh <extra xcodebuild args...>
 #
 # xcodegen generate → xcodebuild test (coverage on) → xccov JSON → per-folder
-# line-coverage summary. Exits non-zero if tests fail or the result bundle is
-# missing.
+# line-coverage summary, uncovered-line report, lcov file (build/lcov.info),
+# HTML report (build/cov-html/index.html). Exits non-zero if tests fail or the
+# result bundle is missing.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,7 +31,7 @@ echo "==> coverage"
 xcrun xccov view --report --json "$RESULT_BUNDLE" > build/cov.json
 
 python3 - <<'PY'
-import json, sys
+import json, os, shutil, subprocess, sys
 
 with open("build/cov.json") as f:
     report = json.load(f)
@@ -95,6 +96,59 @@ print("-" * 47)
 for path, cov, lines in sorted(files):
     name = path.split("/Mimi/")[-1]
     print(f"{name:<28} {cov * 100:>7.1f}%  ({lines} lines)")
+
+# Per-line data: build/lcov.info + uncovered-line report + HTML report.
+xccov = subprocess.run(["xcrun", "--find", "xccov"],
+                       capture_output=True, text=True, check=True).stdout.strip()
+
+records = []
+for path in subprocess.run(
+        [xccov, "view", "--archive", "--file-list", "build/cov.xcresult"],
+        capture_output=True, text=True, check=True).stdout.splitlines():
+    if "/Mimi/" not in path or "/MimiTests/" in path:
+        continue
+    doc = json.loads(subprocess.run(
+        [xccov, "view", "--archive", "--json", "--file", path, "build/cov.xcresult"],
+        capture_output=True, text=True, check=True).stdout)
+    per_line = doc.get(path) if isinstance(doc, dict) else doc
+    da = sorted((e["line"], e.get("executionCount", 0))
+                for e in per_line if e.get("isExecutable"))
+    records.append((os.path.relpath(path, os.getcwd()), da))
+
+with open("build/lcov.info", "w") as f:
+    for rel, da in records:
+        f.write(f"SF:{rel}\n")
+        for line, count in da:
+            f.write(f"DA:{line},{count}\n")
+        f.write(f"LF:{len(da)}\nLH:{sum(1 for _, c in da if c)}\nend_of_record\n")
+
+uncovered = []
+for rel, da in records:
+    misses = [line for line, count in da if count == 0]
+    if misses:
+        ranges = []
+        start = prev = misses[0]
+        for line in misses[1:]:
+            if line == prev + 1:
+                prev = line
+            else:
+                ranges.append((start, prev))
+                start = prev = line
+        ranges.append((start, prev))
+        uncovered.append((rel, len(misses), ranges))
+
+if uncovered:
+    print("\nUncovered lines:")
+    print("-" * 47)
+    for rel, count, ranges in sorted(uncovered, key=lambda r: (-r[1], r[0])):
+        span = ", ".join(f"{a}" if a == b else f"{a}-{b}" for a, b in ranges)
+        print(f"{rel:<44} {count:>3}  -> {span}")
+
+shutil.rmtree("build/cov-html", ignore_errors=True)
+if subprocess.run(["genhtml", "build/lcov.info", "-o", "build/cov-html", "--quiet"]).returncode == 0:
+    print("\nHTML report: build/cov-html/index.html")
+else:
+    print("genhtml failed (build/lcov.info is still valid)", file=sys.stderr)
 
 bad = [f for f in files if f[1] < 1.0]
 if bad:
