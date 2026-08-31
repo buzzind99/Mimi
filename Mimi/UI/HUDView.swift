@@ -72,7 +72,7 @@ struct HUDView: View {
                             surfaceFont: .system(size: 15),
                             annotationFont: .system(size: 11, design: .monospaced),
                             annotationColor: .secondary,
-                            reservesAnnotationLine: true,
+                            reservesAnnotationLine: true
                         )
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
