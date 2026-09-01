@@ -1,11 +1,12 @@
 #!/bin/zsh
-#   scripts/test.sh          run tests with coverage, print per-folder line summary
+#   scripts/test.sh          run tests with coverage, print compact summary
 #   scripts/test.sh <extra xcodebuild args...>
 #
-# xcodegen generate → xcodebuild test (coverage on) → xccov JSON → per-folder
-# line-coverage summary, uncovered-line report, lcov file (build/lcov.info),
-# HTML report (build/cov-html/index.html). Exits non-zero if tests fail or the
-# result bundle is missing.
+# xcodegen generate → xcodebuild test (coverage on) → xccov JSON → compact
+# summary: overall %, failing gates, uncovered lines in failed folders only.
+# Full detail: build/cov.json, build/lcov.info, build/cov-html/index.html.
+# Exits non-zero if tests fail, the result bundle is missing, or a coverage
+# gate fails.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -51,24 +52,21 @@ prefixes = [
 ]
 
 agg = {label: [0, 0] for label, _ in prefixes}
-files = []
+overall = [0, 0]
 for target in report.get("targets", []):
     for f in target.get("files", []):
         path = f.get("path", "")
         if "/Mimi/" not in path or "/MimiTests/" in path:
             continue
-        cov = f.get("lineCoverage", 0.0)
         covered = f.get("coveredLines", 0)
         lines = f.get("executableLines", 0)
-        files.append((path, cov, lines))
+        overall[0] += lines
+        overall[1] += covered
         for label, prefix in prefixes:
             if prefix in path:
                 agg[label][0] += lines
                 agg[label][1] += covered
                 break
-
-print(f"{'Folder / file':<28} {'line %':>8}  gate")
-print("-" * 47)
 
 floors = {
     "State/":       77.5,
@@ -82,24 +80,26 @@ floors = {
     "Audio/":        8.0,
 }
 failed_gates = []
+passed = 0
 for label, _ in prefixes:
-    total, covered = agg[label]
-    pct = (covered / total * 100) if total else float("nan")
     floor = floors.get(label)
     if floor is None:
-        verdict = "  (excluded)"
-    elif pct >= floor:
-        verdict = f"  PASS ≥ {floor:g}%"
+        continue
+    total, covered = agg[label]
+    pct = (covered / total * 100) if total else float("nan")
+    if pct >= floor:
+        passed += 1
     else:
-        verdict = f"  FAIL < {floor:g}%"
-        failed_gates.append(label)
-    print(f"{label:<28} {pct:>7.1f}%{verdict}")
-print("-" * 47)
-for path, cov, lines in sorted(files):
-    name = path.split("/Mimi/")[-1]
-    print(f"{name:<28} {cov * 100:>7.1f}%  ({lines} lines)")
+        failed_gates.append((label, pct, floor))
 
-# Per-line data: build/lcov.info + uncovered-line report + HTML report.
+total_lines, covered_lines = overall
+overall_pct = (covered_lines / total_lines * 100) if total_lines else float("nan")
+print(f"coverage: {overall_pct:.1f}% ({covered_lines}/{total_lines} lines) "
+      f"· gates {passed}/{len(floors)} PASS")
+for label, pct, floor in failed_gates:
+    print(f"  ✗ {label:<14}{pct:>6.1f}% < {floor:g}%")
+
+# Per-line data: build/lcov.info + uncovered report; full detail in artifacts.
 xccov = subprocess.run(["xcrun", "--find", "xccov"],
                        capture_output=True, text=True, check=True).stdout.strip()
 
@@ -124,38 +124,41 @@ with open("build/lcov.info", "w") as f:
             f.write(f"DA:{line},{count}\n")
         f.write(f"LF:{len(da)}\nLH:{sum(1 for _, c in da if c)}\nend_of_record\n")
 
-uncovered = []
-for rel, da in records:
-    misses = [line for line, count in da if count == 0]
-    if misses:
-        ranges = []
-        start = prev = misses[0]
-        for line in misses[1:]:
-            if line == prev + 1:
-                prev = line
-            else:
-                ranges.append((start, prev))
-                start = prev = line
-        ranges.append((start, prev))
-        uncovered.append((rel, len(misses), ranges))
-
-if uncovered:
-    print("\nUncovered lines:")
-    print("-" * 47)
-    for rel, count, ranges in sorted(uncovered, key=lambda r: (-r[1], r[0])):
-        span = ", ".join(f"{a}" if a == b else f"{a}-{b}" for a, b in ranges)
-        print(f"{rel:<44} {count:>3}  -> {span}")
+if failed_gates:
+    prefix_of = dict(prefixes)
+    failed_prefixes = [prefix_of[label] for label, _, _ in failed_gates]
+    uncovered = []
+    for rel, da in records:
+        if not any(rel.startswith(p) for p in failed_prefixes):
+            continue
+        misses = [line for line, count in da if count == 0]
+        if misses:
+            ranges = []
+            start = prev = misses[0]
+            for line in misses[1:]:
+                if line == prev + 1:
+                    prev = line
+                else:
+                    ranges.append((start, prev))
+                    start = prev = line
+            ranges.append((start, prev))
+            uncovered.append((rel, len(misses), ranges))
+    if uncovered:
+        print("\nuncovered in failed gates:")
+        for rel, count, ranges in sorted(uncovered, key=lambda r: (-r[1], r[0])):
+            span = ", ".join(f"{a}" if a == b else f"{a}-{b}" for a, b in ranges)
+            print(f"  {rel:<44} {count:>3}  lines: {span}")
 
 shutil.rmtree("build/cov-html", ignore_errors=True)
-if subprocess.run(["genhtml", "build/lcov.info", "-o", "build/cov-html", "--quiet"]).returncode == 0:
-    print("\nHTML report: build/cov-html/index.html")
+gen = subprocess.run(["genhtml", "build/lcov.info", "-o", "build/cov-html", "--quiet"],
+                     capture_output=True, text=True)
+if gen.returncode == 0:
+    detail = "build/cov-html/index.html · build/lcov.info"
 else:
-    print("genhtml failed (build/lcov.info is still valid)", file=sys.stderr)
-
-bad = [f for f in files if f[1] < 1.0]
-if bad:
-    print(f"\n{len(bad)} file(s) below 100%:", file=sys.stderr)
+    print(gen.stderr or gen.stdout, end="")
+    detail = "build/lcov.info (genhtml failed)"
+print(f"\ndetail: {detail}")
+print("RESULT: FAIL" if failed_gates else "RESULT: PASS")
 if failed_gates:
-    print(f"\ncoverage gate FAILED: {', '.join(failed_gates)}", file=sys.stderr)
     sys.exit(1)
 PY
