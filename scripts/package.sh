@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Phase 4 — package release DMG:
-#   build/pkg/Mimi.dmg   (~10–30 MB, model downloaded on first launch)
+# Package release DMG:
+#   build/pkg/Mimi.dmg   (~20–40 MB; JMdict dictionary data bundled, ASR
+#                        model downloaded on first launch)
 #
 # Signed with the local self-signed "Mimi Dev" certificate so TCC
 # permission grants (Screen Recording) persist across rebuilds.
@@ -30,6 +31,12 @@ build_app() {
   rm -rf "${out}"
   mkdir -p "$(dirname "${out}")"
   cp -R "${built}" "${out}"
+  # Remove the un-staged build output. It carries no Resources (dictionary
+  # data is staged below, only into the copy), and Release builds have no
+  # dev-checkout fallback for the bundled JMdict — launching it instead of
+  # the packaged app fails every session start with "Bundled JMdict_e.gz
+  # not found in the app bundle".
+  rm -rf "${built}"
 }
 
 sign_app() {
@@ -43,6 +50,27 @@ stage_runtime() {
   local app="$1"
   local fwdir="${app}/Contents/Frameworks"
   mkdir -p "${fwdir}"
+  # Dictionary tokenizer dylib — independent of the ASR runtime. Without it
+  # the dictionary DB can never be built, and session start (see
+  # AppModel.ensureDictionaryReady) fails — such a package is broken.
+  if [[ -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
+    cp -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" "${fwdir}/libdictionary.dylib"
+    codesign --force --sign "${SIGN_IDENTITY}" "${fwdir}/libdictionary.dylib"
+  else
+    echo "ERROR: dictionary runtime not built. Run scripts/build_dictionary.sh first." >&2
+    exit 1
+  fi
+  # Bundled JMdict data — the SQLite DB is built from this locally on first
+  # launch (never bundled, never downloaded). Without it session start
+  # fails with "Bundled JMdict_e.gz not found in the app bundle".
+  if [[ -f "${REPO_ROOT}/local/dictionaries/JMdict_e.gz" ]]; then
+    local resdir="${app}/Contents/Resources"
+    mkdir -p "${resdir}"
+    cp -f "${REPO_ROOT}/local/dictionaries/JMdict_e.gz" "${resdir}/JMdict_e.gz"
+  else
+    echo "ERROR: JMdict_e.gz not fetched. Run scripts/build_dictionary.sh first." >&2
+    exit 1
+  fi
   if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
     echo "WARNING: native runtime not built (scripts/build_runtime.sh); app will run in mock mode."
     return
@@ -99,3 +127,4 @@ make_dmg "${BUILD_DIR}/Mimi.app" "Mimi"
 echo
 echo "Artifacts in ${BUILD_DIR}:"
 ls -lh "${BUILD_DIR}" | grep dmg || true
+echo "Launch ${BUILD_DIR}/Mimi.app (or install the DMG) — not the derived build output."
