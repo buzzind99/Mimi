@@ -1,11 +1,13 @@
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `AppModel` session-control guards, translation wiring, and export
 /// delegation on the main actor. `start()`/`begin()` are excluded: they
 /// trigger the TCC Screen Recording prompt in the test host.
 @MainActor
-final class AppModelTests: XCTestCase {
+@Suite("AppModel session control")
+struct AppModelTests {
 
     // MARK: - Fixtures
 
@@ -22,133 +24,138 @@ final class AppModelTests: XCTestCase {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: sentenceText)
     }
 
-    private func makeTranslatedEntry(index: Int = 0) -> SessionEntry {
-        var entry = SessionEntry(sentence: makeSentence(index: index))
-        entry.appendTranslation(SentenceTranslation(lang: "en", text: translationText))
-        return entry
-    }
-
     /// Lets any spawned teardown task finish before assertions.
-    private func settle() async throws {
-        try await Task.sleep(for: .milliseconds(200))
+    private func settle() async {
+        try? await Task.sleep(for: .milliseconds(200))
     }
 
     // MARK: - stop() guards
 
-    func test_stop_whenIdle_shouldBeNoOp() async throws {
+    @Test("stop is a no-op while idle")
+    func stopWhenIdle() async {
         let model = makeSUT()
         model.phase = .idle
 
         model.stop()
-        try await settle()
+        await settle()
 
-        XCTAssertEqual(model.phase, .idle)
+        #expect(model.phase == .idle)
     }
 
-    func test_stop_whenNeedsModel_shouldBeNoOp() async throws {
+    @Test("stop is a no-op while needs-model")
+    func stopWhenNeedsModel() async {
         let model = makeSUT()
         model.phase = .needsModel
 
         model.stop()
-        try await settle()
+        await settle()
 
-        XCTAssertEqual(model.phase, .needsModel)
+        #expect(model.phase == .needsModel)
     }
 
-    func test_stop_whenFailed_shouldBeNoOp() async throws {
+    @Test("stop is a no-op after a failure")
+    func stopWhenFailed() async {
         let model = makeSUT()
         model.phase = .failed("boom")
 
         model.stop()
-        try await settle()
+        await settle()
 
-        XCTAssertEqual(model.phase, .failed("boom"))
+        #expect(model.phase == .failed("boom"))
     }
 
     // MARK: - stop() teardown
 
-    func test_stop_whenStarting_shouldCancelAndWindDownToIdle() async throws {
+    @Test("stop from starting cancels and winds down to idle")
+    func stopCancelsStarting() async {
         let model = makeSUT()
         model.phase = .starting
 
         model.stop()
 
-        XCTAssertEqual(model.phase, .stopping)
-        try await settle()
-        XCTAssertEqual(model.phase, .idle)
+        #expect(model.phase == .stopping)
+        await settle()
+        #expect(model.phase == .idle)
     }
 
-    func test_stop_whenRunning_shouldWindDownToIdle() async throws {
+    @Test("stop from running winds down to idle and resets translation status")
+    func stopWindsDownRunning() async {
         let model = makeSUT()
         model.phase = .running
 
         model.stop()
 
-        XCTAssertEqual(model.phase, .stopping)
-        try await settle()
-        XCTAssertEqual(model.phase, .idle)
-        XCTAssertEqual(model.translationStatus, .idle)
+        #expect(model.phase == .stopping)
+        await settle()
+        #expect(model.phase == .idle)
+        #expect(model.translationStatus == .idle)
     }
 
-    func test_stop_whenSourceLost_shouldWindDownToIdle() async throws {
+    @Test("stop after losing the source winds down to idle")
+    func stopWindsDownSourceLost() async {
         let model = makeSUT()
         model.phase = .sourceLost
 
         model.stop()
 
-        XCTAssertEqual(model.phase, .stopping)
-        try await settle()
-        XCTAssertEqual(model.phase, .idle)
+        #expect(model.phase == .stopping)
+        await settle()
+        #expect(model.phase == .idle)
     }
 
     // MARK: - retryTranslation()
 
-    func test_retryTranslation_whenConfigNil_shouldCreateConfig() {
+    @Test("retryTranslation creates a configuration when none exists")
+    func retryCreatesConfigWhenNil() {
         let model = makeSUT()
         model.translationConfig = nil
 
         model.retryTranslation()
 
-        XCTAssertNotNil(model.translationConfig)
+        #expect(model.translationConfig != nil)
     }
 
-    func test_retryTranslation_whenConfigPresent_shouldReassignConfig() {
+    @Test("retryTranslation replaces the existing configuration")
+    func retryReassignsConfig() {
         let model = makeSUT()
         model.retryTranslation()
 
         model.retryTranslation()
 
-        XCTAssertNotNil(model.translationConfig)
+        #expect(model.translationConfig != nil)
     }
 
     // MARK: - Sentence handling
 
-    func test_onSentence_shouldAppendEntryAndEnqueueTranslation() async {
+    @Test("a sentence appends an entry and enqueues translation")
+    func onSentenceAppendsAndEnqueues() async {
         let model = makeSUT()
         let sentence = makeSentence()
 
         model.sessionController.onSentence?(sentence)
 
-        XCTAssertEqual(model.entries.count, 1)
-        XCTAssertEqual(model.entries.first?.sentence, sentence)
+        #expect(model.entries.count == 1)
+        #expect(model.entries.first?.sentence == sentence)
         // The queue holds the untranslated sentence, so a bounded drain
         // times out instead of completing immediately.
         let drained = await model.translationQueue.drain(timeout: 0.05)
-        XCTAssertFalse(drained)
+        #expect(!drained)
     }
 
-    func test_onSentence_whenTwoSentences_shouldKeepOrder() {
+    @Test("sentences append in arrival order")
+    func onSentenceKeepsOrder() {
         let model = makeSUT()
 
         model.sessionController.onSentence?(makeSentence(index: 0))
         model.sessionController.onSentence?(makeSentence(index: 1))
 
-        XCTAssertEqual(model.entries.map(\.sentence.index), [0, 1])
+        #expect(model.entries.map(\.sentence.index) == [0, 1])
     }
 
     // MARK: - applyTranslation(index:translation:)
 
-    func test_applyTranslation_whenIndexKnown_shouldAppendTranslation() {
+    @Test("a translation appends to the entry with the matching index")
+    func applyTranslationAppendsWhenKnown() {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
@@ -156,13 +163,14 @@ final class AppModelTests: XCTestCase {
             index: 7, translation: SentenceTranslation(lang: "en", text: translationText)
         )
 
-        XCTAssertEqual(model.entries[0].translations, [
+        #expect(model.entries[0].translations == [
             SentenceTranslation(lang: "en", text: translationText)
         ])
-        XCTAssertEqual(model.entries[0].joinedTranslations, translationText)
+        #expect(model.entries[0].joinedTranslations == translationText)
     }
 
-    func test_applyTranslation_whenIndexUnknown_shouldBeNoOp() {
+    @Test("a translation for an unknown index is ignored")
+    func applyTranslationNoOpWhenUnknown() {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
@@ -170,58 +178,64 @@ final class AppModelTests: XCTestCase {
             index: 99, translation: SentenceTranslation(lang: "en", text: translationText)
         )
 
-        XCTAssertEqual(model.entries[0].translations, [])
-        XCTAssertNil(model.entries[0].joinedTranslations)
+        #expect(model.entries[0].translations == [])
+        #expect(model.entries[0].joinedTranslations == nil)
     }
 
     // MARK: - Capture errors
 
-    func test_onCaptureError_whenRunning_shouldMarkSourceLost() {
+    @Test("a capture error while running marks the source lost")
+    func onCaptureErrorMarksSourceLostWhenRunning() {
         let model = makeSUT()
         model.phase = .running
 
         model.sessionController.onCaptureError?("stream died")
 
-        XCTAssertEqual(model.phase, .sourceLost)
-        XCTAssertEqual(model.errorMessage, "stream died")
+        #expect(model.phase == .sourceLost)
+        #expect(model.errorMessage == "stream died")
     }
 
-    func test_onCaptureError_whenStarting_shouldMarkSourceLost() {
+    @Test("a capture error while starting marks the source lost")
+    func onCaptureErrorMarksSourceLostWhenStarting() {
         let model = makeSUT()
         model.phase = .starting
 
         model.sessionController.onCaptureError?("stream died during start")
 
-        XCTAssertEqual(model.phase, .sourceLost)
-        XCTAssertEqual(model.errorMessage, "stream died during start")
+        #expect(model.phase == .sourceLost)
+        #expect(model.errorMessage == "stream died during start")
     }
 
-    func test_onCaptureError_whenIdle_shouldBeIgnored() {
+    @Test("a capture error while idle is ignored")
+    func onCaptureErrorIgnoredWhenIdle() {
         let model = makeSUT()
         model.phase = .idle
 
         model.sessionController.onCaptureError?("stream died")
 
-        XCTAssertEqual(model.phase, .idle)
-        XCTAssertNil(model.errorMessage)
+        #expect(model.phase == .idle)
+        #expect(model.errorMessage == nil)
     }
 
     // MARK: - Export
 
-    func test_isExportable_whenNoEntries_shouldBeFalse() {
+    @Test("nothing is exportable without entries")
+    func notExportableWhenEmpty() {
         let model = makeSUT()
 
-        XCTAssertFalse(model.isExportable)
+        #expect(!model.isExportable)
     }
 
-    func test_isExportable_whenEntriesExist_shouldBeTrue() {
+    @Test("entries make the session exportable")
+    func exportableWhenEntriesExist() {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
 
-        XCTAssertTrue(model.isExportable)
+        #expect(model.isExportable)
     }
 
-    func test_exportText_shouldDelegateToPlainExporter() {
+    @Test("exportText delegates to the plain exporter")
+    func exportTextDelegatesToPlainExporter() {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
@@ -230,19 +244,21 @@ final class AppModelTests: XCTestCase {
 
         let output = model.exportText()
 
-        XCTAssertEqual(output, SessionExporter.plainText(entries: model.entries))
+        #expect(output == SessionExporter.plainText(entries: model.entries))
     }
 
-    func test_export_whenTxt_shouldMatchPlainExporter() throws {
+    @Test("txt export matches the plain exporter")
+    func exportTxtMatchesPlainExporter() throws {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
 
         let data = try model.export(format: .txt)
 
-        XCTAssertEqual(data, Data(SessionExporter.plainText(entries: model.entries).utf8))
+        #expect(data == Data(SessionExporter.plainText(entries: model.entries).utf8))
     }
 
-    func test_export_whenSrt_shouldMatchSubtitleExporter() throws {
+    @Test("srt export matches the subtitle exporter")
+    func exportSrtMatchesSubtitleExporter() throws {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
@@ -251,12 +267,11 @@ final class AppModelTests: XCTestCase {
 
         let data = try model.export(format: .srt)
 
-        XCTAssertEqual(
-            data, Data(SessionExporter.subtitles(entries: model.entries, format: .srt).utf8)
-        )
+        #expect(data == Data(SessionExporter.subtitles(entries: model.entries, format: .srt).utf8))
     }
 
-    func test_export_whenVtt_shouldMatchSubtitleExporter() throws {
+    @Test("vtt export matches the subtitle exporter")
+    func exportVttMatchesSubtitleExporter() throws {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
@@ -265,12 +280,11 @@ final class AppModelTests: XCTestCase {
 
         let data = try model.export(format: .vtt)
 
-        XCTAssertEqual(
-            data, Data(SessionExporter.subtitles(entries: model.entries, format: .vtt).utf8)
-        )
+        #expect(data == Data(SessionExporter.subtitles(entries: model.entries, format: .vtt).utf8))
     }
 
-    func test_export_whenJson_shouldFallBackForNilMetadata() throws {
+    @Test("json export falls back to defaults for nil session metadata")
+    func exportJsonFallsBackForNilMetadata() throws {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
 
@@ -279,18 +293,19 @@ final class AppModelTests: XCTestCase {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let doc = try decoder.decode(SessionExporter.JSONSessionDocument.self, from: data)
-        XCTAssertEqual(doc.schemaVersion, 1)
-        XCTAssertEqual(doc.session.sourceLang, "ja")
-        XCTAssertEqual(doc.session.targetLang, "en")
-        XCTAssertNil(doc.session.model)
-        XCTAssertEqual(doc.session.chunkMS, 160)
-        XCTAssertEqual(doc.sentences.count, 1)
-        XCTAssertEqual(doc.sentences[0].index, 0)
-        XCTAssertEqual(doc.sentences[0].transcript, sentenceText)
-        XCTAssertEqual(doc.sentences[0].translations, [])
+        #expect(doc.schemaVersion == 1)
+        #expect(doc.session.sourceLang == "ja")
+        #expect(doc.session.targetLang == "en")
+        #expect(doc.session.model == nil)
+        #expect(doc.session.chunkMS == 160)
+        #expect(doc.sentences.count == 1)
+        #expect(doc.sentences[0].index == 0)
+        #expect(doc.sentences[0].transcript == sentenceText)
+        #expect(doc.sentences[0].translations == [])
     }
 
-    func test_export_whenJson_shouldSnapshotLatestTranslation() throws {
+    @Test("json export snapshots the latest translation")
+    func exportJsonSnapshotsLatestTranslation() throws {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
@@ -302,81 +317,98 @@ final class AppModelTests: XCTestCase {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let doc = try decoder.decode(SessionExporter.JSONSessionDocument.self, from: data)
-        XCTAssertEqual(doc.sentences[0].translations, [
+        #expect(doc.sentences[0].translations == [
             SentenceTranslation(lang: "en", text: translationText)
         ])
     }
 
     // MARK: - Session controller wiring
 
-    func test_onSessionBegin_shouldClearTranscriptState() {
+    @Test("session begin clears the transcript state")
+    func onSessionBeginClearsTranscriptState() {
         let model = makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.hudPinnedIndex = 3
 
         model.sessionController.onSessionBegin?()
 
-        XCTAssertTrue(model.entries.isEmpty)
-        XCTAssertNil(model.hudPinnedIndex)
+        #expect(model.entries.isEmpty)
+        #expect(model.hudPinnedIndex == nil)
     }
 
-    func test_onEngineChosen_shouldPublishEngineInfo() {
+    @Test("engine chosen publishes the engine info")
+    func onEngineChosenPublishesEngineInfo() {
         let model = makeSUT()
         let url = URL(fileURLWithPath: "/tmp/model.gguf")
 
         model.sessionController.onEngineChosen?(true, url)
 
-        XCTAssertTrue(model.engineIsMock)
-        XCTAssertEqual(model.modelURL, url)
+        #expect(model.engineIsMock)
+        #expect(model.modelURL == url)
     }
 
-    func test_onEngineError_shouldPublishErrorMessage() {
+    @Test("engine error publishes the error message")
+    func onEngineErrorPublishesErrorMessage() {
         let model = makeSUT()
 
         model.sessionController.onEngineError?("engine broke")
 
-        XCTAssertEqual(model.errorMessage, "engine broke")
+        #expect(model.errorMessage == "engine broke")
     }
 
-    func test_translationQueueStatusHandler_shouldPublishStatus() {
+    @Test("the translation queue status handler publishes the status")
+    func translationQueueStatusHandlerPublishesStatus() {
         let model = makeSUT()
         model.translationStatus = .translating
 
         model.translationQueue.resetForRetry()
 
-        XCTAssertEqual(model.translationStatus, .idle)
+        #expect(model.translationStatus == .idle)
     }
 
     // MARK: - refreshModelAvailability / start() guards
 
-    func test_refreshModelAvailability_whenModelResolves_shouldRecoverFromNeedsModel() {
+    @Test("model discovery recovers a needs-model session when a model resolves")
+    func refreshModelAvailabilityRecoversFromNeedsModel() {
         let model = makeSUT()
         model.phase = .needsModel
 
-        model.refreshModelAvailability()
+        model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
 
-        XCTAssertEqual(model.phase, .idle)
+        #expect(model.phase == .idle)
     }
 
-    func test_start_whenNotIdle_shouldBeNoOp() {
+    @Test("model discovery marks needs-model when nothing resolves")
+    func refreshModelAvailabilityNeedsModelWhenNothingResolves() {
+        let model = makeSUT()
+        model.phase = .idle
+
+        model.refreshModelAvailability(resolve: { nil })
+
+        #expect(model.phase == .needsModel)
+    }
+
+    @Test("start is a no-op when not idle")
+    func startWhenNotIdleIsNoOp() {
         let model = makeSUT()
         model.phase = .running
 
         model.start()
 
-        XCTAssertEqual(model.phase, .running)
+        #expect(model.phase == .running)
     }
 
     // MARK: - App termination
 
-    func test_appWillTerminateNotification_whenRunning_shouldStop() async throws {
+    @Test("the app-terminate notification stops a running session")
+    func terminateNotificationStopsRunningSession() async {
         let model = makeSUT()
         model.phase = .running
 
-        NotificationCenter.default.post(name: AppModelTests.willTerminateNotification, object: nil)
-        try await settle()
+        NotificationCenter.default.post(name: Self.willTerminateNotification, object: nil)
+        await settle()
 
-        XCTAssertEqual(model.phase, .idle)
+        #expect(model.phase == .idle)
     }
 
     private static let willTerminateNotification = NSNotification.Name("MimiAppWillTerminate")

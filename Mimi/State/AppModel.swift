@@ -98,8 +98,10 @@ final class AppModel: ObservableObject {
 
     // MARK: - Model / app discovery
 
-    func refreshModelAvailability() {
-        modelURL = ModelLocator.resolve()
+    /// Re-checks the model location and moves `idle`↔`needsModel` accordingly.
+    /// `resolve` is injectable for tests; the default drives the real locator.
+    func refreshModelAvailability(resolve: () -> URL? = { ModelLocator.resolve() }) {
+        modelURL = resolve()
         if modelURL == nil, phase == .idle {
             phase = .needsModel
         } else if modelURL != nil, phase == .needsModel {
