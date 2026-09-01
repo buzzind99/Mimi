@@ -260,40 +260,12 @@ struct DictionaryEngineTests {
 
 // MARK: - DictionaryEngine (live runtime)
 
-/// The live runtime shared by the live suite: the store's prepared dictionary
-/// when one resolves (first launch or `MIMI_DICT`), else the script-fetched
-/// model decompressed once into a private temp file. nil when the dylib or a
-/// dictionary is unavailable — the suite disables itself.
-private enum LiveRuntime {
-    static let engine: DictionaryEngine? = {
-        guard let ffi = DictionaryFFI.load() else { return nil }
-        if let resolved = DictionaryStore.resolve() {
-            return DictionaryEngine(ffi: ffi, resolveDictionary: { resolved })
-        }
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let model = repoRoot.appendingPathComponent(
-            "local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst"
-        )
-        guard FileManager.default.fileExists(atPath: model.path) else { return nil }
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimi-dictengine-live.ipadic.dic")
-        guard ffi.prepare(model.path, destination.path) == 0 else { return nil }
-        return DictionaryEngine(ffi: ffi, resolveDictionary: { destination })
-    }()
-
-    static var isAvailable: Bool {
-        engine != nil
-    }
-}
-
 /// Exercises the real `libdictionary.dylib` against the real IPADIC model.
 /// Gate B lives here: vibrato performs no normalization, so every span must
 /// index the original input's Unicode scalars by construction — the
-/// adversarial tests pin it.
-@Suite("DictionaryEngine live runtime", .enabled(if: LiveRuntime.isAvailable))
+/// adversarial tests pin it. The shared `LiveDictionaryRuntime` backs the
+/// suite (see its doc comment for the leak-test footprint constraint).
+@Suite("DictionaryEngine live runtime", .enabled(if: LiveDictionaryRuntime.isAvailable))
 struct DictionaryEngineLiveTests {
 
     // MARK: Helpers
@@ -310,7 +282,7 @@ struct DictionaryEngineLiveTests {
 
     @Test("tokenizes the student sentence into four surfaces")
     func studentSentenceSurfaces() throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("私は学生です"))
 
@@ -319,7 +291,7 @@ struct DictionaryEngineLiveTests {
 
     @Test("carries hiragana readings per surface")
     func studentSentenceReadings() throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("私は学生です"))
 
@@ -328,7 +300,7 @@ struct DictionaryEngineLiveTests {
 
     @Test("carries surface readings for conjugated tokens (食べました)")
     func conjugatedSurfaceReadings() throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("食べました"))
 
@@ -340,7 +312,7 @@ struct DictionaryEngineLiveTests {
 
     @Test("emits counters as token pairs for the Swift fusion pass (一回)")
     func counterTokenPair() throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("一回"))
 
@@ -349,7 +321,7 @@ struct DictionaryEngineLiveTests {
 
     @Test("spans the rare ideograph as one original-input scalar, unread")
     func rareIdeographSpanAndNullReading() throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("𠮷"))
 
@@ -358,7 +330,7 @@ struct DictionaryEngineLiveTests {
 
     @Test("leaves the space uncovered between tokens (A B)")
     func whitespaceGapUncovered() throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize("A B"))
 
@@ -387,7 +359,7 @@ struct DictionaryEngineLiveTests {
         "cafe\u{0301}"
     ])
     func spansIndexOriginalScalars(input: String) throws {
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         let tokens = try #require(engine.tokenize(input))
         let scalars = Array(input.unicodeScalars)
@@ -413,7 +385,7 @@ struct DictionaryEngineLiveTests {
     func repeatedTokenizationKeepsMemoryFlat() throws {
         let heavySentence = "今日はいい天気ですね。動画を見ます。学校へ行く"
         let leakIterations = 1000
-        let engine = try #require(LiveRuntime.engine)
+        let engine = try #require(LiveDictionaryRuntime.engine)
 
         for _ in 0 ..< 100 {
             _ = engine.tokenize(heavySentence)
