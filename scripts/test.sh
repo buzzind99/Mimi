@@ -112,7 +112,7 @@ floors = {
     "Translation/": 96.5,
     "Model/":       79.5,
     "ASR/":         43.0,
-    "Audio/":        8.0,
+    "Audio/":       74.6,
 }
 failed_gates = []
 passed = 0

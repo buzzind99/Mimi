@@ -154,9 +154,25 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         }
     }
 
+    // MARK: - Test seam
+
+    /// Marks the capture as running without a live SCK stream so the delegate
+    /// data path can be exercised directly via `handleSampleBuffer`.
+    /// Production reaches the same state through `start()`.
+    func setRunningForTesting(_ value: Bool) {
+        stateLock.withLock { isRunning = value }
+    }
+
     // MARK: - SCStreamDelegate
 
+    /// Forwards to the internal seam — tests drive `handleStreamStopped`
+    /// directly instead of constructing an `SCStream`.
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        handleStreamStopped(error)
+    }
+
+    /// `SCStreamDelegate` seam: teardown of a dead stream.
+    func handleStreamStopped(_ error: Error) {
         stateLock.lock()
         guard isRunning else {
             stateLock.unlock()
@@ -164,16 +180,25 @@ final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
         }
         isRunning = false
         stateLock.unlock()
-        self.stream = nil
+        stream = nil
         onIOError?(.streamSetupFailed(error.localizedDescription))
     }
 
     // MARK: - SCStreamOutput
 
+    /// Forwards to the internal seam — tests drive `handleSampleBuffer`
+    /// directly with synthesized sample buffers.
     func stream(
         _ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
+        handleSampleBuffer(sampleBuffer, type: type)
+    }
+
+    /// `SCStreamOutput` seam: the sample callback data path (guards, downmix,
+    /// resample, chunking). Synchronous, so tests get a deterministic stop
+    /// fence.
+    func handleSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: SCStreamOutputType) {
         guard type == .audio, isRunning, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
         guard let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {

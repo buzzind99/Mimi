@@ -47,17 +47,23 @@ enum SampleBufferSynthesis {
     ///   - format: payload encoding (see `PayloadFormat`).
     ///   - dataReady: `false` exercises the data-not-ready guard in the
     ///     sample callback.
+    ///   - withFormatDescription: `false` creates the buffer without a
+    ///     format description, exercising the sample callback's
+    ///     missing-description guard.
     static func make(
         frames: Int,
         channels: Int = 1,
         sampleRate: Double = SystemAudioCapture.outputSampleRate,
         interleaved: Bool = true,
         format: PayloadFormat = .float32,
-        dataReady: Bool = true
+        dataReady: Bool = true,
+        withFormatDescription: Bool = true
     ) throws -> CMSampleBuffer {
-        let formatDescription = try makeFormatDescription(
-            channels: channels, sampleRate: sampleRate, interleaved: interleaved, format: format
-        )
+        let formatDescription: CMFormatDescription? = try withFormatDescription
+            ? makeFormatDescription(
+                channels: channels, sampleRate: sampleRate, interleaved: interleaved, format: format
+            )
+            : nil
         let payload = makePayload(
             frames: frames, channels: channels, interleaved: interleaved, format: format
         )
