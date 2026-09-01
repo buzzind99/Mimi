@@ -20,6 +20,7 @@ enum LiveDictionaryRuntime {
         let repoRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let model = repoRoot.appendingPathComponent(
             "local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst"
         )
