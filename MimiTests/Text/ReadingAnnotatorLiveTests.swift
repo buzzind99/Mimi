@@ -5,9 +5,9 @@ import Testing
 // MARK: - Live dictionary corpus
 
 /// Annotations pinned against the real IPADIC model (live tokenizer
-/// runtime): one surface-walking reading per token, MeCab segmentation
-/// (morpheme-level — conjugated verbs split into stem + ending where the
-/// JMdict engine emitted one token). The shared `LiveDictionaryRuntime`
+/// runtime): one surface-walking reading per token, MeCab morpheme-level
+/// segmentation (conjugated verbs split into stem + ending). The shared
+/// `LiveDictionaryRuntime`
 /// backs the suite (prepared dictionary, else the fetched model decompressed
 /// once into a temp file).
 @Suite("ReadingAnnotator dictionary corpus", .enabled(if: LiveDictionaryRuntime.isAvailable))
@@ -114,7 +114,7 @@ struct ReadingAnnotatorLiveTests {
 
     // MARK: counters
 
-    @Test("geminate-fuses the 十+回 token pair (じゅっかい; じっかい is equally valid — the old suite pinned JMdict's じっかい)")
+    @Test("geminate-fuses the 十+回 token pair (じゅっかい; じっかい is equally valid)")
     func tenCounter() throws {
         let segments = try segments("十回")
 
@@ -134,28 +134,28 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == expected)
     }
 
-    @Test("splits 二十日 into the numeral run + 日 (JMdict's はつか is lost — documented IPADIC degradation)")
+    @Test("splits 二十日 into the numeral run + 日 (はつか is lost — documented IPADIC degradation)")
     func hatsukaSplits() throws {
         let segments = try segments("二十日")
 
         #expect(describe(segments) == [["二十", "nijuu", "にじゅう"], ["日", "nichi", "にち"]])
     }
 
-    @Test("fuses 二十歳 with the geminated counter (にじゅっさい; JMdict's はたち is lost — documented)")
+    @Test("fuses 二十歳 with the geminated counter (にじゅっさい; はたち is lost — documented)")
     func nijussai() throws {
         let segments = try segments("二十歳")
 
         #expect(describe(segments) == [["二十歳", "nijussai", "にじゅっさい"]])
     }
 
-    @Test("splits 十四日 into the numeral run + 日 (JMdict's じゅうよっか is lost — documented)")
+    @Test("splits 十四日 into the numeral run + 日 (じゅうよっか is lost — documented)")
     func juuyokkaSplits() throws {
         let segments = try segments("十四日")
 
         #expect(describe(segments) == [["十四", "juuyon", "じゅうよん"], ["日", "nichi", "にち"]])
     }
 
-    @Test("splits 2本 into numeral + counter (にほん; the old suite pinned the fused JMdict token)",
+    @Test("splits 2本 into numeral + counter (にほん)",
           arguments: [
               ("二本", [["二", "ni", "に"], ["本", "hon", "ほん"]]),
               ("三本", [["三", "san", "さん"], ["本", "bon", "ほん"]])
@@ -366,7 +366,7 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["A", "A", nil], [" ", " ", nil], ["B", "B", nil]])
     }
 
-    @Test("splits 𠮷野家 around the unmodeled ideograph (old suite pinned the fused JMdict entry)")
+    @Test("splits 𠮷野家 around the unmodeled ideograph")
     func rareKanjiCompound() throws {
         let segments = try segments("𠮷野家")
 
