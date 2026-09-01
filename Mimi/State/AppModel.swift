@@ -32,6 +32,10 @@ final class AppModel: ObservableObject {
     /// view; nil tracks the newest.
     @Published var hudPinnedIndex: Int?
     @Published var errorMessage: String?
+    /// True while a session start is blocked on the first-launch dictionary
+    /// build (see `ensureDictionaryReady`) so the status bar can show
+    /// "Building dictionary…" instead of "Starting…".
+    @Published private(set) var isPreparingDictionary = false
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
     @Published var translationConfig: TranslationSession.Configuration?
@@ -57,6 +61,7 @@ final class AppModel: ObservableObject {
             }
         )
         refreshModelAvailability()
+        prepareDictionaryIfNeeded()
 
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("MimiAppWillTerminate"), object: nil, queue: .main
@@ -103,6 +108,56 @@ final class AppModel: ObservableObject {
         sessionController.warmUpIfNeeded(modelURL: modelURL)
     }
 
+    // MARK: - Dictionary preparation
+
+    /// Kicks the first-launch dictionary build (bundled `JMdict_e.gz` → local
+    /// SQLite, see `DictionaryStore`) in the background so ruby annotations
+    /// come up soon after startup. Purely opportunistic: until it succeeds
+    /// (or if it never does) text renders unannotated, so failures are
+    /// logged only and retried on the next launch. `resolve`/`prepare` are
+    /// injectable for tests; the defaults drive the real store.
+    func prepareDictionaryIfNeeded(
+        resolve: () -> URL? = { DictionaryStore.resolve() },
+        prepare: ((@escaping (Result<URL, Error>) -> Void) -> Void) = {
+            DictionaryStore.shared.prepare(completion: $0)
+        }
+    ) {
+        guard resolve() == nil else { return }
+        prepare { result in
+            if case let .failure(error) = result {
+                print(
+                    "[dictionary] first-launch build failed; text stays unannotated: \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    /// Session-start gate: a session must never run while furigana is
+    /// silently missing, so a missing database is built before capture
+    /// begins. The launch-time kick (`prepareDictionaryIfNeeded`, above)
+    /// usually finishes the build first; this coalesces behind an in-flight
+    /// build on the store's queue and only blocks when none is running.
+    /// A failed build throws so the start fails visibly in the status bar
+    /// (pressing Start again retries). `resolve`/`prepare` are injectable
+    /// for tests; the defaults drive the real store.
+    func ensureDictionaryReady(
+        resolve: () -> URL? = { DictionaryStore.resolve() },
+        prepare: (@escaping (Result<URL, Error>) -> Void) -> Void = {
+            DictionaryStore.shared.prepare(completion: $0)
+        }
+    ) async throws {
+        guard resolve() == nil else { return }
+        isPreparingDictionary = true
+        defer { isPreparingDictionary = false }
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, any Error>) in
+            prepare { result in
+                // The store completes on the main queue; resuming here hops
+                // us back onto the main actor.
+                continuation.resume(with: result)
+            }
+        }
+    }
+
     // MARK: - Session control
 
     func start() {
@@ -112,6 +167,7 @@ final class AppModel: ObservableObject {
 
         Task { @MainActor in
             do {
+                try await self.ensureDictionaryReady()
                 try await self.beginSession()
             } catch {
                 self.phase = .failed(error.localizedDescription)

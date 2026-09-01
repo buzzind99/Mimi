@@ -29,8 +29,13 @@ struct StatusBarView: View {
             Label("Source lost — start capture again", systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
         case .starting:
-            Label("Starting…", systemImage: "hourglass")
-                .font(.caption)
+            if model.isPreparingDictionary {
+                Label("Building dictionary…", systemImage: "book")
+                    .font(.caption)
+            } else {
+                Label("Starting…", systemImage: "hourglass")
+                    .font(.caption)
+            }
         case .stopping:
             Label("Stopping…", systemImage: "hourglass.bottomhalf.filled")
                 .font(.caption)
