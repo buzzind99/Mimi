@@ -91,13 +91,14 @@ final class ReadingAnnotator {
 
     /// Emits a non-numeral token: the dictionary's surface reading converted
     /// to romaji (with particle and lexical overrides), furigana only for
-    /// kanji-bearing surfaces. Tokens without a reading (names, rare
-    /// ideographs, punctuation, bare Latin) stay self-transcribed and
-    /// unannotated.
+    /// kanji-bearing surfaces. Kana-only tokens without a dictionary reading
+    /// (unknown katakana, stray kana) read themselves by construction; other
+    /// entry-less tokens (names, rare ideographs, punctuation, bare Latin)
+    /// stay self-transcribed and unannotated.
     private func appendToken(
         _ token: DictionaryToken, surface: String, into segments: inout [ReadingSegment]
     ) {
-        guard let reading = token.reading else {
+        guard let reading = token.reading ?? Self.selfReading(surface) else {
             segments.append(ReadingSegment(surface: surface, romaji: surface, furigana: nil))
             return
         }
@@ -110,8 +111,33 @@ final class ReadingAnnotator {
         segments.append(ReadingSegment(
             surface: surface,
             romaji: romaji,
-            furigana: Self.containsKanji(surface) ? reading : nil
+            furigana: Self.furigana(surface: surface, reading: reading)
         ))
+    }
+
+    /// A kana-only surface's reading is the surface itself: kana carries its
+    /// pronunciation by construction, so unknown katakana and stray kana
+    /// still romaji-convert instead of rendering unannotated.
+    private static func selfReading(_ surface: String) -> String? {
+        guard !surface.isEmpty else { return nil }
+        return surface.unicodeScalars.allSatisfy(isKana) ? surface : nil
+    }
+
+    /// Furigana for kanji-bearing surfaces: the reading run aligned with the
+    /// surface (`ReadingAlignment`) — under IPADIC's per-surface readings
+    /// this succeeds for essentially every conjugated token (見た → み walks
+    /// 見). Rare quirky readings that don't walk their surface fall back to
+    /// the whole-surface reading — shown, never hidden (the JMdict-era
+    /// reinflect/hidden paths are gone). Kana-only surfaces need none.
+    private static func furigana(surface: String, reading: String) -> String? {
+        guard containsKanji(surface) else { return nil }
+        return ReadingAlignment.runs(surface: surface, reading: reading)?
+            .map(\.kana).joined() ?? reading
+    }
+
+    private static func isKana(_ scalar: Unicode.Scalar) -> Bool {
+        (0x3041 ... 0x309F).contains(scalar.value)
+            || (0x30A1 ... 0x30FF).contains(scalar.value)
     }
 
     /// Emits a kana reading (from the dictionary, the digit table, or a
@@ -262,7 +288,11 @@ final class ReadingAnnotator {
            let stem = Self.geminationStem(of: held.kana), Self.isGeminable(reading)
         {
             pending = nil
-            append(surface: held.surface + surface, kana: stem + "っ" + reading, into: &segments)
+            append(
+                surface: held.surface + surface,
+                kana: stem + "っ" + Self.postSokuonVoicing(reading),
+                into: &segments
+            )
             return true
         }
         pending = nil
@@ -294,6 +324,20 @@ final class ReadingAnnotator {
     /// the fusion must not produce ろっさい.
     private static func rokuException(numberKana: String, counterKana: String) -> Bool {
         numberKana == "ろく" && ["さい", "とう", "せん"].contains { counterKana.hasPrefix($0) }
+    }
+
+    /// The written form a counter takes after the geminating っ: a は/ば-row
+    /// onset voices to the p-series (八+分 → はっぷん, 八+番 → はっぱん),
+    /// matching how `KanaRomaji` realizes the sound.
+    private static func postSokuonVoicing(_ kana: String) -> String {
+        let voiced = [
+            "は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ",
+            "ば": "ぱ", "び": "ぴ", "ぶ": "ぷ", "べ": "ぺ", "ぼ": "ぽ"
+        ]
+        guard let first = kana.first, let p = voiced[String(first)] else {
+            return kana
+        }
+        return p + kana.dropFirst()
     }
 
     /// Digit runs whose counter readings the dictionary can't see, in kana
