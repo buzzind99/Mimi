@@ -70,8 +70,7 @@ enum KanaRomaji {
     /// Two-kana combinations: y-digraphs (きゃ → "kya"), the foreign forms
     /// (ファ → "fa", ヴァ → "va", ティ → "ti", とぅ → "tu", ウォ → "wo")
     /// and the ち-row spellings (ちゃ → "cha"). Long vowels need no entries
-    /// (とう = と + う). Mirrors the inverse table in KanaConversion plus the
-    /// katakana forms dictionary readings use.
+    /// (とう = と + う).
     private static let digraphs: [String: String] = [
         "きゃ": "kya", "きゅ": "kyu", "きょ": "kyo",
         "ぎゃ": "gya", "ぎゅ": "gyu", "ぎょ": "gyo",
