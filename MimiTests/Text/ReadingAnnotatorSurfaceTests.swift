@@ -11,8 +11,8 @@ struct ReadingAnnotatorSurfaceTests {
     func concatenateBack() throws {
         let text = "600回、桜ですA B𠮷"
         let annotator = makeAnnotator(tokens(
-            ["6", "0", "0", "回", "、", "桜", "です", "A", " ", "B", "𠮷"],
-            readings: [nil, nil, nil, "かい", nil, "さくら", "です", nil, nil, nil, nil]
+            ["600", "回", "、", "桜", "です", "A", " ", "B", "𠮷"],
+            readings: [nil, "かい", nil, "さくら", "です", nil, nil, nil, nil]
         ))
 
         let segments = try #require(annotator.segments(for: text))

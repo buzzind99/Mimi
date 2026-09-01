@@ -94,14 +94,51 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == [["抹茶", "matcha", "まっちゃ"]])
     }
 
-    @Test("self-transcribes tokens without a reading unannotated",
-          arguments: [("𠮷", "𠮷"), ("。", "。"), ("H", "H"), ("っ", "っ")])
+    @Test("self-transcribes entry-less non-kana tokens unannotated",
+          arguments: [("𠮷", "𠮷"), ("。", "。"), ("H", "H"), ("亜かな", "亜かな")])
     func readingLessSelfTranscribed(surface: String, romaji: String) throws {
         let annotator = makeAnnotator([token(surface, start: 0)])
 
         let segments = try #require(annotator.segments(for: surface))
 
         #expect(describe(segments) == [[surface, romaji, nil]])
+    }
+
+    @Test("kana-only tokens without a reading read themselves",
+          arguments: [("かな", "kana"), ("カタカナ", "katakana"), ("っ", "tsu")])
+    func kanaSelfReading(surface: String, romaji: String) throws {
+        let annotator = makeAnnotator([token(surface, start: 0)])
+
+        let segments = try #require(annotator.segments(for: surface))
+
+        #expect(describe(segments) == [[surface, romaji, nil]])
+    }
+
+    @Test("furigana walks the surface for conjugated tokens (見た/みた)")
+    func conjugatedFurigana() throws {
+        let annotator = makeAnnotator([token("見た", start: 0, reading: "みた")])
+
+        let segments = try #require(annotator.segments(for: "見た"))
+
+        #expect(describe(segments) == [["見た", "mita", "みた"]])
+    }
+
+    @Test("folds katakana surfaces onto the hiragana reading for furigana")
+    func katakanaFuriganaAlignment() throws {
+        let annotator = makeAnnotator([token("ゲーム版", start: 0, reading: "げーむばん")])
+
+        let segments = try #require(annotator.segments(for: "ゲーム版"))
+
+        #expect(describe(segments) == [["ゲーム版", "geemuban", "げーむばん"]])
+    }
+
+    @Test("quirky readings that don't walk the surface fall back to whole-surface furigana")
+    func quirkyReadingFallback() throws {
+        let annotator = makeAnnotator([token("買った", start: 0, reading: "かう")])
+
+        let segments = try #require(annotator.segments(for: "買った"))
+
+        #expect(describe(segments) == [["買った", "kau", "かう"]])
     }
 
     @Test("falls back to the surface romaji when the reading can't convert")
