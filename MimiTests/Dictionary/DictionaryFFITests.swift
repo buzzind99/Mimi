@@ -1,20 +1,24 @@
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 // MARK: - DictionaryFFI loading
 
-final class DictionaryFFITests: XCTestCase {
+@Suite("DictionaryFFI loading")
+struct DictionaryFFITests {
 
-    func test_load_whenLibraryMissing_shouldReturnNil() {
+    @Test("returns nil when the library is missing")
+    func libraryMissing() {
         let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in nil }
         let symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { _, _ in nil }
 
         let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)
 
-        XCTAssertNil(ffi)
+        #expect(ffi == nil)
     }
 
-    func test_load_whenFirstCandidateFails_shouldTryNextCandidate() {
+    @Test("tries the next candidate after a failed load")
+    func firstCandidateFailsTriesNext() {
         var attempts = 0
         let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in
             attempts += 1
@@ -26,39 +30,40 @@ final class DictionaryFFITests: XCTestCase {
 
         let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)
 
-        XCTAssertNotNil(ffi, "the second candidate must bind")
-        XCTAssertEqual(attempts, 2, "the second candidate should be tried after the first fails")
+        #expect(ffi != nil, "the second candidate must bind")
+        #expect(attempts == 2, "the second candidate should be tried after the first fails")
     }
 
-    func test_load_whenRequiredSymbolMissing_shouldReturnNil() {
+    @Test("returns nil when the open symbol is missing")
+    func openSymbolMissing() {
         let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in
             UnsafeMutableRawPointer(bitPattern: 1)
         }
         let symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { _, name in
-            // "tentoku_build_db" is the dylib's ABI literal, mirrored here.
-            name == "tentoku_build_db" ? nil : UnsafeMutableRawPointer(strdup(name))
+            // "dictionary_open" is the dylib's ABI literal, mirrored here.
+            name == "dictionary_open" ? nil : UnsafeMutableRawPointer(strdup(name))
         }
 
         let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)
 
-        XCTAssertNil(ffi)
+        #expect(ffi == nil)
     }
 
-    func test_load_whenLookupSymbolMissing_shouldReturnNil() {
+    @Test("returns nil when the prepare symbol is missing")
+    func prepareSymbolMissing() {
         let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in
             UnsafeMutableRawPointer(bitPattern: 1)
         }
         let symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { _, name in
-            // "tentoku_lookup_json" is the dylib's ABI literal, mirrored here.
-            name == "tentoku_lookup_json" ? nil : UnsafeMutableRawPointer(strdup(name))
+            // "dictionary_prepare" is the dylib's ABI literal, mirrored here.
+            name == "dictionary_prepare" ? nil : UnsafeMutableRawPointer(strdup(name))
         }
 
         let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)
 
-        XCTAssertNil(ffi)
+        #expect(ffi == nil)
     }
 
-    func test_load_withRealRuntime_shouldBindAllSymbols() throws {
-        try XCTSkipIf(DictionaryFFI.load() == nil, "libdictionary.dylib is not available")
-    }
+    @Test("binds all symbols from the real runtime", .enabled(if: DictionaryFFI.load() != nil))
+    func realRuntimeBindsAllSymbols() {}
 }

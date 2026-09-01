@@ -40,7 +40,6 @@ private var fakeOpenCalls = 0
 private var fakeOpenFailuresBeforeSuccess = 0
 
 private var fakeTokenizeCalls = 0
-private var fakeTokenizeReceivedMax: UInt32 = 0
 /// Raw JSON the tokenize fake returns; nil means "return a null pointer".
 private var fakeTokenizeJSONText: String?
 
@@ -52,10 +51,9 @@ private func fakeOpenCounting(_ dbPath: UnsafePointer<CChar>) -> UnsafeMutableRa
 }
 
 private func fakeTokenizeWithPayload(
-    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>, _ maxResults: UInt32
+    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
     fakeTokenizeCalls += 1
-    fakeTokenizeReceivedMax = maxResults
     guard let text = fakeTokenizeJSONText else { return nil }
     return strdup(text)
 }
@@ -63,7 +61,7 @@ private func fakeTokenizeWithPayload(
 /// Raw byte payload with an invalid UTF-8 lead byte (0xFF), built with malloc
 /// so the fake freeString's `free()` stays paired.
 private func fakeTokenizeInvalidUTF8(
-    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>, _ maxResults: UInt32
+    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
     fakeTokenizeCalls += 1
     guard let raw = malloc(2) else { return nil }
@@ -71,18 +69,6 @@ private func fakeTokenizeInvalidUTF8(
     pointer[0] = CChar(bitPattern: 0xFF)
     pointer[1] = 0
     return pointer
-}
-
-private func fakeBuildDBUnused(
-    _ dbPath: UnsafePointer<CChar>, _ gzPath: UnsafePointer<CChar>
-) -> Int32 {
-    1
-}
-
-private func fakeLookupUnused(
-    _ handle: UnsafeMutableRawPointer?, _ word: UnsafePointer<CChar>, _ maxResults: UInt32
-) -> UnsafeMutablePointer<CChar>? {
-    nil
 }
 
 private func fakeFreeHandle(_ handle: UnsafeMutableRawPointer?) {}
@@ -98,12 +84,11 @@ private func makeFakeFFI(
     tokenize: DictionaryFFI.FnTokenizeJSON = fakeTokenizeWithPayload
 ) -> DictionaryFFI {
     DictionaryFFI(
-        buildDB: fakeBuildDBUnused,
         open: open,
         free: fakeFreeHandle,
         tokenizeJSON: tokenize,
-        lookupJSON: fakeLookupUnused,
-        freeString: fakeFreeString
+        freeString: fakeFreeString,
+        prepare: { _, _ in 1 }
     )
 }
 
@@ -116,7 +101,6 @@ final class DictionaryEngineTests: XCTestCase {
         fakeOpenCalls = 0
         fakeOpenFailuresBeforeSuccess = 0
         fakeTokenizeCalls = 0
-        fakeTokenizeReceivedMax = 0
         fakeFreeStringCalls = 0
         fakeTokenizeJSONText = nil
     }
@@ -237,35 +221,6 @@ final class DictionaryEngineTests: XCTestCase {
         XCTAssertEqual(fakeOpenCalls, 1, "the handle must stay warm across calls")
     }
 
-    // MARK: argument forwarding
-
-    func test_tokenize_whenMaxBelowOne_shouldReturnNil() {
-        fakeTokenizeJSONText = unmatchedPayload
-        let engine = makeEngine()
-
-        let tokens = engine.tokenize(anyText, max: 0)
-
-        XCTAssertNil(tokens)
-    }
-
-    func test_tokenize_byDefault_shouldPassMaxOneToRuntime() {
-        fakeTokenizeJSONText = unmatchedPayload
-        let engine = makeEngine()
-
-        _ = engine.tokenize(anyText)
-
-        XCTAssertEqual(fakeTokenizeReceivedMax, 1)
-    }
-
-    func test_tokenize_withExplicitMax_shouldPassValueToRuntime() {
-        fakeTokenizeJSONText = unmatchedPayload
-        let engine = makeEngine()
-
-        _ = engine.tokenize(anyText, max: 7)
-
-        XCTAssertEqual(fakeTokenizeReceivedMax, 7)
-    }
-
     // MARK: decoding the PhaseZero JSON contract
 
     func test_tokenize_withPhaseZeroPayloadShape_shouldDecodeTokenFields() throws {
@@ -323,17 +278,17 @@ final class DictionaryEngineTests: XCTestCase {
     // MARK: default resolver wiring
 
     /// Exercises the default `resolveDatabase` argument end-to-end: the DEBUG
-    /// `MIMI_JMDICT_DB` env override hands `DictionaryStore.resolve()` an
+    /// `MIMI_DICT` env override hands `DictionaryStore.resolve()` an
     /// existing file, the fake runtime opens it, and the payload decodes.
     /// Mirrors the store tests' env-override pattern; serial execution makes
     /// the process-global setenv safe.
-    func test_init_withDefaultResolver_whenEnvOverridePointsAtDatabase_shouldTokenize() throws {
+    func test_init_withDefaultResolver_whenEnvOverridePointsAtDictionary_shouldTokenize() throws {
         let overrideURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimi-dictengine-override-\(UUID().uuidString)")
         try Data("db".utf8).write(to: overrideURL)
         addTeardownBlock { try? FileManager.default.removeItem(at: overrideURL) }
-        setenv("MIMI_JMDICT_DB", overrideURL.path, 1)
-        defer { unsetenv("MIMI_JMDICT_DB") }
+        setenv("MIMI_DICT", overrideURL.path, 1)
+        defer { unsetenv("MIMI_DICT") }
         fakeTokenizeJSONText = unmatchedPayload
         let engine = DictionaryEngine(ffi: makeFakeFFI())
 
@@ -348,62 +303,33 @@ final class DictionaryEngineTests: XCTestCase {
 
 // MARK: - DictionaryEngine (live runtime)
 
-/// Exercises the real `libdictionary.dylib` against a real JMdict database:
-/// the resolved dev/app location when one exists, otherwise one built once
-/// into a fixed temp location from the script-fetched `JMdict_e.gz`. The
-/// Gate-B tests here pin the FFI's index semantics — `start`/`end` are
-/// Unicode-scalar indices into the original input, even when the runtime
-/// normalized the text (ZWNJ stripped, halfwidth digits widened, NFC
-/// composition) to match an entry.
+/// Exercises the real `libdictionary.dylib` against the prepared dictionary
+/// (the resolved `DictionaryStore` location — first launch or `MIMI_DICT`).
+/// Skips visibly when the runtime or a prepared dictionary is absent. The
+/// full adversarial span-semantics suite (Gate B) is re-pinned here once the
+/// new payload lands in Phase 3.
 final class DictionaryEngineLiveTests: XCTestCase {
 
     private let studentSentence = "私は学生です"
     private let expectedStudentSurfaces = ["私", "は", "学生", "です"]
-    /// Heavy token payload (~16 KB of JSON) for the 1000-iteration check.
+
+    /// Heavy token payload for the 1000-iteration check.
     private let heavySentence = "今日はいい天気ですね。動画を見ます。学校へ行く"
 
     private let leakIterations = 1000
 
     // MARK: Live fixtures
 
-    private static var repoDictionaryGz: URL? {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let url = root.appendingPathComponent("local/dictionaries/JMdict_e.gz")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
-    /// The live database: the resolved dev/app location when present,
-    /// otherwise one build from the script-fetched gz into a fixed temp
-    /// location (staged and renamed so a crash never leaves a partial DB).
-    private static let liveDatabaseURL: URL? = {
-        guard let ffi = DictionaryFFI.load() else { return nil }
-        if let resolved = DictionaryStore.resolve() {
-            return resolved
-        }
-        guard let gz = repoDictionaryGz else { return nil }
-        let fm = FileManager.default
-        let url = fm.temporaryDirectory
-            .appendingPathComponent("mimi-dictengine-live/jmdict.db")
-        if fm.fileExists(atPath: url.path) {
-            return url
-        }
-        try? fm.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        let staging = url.deletingLastPathComponent()
-            .appendingPathComponent("jmdict-build-\(UUID().uuidString)")
-        guard ffi.buildDB(staging.path, gz.path) == 0 else { return nil }
-        try? fm.moveItem(at: staging, to: url)
-        return fm.fileExists(atPath: url.path) ? url : nil
-    }()
-
     private func requireLiveEngine() throws -> DictionaryEngine {
         try XCTSkipIf(DictionaryFFI.load() == nil, "libdictionary.dylib is not available")
-        let url = try XCTUnwrap(Self.liveDatabaseURL, "no JMdict database available")
-        return DictionaryEngine(ffi: DictionaryFFI.load(), resolveDatabase: { url })
+        try XCTSkipIf(
+            DictionaryStore.resolve() == nil,
+            "no prepared dictionary (launch the app once, or set MIMI_DICT)"
+        )
+        return DictionaryEngine(
+            ffi: DictionaryFFI.load(),
+            resolveDatabase: { DictionaryStore.resolve() }
+        )
     }
 
     /// Slices `input` by the token's scalar span — the only correct way to
@@ -433,67 +359,6 @@ final class DictionaryEngineLiveTests: XCTestCase {
         XCTAssertEqual(tokens.map { scalarSlice($0, of: studentSentence) }, tokens.map(\.text))
     }
 
-    func test_tokenize_withLiveRuntime_whenStudentSentence_shouldAttachDictionaryEntries() throws {
-        let engine = try requireLiveEngine()
-
-        let tokens = try XCTUnwrap(engine.tokenize(studentSentence))
-
-        XCTAssertNotNil(tokens[0].dictionaryEntry, "私 must resolve to an entry")
-        XCTAssertEqual(tokens[0].dictionaryEntry?.kanaReadings.map(\.text).first, "わたし")
-        XCTAssertNotNil(tokens[2].dictionaryEntry, "学生 must resolve to an entry")
-        XCTAssertEqual(tokens[2].dictionaryEntry?.kanaReadings.map(\.text), ["がくせい"])
-        XCTAssertNotNil(tokens[3].dictionaryEntry, "です must resolve to an entry")
-        XCTAssertEqual(tokens[3].dictionaryEntry?.kanaReadings.map(\.text), ["です"])
-    }
-
-    // MARK: index semantics under normalization
-
-    /// The runtime strips ZWNJ to match 学生 but must report indices counting
-    /// the original three scalars — if these were normalized-text indices the
-    /// end would be 2.
-    func test_tokenize_withLiveRuntime_whenZWNJInsideWord_shouldIndexOriginalScalars() throws {
-        let input = "学\u{200C}生"
-        let engine = try requireLiveEngine()
-
-        let tokens = try XCTUnwrap(engine.tokenize(input))
-
-        XCTAssertEqual(tokens.count, 1)
-        XCTAssertEqual(tokens[0].start, 0)
-        XCTAssertEqual(tokens[0].end, 3, "indices must count original scalars, not normalized text")
-        XCTAssertEqual(tokens[0].text, input)
-        XCTAssertEqual(tokens[0].dictionaryEntry?.kanaReadings.map(\.text), ["がくせい"])
-    }
-
-    /// Halfwidth 8 is widened to match 八月; the token text must stay the
-    /// original "8月" and span both original scalars.
-    func test_tokenize_withLiveRuntime_whenHalfwidthDigitPrefix_shouldIndexOriginalScalars() throws {
-        let input = "8月"
-        let engine = try requireLiveEngine()
-
-        let tokens = try XCTUnwrap(engine.tokenize(input))
-
-        XCTAssertEqual(tokens.count, 1)
-        XCTAssertEqual(tokens[0].start, 0)
-        XCTAssertEqual(tokens[0].end, 2)
-        XCTAssertEqual(tokens[0].text, input)
-        XCTAssertEqual(tokens[0].dictionaryEntry?.kanaReadings.map(\.text), ["はちがつ"])
-    }
-
-    /// か + combining voiced mark (U+3099) composes to が under NFC; the
-    /// token must span all five original scalars.
-    func test_tokenize_withLiveRuntime_whenNFCComposingInput_shouldIndexOriginalScalars() throws {
-        let input = "か\u{3099}っこう"
-        let engine = try requireLiveEngine()
-
-        let tokens = try XCTUnwrap(engine.tokenize(input))
-
-        XCTAssertEqual(tokens.count, 1)
-        XCTAssertEqual(tokens[0].start, 0)
-        XCTAssertEqual(tokens[0].end, 5)
-        XCTAssertEqual(tokens[0].text, input)
-        XCTAssertEqual(tokens[0].dictionaryEntry?.kanaReadings.map(\.text), ["がっこう"])
-    }
-
     func test_tokenize_withLiveRuntime_whenRareIdeographUnmatched_shouldIndexOriginalScalars() throws {
         let input = "𠮷"
         let engine = try requireLiveEngine()
@@ -504,20 +369,6 @@ final class DictionaryEngineLiveTests: XCTestCase {
         XCTAssertEqual(tokens[0].start, 0)
         XCTAssertEqual(tokens[0].end, 1, "𠮷 is one Unicode scalar")
         XCTAssertEqual(tokens[0].text, input)
-        XCTAssertNil(tokens[0].dictionaryEntry)
-    }
-
-    func test_tokenize_withLiveRuntime_whenRareIdeographInWord_shouldMatchDictionaryEntry() throws {
-        let input = "𠮷野家"
-        let engine = try requireLiveEngine()
-
-        let tokens = try XCTUnwrap(engine.tokenize(input))
-
-        XCTAssertEqual(tokens.count, 1)
-        XCTAssertEqual(tokens[0].start, 0)
-        XCTAssertEqual(tokens[0].end, 3)
-        XCTAssertEqual(tokens[0].text, input)
-        XCTAssertEqual(tokens[0].dictionaryEntry?.kanaReadings.map(\.text), ["よしのや"])
     }
 
     // MARK: payload lifetime

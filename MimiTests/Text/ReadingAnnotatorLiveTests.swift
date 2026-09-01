@@ -4,44 +4,20 @@ import Testing
 
 // MARK: - Live dictionary corpus
 
-/// Resolves the live dictionary runtime for the corpus suite: the store's
-/// resolved database when present, otherwise a one-time build from the
-/// script-fetched `JMdict_e.gz` into a fixed temp location (shared with the
-/// DictionaryEngine live tests, so at most one build ever happens).
+/// Resolves the live dictionary runtime for the corpus suite from the store's
+/// prepared dictionary (`DictionaryStore.resolve()` — first launch or
+/// `MIMI_DICT`). Interim during the vibrato migration: the suite stays
+/// skipped until a dictionary is prepared, and its expectations are
+/// regenerated for the new surface-reading payload in Phase 4.
 enum LiveDictionary {
     static let engine: DictionaryEngine? = {
         guard let ffi = DictionaryFFI.load() else { return nil }
-        if let resolved = DictionaryStore.resolve() {
-            return DictionaryEngine(ffi: ffi, resolveDatabase: { resolved })
-        }
-        guard let gz = repoGz else { return nil }
-        let fm = FileManager.default
-        let url = fm.temporaryDirectory
-            .appendingPathComponent("mimi-dictengine-live/jmdict.db")
-        if !fm.fileExists(atPath: url.path) {
-            try? fm.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-            )
-            let staging = url.deletingLastPathComponent()
-                .appendingPathComponent("jmdict-build-\(UUID().uuidString)")
-            guard ffi.buildDB(staging.path, gz.path) == 0 else { return nil }
-            try? fm.moveItem(at: staging, to: url)
-        }
-        guard fm.fileExists(atPath: url.path) else { return nil }
-        return DictionaryEngine(ffi: ffi, resolveDatabase: { url })
+        guard let resolved = DictionaryStore.resolve() else { return nil }
+        return DictionaryEngine(ffi: ffi, resolveDatabase: { resolved })
     }()
 
     static var isAvailable: Bool {
         engine != nil
-    }
-
-    private static var repoGz: URL? {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let url = root.appendingPathComponent("local/dictionaries/JMdict_e.gz")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }
 
@@ -50,7 +26,7 @@ enum LiveDictionary {
 struct ReadingAnnotatorLiveTests {
 
     private static let annotator = ReadingAnnotator(tokenize: {
-        LiveDictionary.engine?.tokenize($0, max: 1)
+        LiveDictionary.engine?.tokenize($0)
     })
 
     private func segments(_ text: String) throws -> [ReadingSegment] {

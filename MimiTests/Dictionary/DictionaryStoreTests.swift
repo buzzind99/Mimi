@@ -1,149 +1,76 @@
-import Compression
+import Foundation
 @testable import Mimi
-import XCTest
-
-// MARK: - Fixtures
-
-/// Builds a tiny gzip'd JMdict_e fixture in-process (raw DEFLATE via the
-/// Compression framework wrapped in gzip framing), mirroring the vendored
-/// Rust integration test's `MINI_JMDICT` so both languages exercise the same
-/// build path.
-private enum MiniJMdict {
-    /// Word certain to exist in any JMdict build; lives in the fixture XML and
-    /// backs the store's smoke-query expectations.
-    static let smokeWord = "学生"
-
-    static let xml = #"""
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE JMdict [
-    <!ENTITY n "noun (common) (futsuumeishi)">
-    <!ENTITY v1 "Ichidan verb">
-    ]>
-    <JMdict>
-    <entry>
-    <ent_seq>1549240</ent_seq>
-    <k_ele><keb>学生</keb><ke_pri>ichi1</ke_pri></k_ele>
-    <r_ele><reb>がくせい</reb><re_pri>ichi1</re_pri></r_ele>
-    <sense><pos>&n;</pos><gloss>student</gloss></sense>
-    </entry>
-    <entry>
-    <ent_seq>1418230</ent_seq>
-    <k_ele><keb>食べる</keb><ke_pri>ichi1</ke_pri></k_ele>
-    <r_ele><reb>たべる</reb><re_pri>ichi1</re_pri></r_ele>
-    <sense><pos>&v1;</pos><gloss>to eat</gloss></sense>
-    </entry>
-    </JMdict>
-    """#
-
-    static func makeGz() throws -> Data {
-        let source = Array(xml.utf8)
-        var compressed = [UInt8](repeating: 0, count: source.count + 256)
-        let written = compression_encode_buffer(
-            &compressed, compressed.count, source, source.count, nil, COMPRESSION_ZLIB
-        )
-        guard written > 0 else {
-            throw NSError(domain: "MiniJMdict", code: 1, userInfo: nil)
-        }
-        // gzip framing: 10-byte header (magic, deflate, no flags, mtime 0,
-        // OS unknown), the raw DEFLATE stream, CRC32 + ISIZE little-endian.
-        var data = Data([0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF])
-        data.append(contentsOf: compressed[0 ..< written])
-        var crc = Self.crc32(source).littleEndian
-        var isize = UInt32(truncatingIfNeeded: source.count).littleEndian
-        data.append(contentsOf: withUnsafeBytes(of: &crc) { Data($0) })
-        data.append(contentsOf: withUnsafeBytes(of: &isize) { Data($0) })
-        return data
-    }
-
-    private static let crcTable: [UInt32] = (0 ..< 256).map { index in
-        var value = UInt32(index)
-        for _ in 0 ..< 8 {
-            value = (value & 1) != 0 ? (0xEDB8_8320 ^ (value >> 1)) : (value >> 1)
-        }
-        return value
-    }
-
-    private static func crc32(_ bytes: [UInt8]) -> UInt32 {
-        var crc: UInt32 = 0xFFFF_FFFF
-        for byte in bytes {
-            crc = crcTable[Int((crc ^ UInt32(byte)) & 0xFF)] ^ (crc >> 8)
-        }
-        return crc ^ 0xFFFF_FFFF
-    }
-}
+import Testing
 
 // MARK: - Fake FFI shims
 
 //
 // Top-level C-convention functions (no captures, so they convert to the FFI
-// function-pointer types) plus file-scope counters. Tests here run serially,
-// so plain globals are safe. The fake buildDB actually writes a file at the
-// requested DB path so the store's promote step behaves like the real thing.
+// function-pointer types) plus file-scope counters. The suite is serialized,
+// so plain globals are safe. The fake prepare actually writes a file at the
+// requested output path so the store's promote step behaves like the real
+// thing.
 
-/// Placeholder payload the fake buildDB leaves where the real DB would land.
-private let fakeDBContents = "fake db"
+/// Placeholder payload the fake prepare leaves where the real dictionary
+/// would land.
+private let fakeDicContents = "fake dic"
 
-private var fakeBuildCalls = 0
-private var fakeBuildDelayMs = 0
+/// The smoke word the store tokenizes; lives in the fake tokenize payloads.
+private let smokeWord = "学生"
 
-private func fakeBuildDBWriteFile(
-    _ dbPath: UnsafePointer<CChar>, _ gzPath: UnsafePointer<CChar>
+private var fakePrepareCalls = 0
+private var fakePrepareDelayMs = 0
+
+private func fakePrepareWriteFile(
+    _ zstPath: UnsafePointer<CChar>, _ outPath: UnsafePointer<CChar>
 ) -> Int32 {
-    fakeBuildCalls += 1
-    if fakeBuildDelayMs > 0 {
-        usleep(useconds_t(fakeBuildDelayMs) * 1000)
+    fakePrepareCalls += 1
+    if fakePrepareDelayMs > 0 {
+        usleep(useconds_t(fakePrepareDelayMs) * 1000)
     }
-    let destination = URL(fileURLWithPath: String(cString: dbPath))
+    let destination = URL(fileURLWithPath: String(cString: outPath))
     do {
-        try Data(fakeDBContents.utf8).write(to: destination)
+        try Data(fakeDicContents.utf8).write(to: destination)
         return 0
     } catch {
         return 1
     }
 }
 
-private func fakeBuildDBFail(
-    _ dbPath: UnsafePointer<CChar>, _ gzPath: UnsafePointer<CChar>
+private func fakePrepareFail(
+    _ zstPath: UnsafePointer<CChar>, _ outPath: UnsafePointer<CChar>
 ) -> Int32 {
-    fakeBuildCalls += 1
+    fakePrepareCalls += 1
     return 1
 }
 
-private func fakeOpenOK(_ dbPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
+private func fakeOpenOK(_ dicPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
     UnsafeMutableRawPointer(bitPattern: 0xDEAD_BEEF)
 }
 
-private func fakeOpenNil(_ dbPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
+private func fakeOpenNil(_ dicPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
     nil
 }
 
-private func fakeTokenizeEntry(
-    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>, _ maxResults: UInt32
+private func fakeTokenizeReading(
+    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
-    strdup(
-        #"[{"text":"学生","start":0,"end":2,"dictionary_entry":{"ent_seq":"1549240"},"deinflection_reasons":null}]"#
-    )
+    strdup(#"[{"text":"学生","start":0,"end":2,"reading":"がくせい"}]"#)
 }
 
-private func fakeTokenizeEmpty(
-    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>, _ maxResults: UInt32
+private func fakeTokenizeNullReading(
+    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
-    strdup("[]")
+    strdup(#"[{"text":"学生","start":0,"end":2,"reading":null}]"#)
 }
 
 private func fakeTokenizeNil(
-    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>, _ maxResults: UInt32
+    _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
     nil
 }
 
 private func fakeFreeHandle(_ handle: UnsafeMutableRawPointer?) {}
-
-private func fakeLookupNil(
-    _ handle: UnsafeMutableRawPointer?, _ word: UnsafePointer<CChar>, _ maxResults: UInt32
-) -> UnsafeMutablePointer<CChar>? {
-    nil
-}
 
 private func fakeFreeString(_ string: UnsafeMutablePointer<CChar>?) {
     guard let string else { return }
@@ -151,387 +78,386 @@ private func fakeFreeString(_ string: UnsafeMutablePointer<CChar>?) {
 }
 
 private func makeFakeFFI(
-    build: DictionaryFFI.FnBuildDB = fakeBuildDBWriteFile,
+    prepare: DictionaryFFI.FnPrepare = fakePrepareWriteFile,
     open: DictionaryFFI.FnOpen = fakeOpenOK,
-    tokenize: DictionaryFFI.FnTokenizeJSON = fakeTokenizeEntry
+    tokenize: DictionaryFFI.FnTokenizeJSON = fakeTokenizeReading
 ) -> DictionaryFFI {
     DictionaryFFI(
-        buildDB: build,
         open: open,
         free: fakeFreeHandle,
         tokenizeJSON: tokenize,
-        lookupJSON: fakeLookupNil,
-        freeString: fakeFreeString
+        freeString: fakeFreeString,
+        prepare: prepare
     )
 }
 
 // MARK: - DictionaryStore
 
-final class DictionaryStoreTests: XCTestCase {
+@Suite("DictionaryStore", .serialized)
+final class DictionaryStoreTests {
 
-    private var tempRoot: URL!
-    private var destination: URL!
-    private var fixtureGz: URL!
+    private let tempRoot: URL
+    private let destination: URL
+    private let fixtureZst: URL
 
-    /// Contents left at the destination to simulate a DB built by an earlier
-    /// launch.
-    private let previousDBContents = "previously built"
+    /// Contents left at the destination to simulate a dictionary prepared by
+    /// an earlier launch.
+    private let previousDicContents = "previously prepared"
 
     /// Arbitrary payload for the process-env override file (only its presence
     /// matters).
-    private let overrideDBContents = "db"
+    private let overrideDicContents = "dic"
 
-    private func requireFFI() throws -> DictionaryFFI {
-        try XCTUnwrap(DictionaryFFI.load(), "libdictionary.dylib is not available")
-    }
-
-    /// Repo root (MimiTests/Text/ → repo), for the script-fetched real gz.
-    private var repoDictionaryGz: URL? {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let url = root.appendingPathComponent("local/dictionaries/JMdict_e.gz")
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() throws {
         tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("mimi-dictstore-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         destination = tempRoot.appendingPathComponent("dictionaries", isDirectory: true)
-        fixtureGz = tempRoot.appendingPathComponent("JMdict_e.gz")
-        try MiniJMdict.makeGz().write(to: fixtureGz)
-        fakeBuildCalls = 0
-        fakeBuildDelayMs = 0
+        fixtureZst = tempRoot.appendingPathComponent("system.dic.zst")
+        try Data("fake zst".utf8).write(to: fixtureZst)
+        fakePrepareCalls = 0
+        fakePrepareDelayMs = 0
     }
 
-    override func tearDown() {
+    deinit {
         try? FileManager.default.removeItem(at: tempRoot)
-        super.tearDown()
     }
 
     // MARK: Helpers
 
-    private func makeStore(ffi: DictionaryFFI? = makeFakeFFI()) -> DictionaryStore {
+    private func makeStore(
+        ffi: DictionaryFFI? = makeFakeFFI(),
+        bundledSource: URL? = nil,
+        destinationDirectory: URL? = nil
+    ) -> DictionaryStore {
         DictionaryStore(
-            bundledSource: fixtureGz, destinationDirectory: destination, ffi: ffi
+            bundledSource: bundledSource ?? fixtureZst,
+            destinationDirectory: destinationDirectory ?? destination,
+            ffi: ffi
         )
     }
 
-    private func prepareAndWait(
-        _ store: DictionaryStore, timeout: TimeInterval = 60
-    ) throws -> Result<URL, Error> {
-        let ready = expectation(description: "prepare")
-        var result: Result<URL, Error>?
-        store.prepare {
-            result = $0
-            ready.fulfill()
+    private func prepare(_ store: DictionaryStore) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            store.prepare { continuation.resume(with: $0) }
         }
-        wait(for: [ready], timeout: timeout)
-        return try XCTUnwrap(result, "completion must run exactly once")
+    }
+
+    /// Repo root (MimiTests/Dictionary/ → repo), for the script-fetched real
+    /// model.
+    private var repoModelZst: URL? {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = root.appendingPathComponent(
+            "local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst"
+        )
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     // MARK: errorDescription
 
-    func test_errorDescription_whenLibraryUnavailable_shouldExplainPlainTextFallback() {
+    @Test("explains the plain-text fallback when the library is unavailable")
+    func libraryUnavailableMessage() {
         let error = DictionaryStore.DictionaryStoreError.libraryUnavailable
 
-        let message = error.errorDescription
-
-        XCTAssertEqual(
-            message, "Dictionary runtime library not found; text renders unannotated."
+        #expect(
+            error.errorDescription
+                == "Dictionary runtime library not found; text renders unannotated."
         )
     }
 
-    func test_errorDescription_whenBundledDictionaryMissing_shouldNameTheMissingAsset() {
+    @Test("names the missing bundled asset")
+    func bundledMissingMessage() {
         let error = DictionaryStore.DictionaryStoreError.bundledDictionaryMissing
 
-        let message = error.errorDescription
-
-        XCTAssertEqual(message, "Bundled JMdict_e.gz not found in the app bundle.")
+        #expect(error.errorDescription == "Bundled system.dic.zst not found in the app bundle.")
     }
 
-    func test_errorDescription_whenBuildFailed_shouldIncludeReturnCode() {
-        let error = DictionaryStore.DictionaryStoreError.buildFailed(returnCode: 3)
+    @Test("includes the return code when decompression fails")
+    func prepareFailedMessage() {
+        let error = DictionaryStore.DictionaryStoreError.prepareFailed(returnCode: 3)
 
-        let message = error.errorDescription
-
-        XCTAssertEqual(message, "Dictionary database build failed (return code 3).")
+        #expect(error.errorDescription == "Dictionary decompression failed (return code 3).")
     }
 
-    func test_errorDescription_whenSmokeTestFailed_shouldIncludeReason() {
+    @Test("includes the reason when the smoke query fails")
+    func smokeFailedMessage() {
         let error = DictionaryStore.DictionaryStoreError.smokeTestFailed(reason: "open returned null")
 
-        let message = error.errorDescription
-
-        XCTAssertEqual(
-            message, "Dictionary database failed its smoke query: open returned null."
-        )
+        #expect(error.errorDescription == "Dictionary failed its smoke query: open returned null.")
     }
 
     // MARK: resolve
 
-    func test_resolve_whenDefaultLocationExists_shouldReturnIt() {
+    @Test("returns the default location when it exists")
+    func resolvesDefaultLocation() {
         let dictionariesExist: (URL) -> Bool = { $0.pathComponents.contains("dictionaries") }
 
         let url = DictionaryStore.resolve(environment: [:], fileExists: dictionariesExist)
 
-        XCTAssertEqual(url, DictionaryStore.defaultDatabaseURL)
+        #expect(url == DictionaryStore.defaultDictionaryURL)
     }
 
-    func test_resolve_whenEnvOverrideExists_shouldPreferIt() {
-        let overridePath = "/custom/db.sqlite"
+    @Test("prefers an existing env override")
+    func envOverrideWins() {
+        let overridePath = "/custom/ipadic.dic"
         let overrideExists: (URL) -> Bool = { $0.path == overridePath }
 
         let url = DictionaryStore.resolve(
-            environment: ["MIMI_JMDICT_DB": overridePath], fileExists: overrideExists
+            environment: ["MIMI_DICT": overridePath], fileExists: overrideExists
         )
 
-        XCTAssertEqual(url?.path, overridePath)
+        #expect(url?.path == overridePath)
     }
 
-    func test_resolve_whenEnvOverrideMissing_shouldFallThroughToDefaultLocation() {
-        let missingOverride = "/missing/db.sqlite"
+    @Test("falls through to the default location when the env override is missing")
+    func missingEnvOverrideFallsThrough() {
+        let missingOverride = "/missing/ipadic.dic"
         let dictionariesExist: (URL) -> Bool = { $0.pathComponents.contains("dictionaries") }
 
         let url = DictionaryStore.resolve(
-            environment: ["MIMI_JMDICT_DB": missingOverride], fileExists: dictionariesExist
+            environment: ["MIMI_DICT": missingOverride], fileExists: dictionariesExist
         )
 
-        XCTAssertEqual(url, DictionaryStore.defaultDatabaseURL)
+        #expect(url == DictionaryStore.defaultDictionaryURL)
     }
 
-    func test_resolve_whenOnlyDevCheckoutExists_shouldReturnIt() {
+    @Test("falls back to the dev-checkout copy when only it exists")
+    func devCheckoutFallback() {
         let modelsExist: (URL) -> Bool = { $0.pathComponents.contains("models") }
 
         let url = DictionaryStore.resolve(environment: [:], fileExists: modelsExist)
 
-        XCTAssertEqual(url?.lastPathComponent, DictionaryStore.databaseFileName)
+        #expect(url?.lastPathComponent == DictionaryStore.dictionaryFileName)
     }
 
-    func test_resolve_whenNothingExists_shouldReturnNil() {
+    @Test("returns nil when nothing exists")
+    func nothingResolves() {
         let nothingExists: (URL) -> Bool = { _ in false }
 
         let url = DictionaryStore.resolve(environment: [:], fileExists: nothingExists)
 
-        XCTAssertNil(url)
+        #expect(url == nil)
     }
 
     #if DEBUG
-        func test_resolve_whenEnvOverrideSetOnProcess_shouldResolveToOverride() throws {
-            let overrideURL = tempRoot.appendingPathComponent("override.db")
-            try Data(overrideDBContents.utf8).write(to: overrideURL)
-            setenv("MIMI_JMDICT_DB", overrideURL.path, 1)
-            defer { unsetenv("MIMI_JMDICT_DB") }
+        @Test("resolves the MIMI_DICT override set on the process")
+        func processEnvOverride() throws {
+            let overrideURL = tempRoot.appendingPathComponent("override.dic")
+            try Data(overrideDicContents.utf8).write(to: overrideURL)
+            setenv("MIMI_DICT", overrideURL.path, 1)
+            defer { unsetenv("MIMI_DICT") }
 
             let resolved = DictionaryStore.resolve()
 
-            XCTAssertEqual(resolved?.path, overrideURL.path)
+            #expect(resolved?.path == overrideURL.path)
         }
     #endif
 
     // MARK: default locations
 
-    func test_defaultDatabaseURL_whenComposed_shouldMatchDocumentedPath() {
-        let path = DictionaryStore.defaultDatabaseURL.path
+    @Test("composes the documented destination path")
+    func defaultDictionaryPath() {
+        let path = DictionaryStore.defaultDictionaryURL.path
 
-        XCTAssertTrue(path.hasSuffix("Mimi/dictionaries/jmdict.db"))
+        #expect(path.hasSuffix("Mimi/dictionaries/ipadic.dic"))
     }
 
     #if DEBUG
-        func test_defaultBundledSource_whenDebug_shouldFallBackToScriptFetchedCopy() {
+        @Test("falls back to the script-fetched model in debug checkouts")
+        func debugBundledSourceFallback() {
             let source = DictionaryStore.defaultBundledSource
 
             // Debug checkouts always have a fallback (bundle or script-fetched copy).
-            XCTAssertNotNil(source)
+            #expect(source != nil)
         }
     #endif
 
-    // MARK: prepare (real runtime)
+    // MARK: prepare (fake runtime — success paths)
 
-    func test_prepare_whenTinyFixtureProvided_shouldBuildOpenableDatabase() throws {
-        let store = try makeStore(ffi: requireFFI())
+    @Test("decompresses into place on first launch")
+    func firstPrepareMovesIntoPlace() async throws {
+        let store = makeStore()
 
-        let url = try prepareAndWait(store).get()
+        let url = try await prepare(store)
 
-        XCTAssertEqual(url, destination.appendingPathComponent("jmdict.db"))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-    }
-
-    /// Arrange = one successful prepare (builds the DB); the act under test is
-    /// the second call, which must be a no-op even with the source gz gone.
-    func test_prepare_whenAlreadyBuilt_shouldBeNoOp() throws {
-        let store = try makeStore(ffi: requireFFI())
-        let built = try prepareAndWait(store).get()
-        try FileManager.default.removeItem(at: fixtureGz)
-
-        let second = try prepareAndWait(store).get()
-
-        XCTAssertEqual(second, built, "a successful prepare must never rebuild")
-    }
-
-    func test_prepare_withRealBundledGz_shouldBuildRealDatabase() throws {
-        let source = try XCTUnwrap(repoDictionaryGz, "local/dictionaries/JMdict_e.gz is not fetched")
-        let store = try DictionaryStore(
-            bundledSource: source, destinationDirectory: destination, ffi: requireFFI()
+        #expect(
+            url == destination.appendingPathComponent(DictionaryStore.dictionaryFileName)
         )
-
-        let started = Date()
-        let url = try prepareAndWait(store, timeout: 120).get()
-        let elapsed = Date().timeIntervalSince(started)
-
-        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-        print(String(format: "==> first-launch JMdict build wall time: %.2fs", elapsed))
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
-    // MARK: prepare (fake runtime — failure paths & coalescing)
-
-    func test_prepare_whenDestinationExists_shouldAdoptWithoutBuilding() throws {
+    @Test("adopts a dictionary prepared by an earlier launch without decompressing")
+    func adoptsExistingDestination() async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        let existing = destination.appendingPathComponent("jmdict.db")
-        try Data(previousDBContents.utf8).write(to: existing)
+        let existing = destination.appendingPathComponent(DictionaryStore.dictionaryFileName)
+        try Data(previousDicContents.utf8).write(to: existing)
         let store = makeStore()
 
-        let url = try prepareAndWait(store).get()
+        let url = try await prepare(store)
 
-        XCTAssertEqual(url, existing)
-        XCTAssertEqual(fakeBuildCalls, 0, "an existing DB must short-circuit the build")
+        #expect(url == existing)
+        #expect(fakePrepareCalls == 0, "an existing dictionary must short-circuit the decompress")
     }
 
-    func test_prepare_whenCalledConcurrently_shouldCoalesceIntoOneBuild() throws {
-        fakeBuildDelayMs = 300
+    @Test("is a no-op once prepared, even with the source gone")
+    func secondPrepareIsNoOp() async throws {
         let store = makeStore()
-        var results: [Result<URL, Error>] = []
-        let firstDone = expectation(description: "prepare 1")
-        let secondDone = expectation(description: "prepare 2")
-        let thirdDone = expectation(description: "prepare 3")
+        let prepared = try await prepare(store)
+        try FileManager.default.removeItem(at: fixtureZst)
 
-        store.prepare { results.append($0); firstDone.fulfill() }
-        store.prepare { results.append($0); secondDone.fulfill() }
-        store.prepare { results.append($0); thirdDone.fulfill() }
+        let second = try await prepare(store)
 
-        wait(for: [firstDone, secondDone, thirdDone], timeout: 30)
-
-        XCTAssertNoThrow(try results[0].get())
-        XCTAssertNoThrow(try results[1].get())
-        XCTAssertNoThrow(try results[2].get())
-        XCTAssertEqual(fakeBuildCalls, 1, "all callers must share the single build")
+        #expect(second == prepared, "a successful prepare must never re-decompress")
     }
 
-    func test_prepare_whenBuildFails_shouldReportErrorAndLeaveNoPartialDatabase() throws {
-        let store = makeStore(ffi: makeFakeFFI(build: fakeBuildDBFail))
+    @Test("coalesces concurrent callers into one decompression")
+    func concurrentCallersCoalesce() async throws {
+        fakePrepareDelayMs = 300
+        let store = makeStore()
 
-        let error = try prepareAndWait(store).getError()
+        async let first = prepare(store)
+        async let second = prepare(store)
+        async let third = prepare(store)
+        let results = try await(first, second, third)
 
-        guard case let .buildFailed(returnCode) = error as? DictionaryStore.DictionaryStoreError
-        else {
-            return XCTFail("expected .buildFailed, got \(error)")
+        #expect(results.0 == results.1 && results.1 == results.2)
+        #expect(fakePrepareCalls == 1, "all callers must share the single decompression")
+    }
+
+    // MARK: prepare (fake runtime — failure paths)
+
+    @Test("reports a decompression failure and leaves no partial dictionary")
+    func prepareFailureLeavesNoPartialFile() async throws {
+        let store = makeStore(ffi: makeFakeFFI(prepare: fakePrepareFail))
+
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
         }
-        XCTAssertEqual(returnCode, 1)
-        XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: destination.appendingPathComponent("jmdict.db").path
+
+        #expect(error == .prepareFailed(returnCode: 1))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent(DictionaryStore.dictionaryFileName).path
             ),
-            "a failed build must not leave a partial database"
+            "a failed prepare must not leave a partial dictionary"
         )
     }
 
-    /// Arrange = one failing prepare; the act under test is the retry, which
-    /// must re-attempt the build (phase reset) instead of reporting a stale
-    /// success.
-    func test_prepare_whenBuildFailed_shouldRetryOnNextCall() throws {
-        let store = makeStore(ffi: makeFakeFFI(build: fakeBuildDBFail))
-        _ = try? prepareAndWait(store).getError()
+    @Test("re-attempts the decompression on the next call after a failure")
+    func failedPrepareRetries() async throws {
+        let store = makeStore(ffi: makeFakeFFI(prepare: fakePrepareFail))
+        _ = try? await prepare(store)
 
-        let error = try prepareAndWait(store).getError()
-
-        guard case .buildFailed = error as? DictionaryStore.DictionaryStoreError else {
-            return XCTFail("expected .buildFailed on retry, got \(error)")
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
         }
-        XCTAssertEqual(fakeBuildCalls, 2, "the retry must re-attempt the build")
+
+        #expect(error == .prepareFailed(returnCode: 1))
+        #expect(fakePrepareCalls == 2, "the retry must re-attempt the decompression")
     }
 
-    func test_prepare_whenSmokeOpenReturnsNull_shouldFailWithoutLeavingDatabase() throws {
+    @Test("fails the smoke query when open returns null")
+    func smokeOpenFailure() async throws {
         let store = makeStore(ffi: makeFakeFFI(open: fakeOpenNil))
 
-        let error = try prepareAndWait(store).getError()
-
-        guard case let .smokeTestFailed(reason) = error as? DictionaryStore.DictionaryStoreError
-        else {
-            return XCTFail("expected .smokeTestFailed, got \(error)")
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
         }
-        XCTAssertEqual(reason, "open returned null")
-        XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: destination.appendingPathComponent("jmdict.db").path
+
+        #expect(error == .smokeTestFailed(reason: "open returned null"))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: destination.appendingPathComponent(DictionaryStore.dictionaryFileName).path
             )
         )
     }
 
-    func test_prepare_whenSmokeQueryFindsNoEntries_shouldFail() throws {
-        let store = makeStore(ffi: makeFakeFFI(tokenize: fakeTokenizeEmpty))
-
-        let error = try prepareAndWait(store).getError()
-
-        guard case let .smokeTestFailed(reason) = error as? DictionaryStore.DictionaryStoreError
-        else {
-            return XCTFail("expected .smokeTestFailed, got \(error)")
-        }
-        XCTAssertEqual(reason, "no dictionary entry for \(MiniJMdict.smokeWord)")
-    }
-
-    func test_prepare_whenSmokeTokenizeReturnsNull_shouldFail() throws {
+    @Test("fails the smoke query when tokenize returns null")
+    func smokeTokenizeFailure() async throws {
         let store = makeStore(ffi: makeFakeFFI(tokenize: fakeTokenizeNil))
 
-        let error = try prepareAndWait(store).getError()
-
-        guard case let .smokeTestFailed(reason) = error as? DictionaryStore.DictionaryStoreError
-        else {
-            return XCTFail("expected .smokeTestFailed, got \(error)")
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
         }
-        XCTAssertEqual(reason, "tokenize returned null")
+
+        #expect(error == .smokeTestFailed(reason: "tokenize returned null"))
     }
 
-    func test_prepare_whenBundledSourceMissing_shouldFail() throws {
+    @Test("fails the smoke query when the smoke word carries no reading")
+    func smokeMissingReadingFailure() async throws {
+        let store = makeStore(ffi: makeFakeFFI(tokenize: fakeTokenizeNullReading))
+
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
+        }
+
+        #expect(error == .smokeTestFailed(reason: "no reading for \(smokeWord)"))
+    }
+
+    @Test("fails when the bundled model is missing")
+    func bundledSourceMissing() async throws {
         let store = DictionaryStore(
             bundledSource: nil, destinationDirectory: destination, ffi: makeFakeFFI()
         )
 
-        let error = try prepareAndWait(store).getError()
-
-        guard case .bundledDictionaryMissing = error as? DictionaryStore.DictionaryStoreError else {
-            return XCTFail("expected .bundledDictionaryMissing, got \(error)")
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
         }
-        XCTAssertEqual(fakeBuildCalls, 0)
+
+        #expect(error == .bundledDictionaryMissing)
+        #expect(fakePrepareCalls == 0)
     }
 
-    func test_prepare_whenLibraryUnavailable_shouldFail() throws {
+    @Test("fails when the runtime library is unavailable")
+    func libraryUnavailable() async throws {
+        let store = makeStore(ffi: nil)
+
+        let error = await #expect(throws: DictionaryStore.DictionaryStoreError.self) {
+            try await prepare(store)
+        }
+
+        #expect(error == .libraryUnavailable)
+    }
+
+    // MARK: prepare (live runtime)
+
+    @Test("decompresses the real fetched model on first launch")
+    func liveFirstLaunchDecompresses() async throws {
+        guard let ffi = DictionaryFFI.load(), let model = repoModelZst else {
+            try Test.cancel("libdictionary.dylib or the fetched model is not available")
+        }
         let store = DictionaryStore(
-            bundledSource: fixtureGz, destinationDirectory: destination, ffi: nil
+            bundledSource: model, destinationDirectory: destination, ffi: ffi
         )
 
-        let error = try prepareAndWait(store).getError()
+        let started = Date()
+        let url = try await prepare(store)
+        let elapsed = Date().timeIntervalSince(started)
 
-        guard case .libraryUnavailable = error as? DictionaryStore.DictionaryStoreError else {
-            return XCTFail("expected .libraryUnavailable, got \(error)")
-        }
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        print(String(format: "==> first-launch dictionary decompress wall time: %.2fs", elapsed))
     }
-}
 
-// MARK: - Result helpers
-
-private extension Result where Success == URL, Failure == Error {
-    func getError() throws -> Error {
-        switch self {
-        case let .success(url):
-            throw NSError(
-                domain: "DictionaryStoreTests", code: 0,
-                userInfo: [NSLocalizedDescriptionKey: "unexpected success: \(url)"]
-            )
-        case let .failure(error):
-            return error
+    @Test("is a no-op on the second live prepare, even with the source gone")
+    func liveSecondPrepareIsNoOp() async throws {
+        guard let ffi = DictionaryFFI.load(), let model = repoModelZst else {
+            try Test.cancel("libdictionary.dylib or the fetched model is not available")
         }
+        // A private copy stands in for the bundle, so it can be removed to
+        // prove the second prepare never reads a source.
+        let sourceCopy = tempRoot.appendingPathComponent("copied-system.dic.zst")
+        try FileManager.default.copyItem(at: model, to: sourceCopy)
+        let store = DictionaryStore(
+            bundledSource: sourceCopy, destinationDirectory: destination, ffi: ffi
+        )
+        let prepared = try await prepare(store)
+        try FileManager.default.removeItem(at: sourceCopy)
+
+        let second = try await prepare(store)
+
+        #expect(second == prepared, "a successful prepare must never re-decompress")
     }
 }

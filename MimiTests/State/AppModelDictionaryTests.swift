@@ -92,7 +92,7 @@ struct AppModelDictionaryTests {
     @Test("session-start gate rethrows a failed build so the start fails visibly")
     func gateRethrowsFailedBuild() async throws {
         let model = AppModel()
-        let failure = DictionaryStore.DictionaryStoreError.buildFailed(returnCode: 1)
+        let failure = DictionaryStore.DictionaryStoreError.prepareFailed(returnCode: 1)
 
         await #expect(throws: (any Error).self) {
             try await model.ensureDictionaryReady(
