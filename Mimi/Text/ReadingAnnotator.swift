@@ -1,11 +1,11 @@
 import Foundation
 
 /// One rendered run of text plus its optional romaji/kana annotations. The
-/// `surface` strings concatenate back to the original text (gaps between
-/// tokenizer tokens — punctuation, symbols — become plain runs with nil
-/// annotations). A run whose romaji equals its surface (Latin, digits) is
-/// self-transcribed; renderers skip annotating those. `furigana` is only
-/// populated for kanji-bearing runs whose romaji reverses cleanly to kana.
+/// `surface` strings concatenate back to the original text (uncovered spans
+/// and runtime failures become plain runs). A run whose romaji equals its
+/// surface (Latin, digits, punctuation, kanji without a dictionary reading)
+/// is self-transcribed; renderers skip annotating those. `furigana` is only
+/// populated for kanji-bearing runs.
 final class ReadingSegment {
     var surface: String
     var romaji: String?
@@ -18,460 +18,402 @@ final class ReadingSegment {
     }
 }
 
-/// Produces romaji (Hepburn-style Latin transcription) and kana furigana for
-/// Japanese text using the system tokenizer's built-in `LatinTranscription`
-/// attribute. No dependencies, no network, no bundled dictionaries.
-enum ReadingAnnotator {
-    private static let segmentCache = NSCache<NSString, NSArray>()
+/// Produces romaji (wapuro long vowels, Hepburn consonants) and kana
+/// furigana for Japanese text from the dictionary tokenizer's JMdict-backed
+/// kana readings (`DictionaryEngine`), plus a numeral→counter fusion pass in
+/// kana space so Arabic-digit counters read correctly (`600回` →
+/// "roppyakkai"). The dictionary may still be building on first launch;
+/// every failure degrades to plain text.
+final class ReadingAnnotator {
+    /// The process-wide annotator backing the static entry point.
+    static let shared = ReadingAnnotator()
+
+    private let cache = NSCache<NSString, NSArray>()
+    /// The token source; injectable so tests drive the annotator without the
+    /// dictionary runtime.
+    private let tokenize: (String) -> [DictionaryToken]?
+
+    init(tokenize: @escaping (String) -> [DictionaryToken]? = {
+        DictionaryEngine.shared.tokenize($0, max: 1)
+    }) {
+        self.tokenize = tokenize
+    }
 
     /// Returns per-run segments for `text` (surface + romaji + furigana), or
-    /// `nil` for empty input. Cheap (microseconds per sentence) and cached.
+    /// `nil` for empty input. Cached.
     static func segments(for text: String) -> [ReadingSegment]? {
+        shared.segments(for: text)
+    }
+
+    func segments(for text: String) -> [ReadingSegment]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        if let cached = segmentCache.object(forKey: trimmed as NSString) as? [ReadingSegment] {
+        if let cached = cache.object(forKey: trimmed as NSString) as? [ReadingSegment] {
             return cached
         }
 
         let result = transcribe(trimmed)
-        segmentCache.setObject(result as NSArray, forKey: trimmed as NSString)
+        cache.setObject(result as NSArray, forKey: trimmed as NSString)
         return result
     }
 
-    private static func transcribe(_ text: String) -> [ReadingSegment] {
-        let nsText = text as NSString
-        let locale = NSLocale(localeIdentifier: "ja_JP") as CFLocale
-        guard let tokenizer = CFStringTokenizerCreate(
-            kCFAllocatorDefault,
-            text as CFString,
-            CFRange(location: 0, length: nsText.length),
-            kCFStringTokenizerUnitWord,
-            locale
-        ) else { return [] }
+    // MARK: - Transcription
 
+    private func transcribe(_ text: String) -> [ReadingSegment] {
+        guard let tokens = tokenize(text) else { return [] }
+        let scalars = Array(text.unicodeScalars)
         var segments: [ReadingSegment] = []
-        // Index of the most recent token segment (gaps don't count): sokuon
-        // fusion must land on the word, not on intervening punctuation.
-        var lastTokenIndex: Int?
         var cursor = 0
-        // The tokenizer marks a sokuon that straddles a token boundary with a
-        // literal "~tsu" suffix (e.g. みよっか → "miyo~tsu" | "ka"). Consume it
-        // and geminate the next token's leading consonant instead.
-        var carriesSokuon = false
-        // A number token (一, 十, 8, 20…) is held back one token: when the
-        // next token is a counter with an unvoiced onset, the pair fuses
-        // with sokuon gemination (一回 → "ikkai", 一本 → "ippon") instead
-        // of the tokenizer's plain "ichi kai".
-        var pendingNumber: (surface: String, romaji: String)?
-        // A family term (母, 父, 祖父…) is held back one token: when the
-        // next token is an honorific suffix (さん, ちゃん, 様…), the pair
-        // fuses with the honorific stem (お母さん → "okaasan") instead of
-        // the tokenizer's standalone headword readings ("ohahasan").
-        var pendingFamily: (surface: String, plainRomaji: String, stemRomaji: String)?
+        // A numeral run held back for counter fusion (一回 → "ikkai").
+        var pending: PendingNumber?
 
-        func appendNumber(_ pending: (surface: String, romaji: String)) {
-            let romaji = romanize(surface: pending.surface, reading: pending.romaji)
-            segments.append(ReadingSegment(
-                surface: pending.surface,
-                romaji: romaji,
-                furigana: furigana(surface: pending.surface, romaji: romaji)
-            ))
-            lastTokenIndex = segments.count - 1
-        }
+        for token in tokens {
+            if token.start > cursor {
+                // A held-back number never fuses across an uncovered span
+                // (三、四本): flush it, then emit the span as a plain run.
+                flush(&pending, into: &segments)
+                appendSpan(from: cursor, to: token.start, of: scalars, into: &segments)
+            }
+            let surface = Self.scalarSlice(token, of: scalars)
+            cursor = token.end
 
-        func appendFamily(_ pending: (surface: String, plainRomaji: String, stemRomaji: String)) {
-            segments.append(ReadingSegment(
-                surface: pending.surface,
-                romaji: pending.plainRomaji,
-                furigana: furigana(surface: pending.surface, romaji: pending.plainRomaji)
-            ))
-            lastTokenIndex = segments.count - 1
-        }
-
-        func appendGap(to end: Int) {
-            guard cursor < end else { return }
-            let range = NSRange(location: cursor, length: end - cursor)
-            let gap = nsText.substring(with: range)
-            if gap.trimmingCharacters(in: .whitespaces).isEmpty {
-                // Whitespace-only gap: keep word spacing by folding one space
-                // into the previous run's surface.
-                if let last = segments.last, !gap.isEmpty {
-                    last.surface += " "
-                }
-            } else {
-                segments.append(ReadingSegment(surface: gap, romaji: nil))
+            if Self.isNumeralRun(surface) {
+                Self.accumulate(token, surface: surface, into: &pending)
+            } else if !fuse(&pending, with: token, surface: surface, into: &segments) {
+                appendToken(token, surface: surface, into: &segments)
             }
         }
-
-        while true {
-            let tokenType = CFStringTokenizerAdvanceToNextToken(tokenizer)
-            guard tokenType != [] else { break }
-            let tokenRange = CFStringTokenizerGetCurrentTokenRange(tokenizer)
-            guard tokenRange.length > 0 else { break }
-            // Don't fuse a held-back number across a gap.
-            if pendingNumber != nil, tokenRange.location > cursor {
-                appendNumber(pendingNumber!)
-                pendingNumber = nil
-            }
-            // Same for a held-back family term (お、母さん reads plain).
-            if pendingFamily != nil, tokenRange.location > cursor {
-                appendFamily(pendingFamily!)
-                pendingFamily = nil
-            }
-            appendGap(to: tokenRange.location)
-
-            let surface = nsText.substring(
-                with: NSRange(location: tokenRange.location, length: tokenRange.length)
-            )
-
-            var (reading, endsWithSokuon) = tokenReading(tokenizer: tokenizer, surface: surface)
-
-            // The honorific 方 ("kata") after あの/どの: the tokenizer
-            // transcribes the person reading as the direction reading
-            // "hou" (あの方は → "hou"). Only あの/どの participate —
-            // この方/その方 already transcribe "kata", and their 方がいい
-            // comparative ("that way is better") reads "hou", which this
-            // guard would wrongly rewrite. The こっち/そっち/あっち/どっち
-            // (+ こちら/あちら/どちら) + の方 phrases are always
-            // directional. (どの方 already transcribes "kata"; the
-            // reading guard leaves it untouched.)
-            var followsAnoDono = false
-            if let at = lastTokenIndex,
-               ["あの", "どの"].contains(segments[at].surface)
-            {
-                followsAnoDono = true
-            }
-            if surface == "方", reading.lowercased() == "hou",
-               tokenRange.location == cursor, followsAnoDono
-            {
-                reading = "kata"
-            }
-
-            if let pending = pendingNumber {
-                pendingNumber = nil
-                if let fused = fuseNumber(number: pending, counterReading: reading) {
-                    let fusedSurface = pending.surface + surface
-                    segments.append(ReadingSegment(
-                        surface: fusedSurface,
-                        romaji: fused,
-                        furigana: furigana(surface: fusedSurface, romaji: fused)
-                    ))
-                    lastTokenIndex = segments.count - 1
-                    carriesSokuon = endsWithSokuon
-                    cursor = tokenRange.location + tokenRange.length
-                    continue
-                }
-                // The tokenizer pre-assimilates 本's counter reading to
-                // "pon" even where no p-sound occurs (二本 → "ni hon",
-                // 三本 → "san bon"); restore the base sound.
-                if reading.lowercased().hasPrefix("pon") {
-                    let voiced = ["san", "sen", "man"].contains { pending.romaji.hasSuffix($0) }
-                    reading = (voiced ? "bon" : "hon") + reading.dropFirst(3)
-                }
-                appendNumber(pending)
-            }
-
-            if let pending = pendingFamily {
-                pendingFamily = nil
-                if let suffixRomaji = familySuffixRomaji[surface] {
-                    let fusedSurface = pending.surface + surface
-                    let fusedRomaji = pending.stemRomaji + suffixRomaji
-                    // A directly adjacent お/御 already sits in its own
-                    // segment (お|母|さん): fold it into the fused run so
-                    // お母さん becomes one "okaasan" segment. 御 merges the
-                    // same way; a different transcription (e.g. "on") or an
-                    // intervening gap leaves the prefix as its own run.
-                    if let at = lastTokenIndex, at == segments.count - 1,
-                       ["お", "御"].contains(segments[at].surface),
-                       let prefixRomaji = segments[at].romaji,
-                       prefixRomaji.lowercased() == "o"
-                    {
-                        let prefix = segments[at]
-                        let mergedRomaji = prefixRomaji + fusedRomaji
-                        prefix.surface += fusedSurface
-                        prefix.romaji = mergedRomaji
-                        prefix.furigana = furigana(
-                            surface: prefix.surface, romaji: mergedRomaji
-                        )
-                    } else {
-                        segments.append(ReadingSegment(
-                            surface: fusedSurface,
-                            romaji: fusedRomaji,
-                            furigana: furigana(surface: fusedSurface, romaji: fusedRomaji)
-                        ))
-                        lastTokenIndex = segments.count - 1
-                    }
-                    carriesSokuon = endsWithSokuon
-                    cursor = tokenRange.location + tokenRange.length
-                    continue
-                }
-                appendFamily(pending)
-            }
-
-            if carriesSokuon {
-                if let doubled = geminate(reading), let at = lastTokenIndex {
-                    // Fuse with the previous word — the split is artificial —
-                    // absorbing the counter's glyphs into the run's surface.
-                    segments[at].romaji = (segments[at].romaji ?? "") + doubled
-                    segments[at].surface += surface
-                    segments[at].furigana = furigana(
-                        surface: segments[at].surface, romaji: segments[at].romaji ?? ""
-                    )
-                    reading = ""
-                } else if let at = lastTokenIndex {
-                    // Next token can't take a geminate (vowel-initial,
-                    // digit…): keep the sokuon as a spoken "tsu".
-                    segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
-                    segments[at].furigana = furigana(
-                        surface: segments[at].surface, romaji: segments[at].romaji ?? ""
-                    )
-                }
-            }
-            if !reading.isEmpty {
-                if !endsWithSokuon,
-                   let numReading = numberReading(surface: surface, reading: reading)
-                {
-                    pendingNumber = (surface, numReading)
-                } else if !endsWithSokuon, let stem = familyHonorificStems[surface] {
-                    pendingFamily = (
-                        surface: surface,
-                        plainRomaji: romanize(surface: surface, reading: reading),
-                        stemRomaji: stem
-                    )
-                } else {
-                    let romaji = romanize(surface: surface, reading: reading)
-                    segments.append(ReadingSegment(
-                        surface: surface,
-                        romaji: romaji,
-                        furigana: furigana(surface: surface, romaji: romaji)
-                    ))
-                    lastTokenIndex = segments.count - 1
-                }
-            }
-            carriesSokuon = endsWithSokuon
-            cursor = tokenRange.location + tokenRange.length
-        }
-        if let pending = pendingNumber {
-            appendNumber(pending)
-            pendingNumber = nil
-        }
-        if let pending = pendingFamily {
-            appendFamily(pending)
-            pendingFamily = nil
-        }
-        if carriesSokuon, let at = lastTokenIndex {
-            segments[at].romaji = (segments[at].romaji ?? "") + "tsu"
-        }
-        appendGap(to: nsText.length)
-
+        flush(&pending, into: &segments)
+        appendSpan(from: cursor, to: scalars.count, of: scalars, into: &segments)
         return segments
     }
 
-    /// The tokenizer's Latin transcription for the current token, with the
-    /// "~tsu" straddling-sokuon marker consumed and the ヴ row's morpheme
-    /// break fused ("vu~aiorin" → "vaiorin"). Falls back to the surface text
-    /// for tokens without a transcription (digits, Latin runs, symbols) and
-    /// for tokens transcribing to the empty string (rare ideographs like
-    /// 𠮷/㐂) — dropping them would break the surfaces-concatenate-back
-    /// invariant.
-    private static func tokenReading(
-        tokenizer: CFStringTokenizer,
-        surface: String
-    ) -> (reading: String, endsWithSokuon: Bool) {
-        guard let transcription = CFStringTokenizerCopyCurrentTokenAttribute(
-            tokenizer, kCFStringTokenizerAttributeLatinTranscription
-        ) as? String, !transcription.isEmpty else {
-            return (surface, false)
+    /// Emits a non-numeral token: the selected dictionary reading converted
+    /// to romaji (with particle and lexical overrides), furigana only for
+    /// kanji-bearing surfaces. Entry-less tokens (names, rare ideographs,
+    /// punctuation, bare Latin) stay self-transcribed and unannotated.
+    private func appendToken(
+        _ token: DictionaryToken, surface: String, into segments: inout [ReadingSegment]
+    ) {
+        guard let reading = Self.selectReading(for: token) else {
+            segments.append(ReadingSegment(surface: surface, romaji: surface, furigana: nil))
+            return
         }
-        var reading = transcription
-        var endsWithSokuon = false
-        if reading.lowercased().hasSuffix("~tsu") {
-            reading = String(reading.dropLast(4))
-            endsWithSokuon = true
+        var romaji = KanaRomaji.romaji(fromKana: reading) ?? surface
+        if let lexical = Self.lexicalRomaji[reading] {
+            romaji = lexical
+        } else if let particle = Self.particleRomaji[surface] {
+            romaji = particle
         }
-        reading = reading.replacingOccurrences(of: "vu~", with: "v")
-        reading = reading.replacingOccurrences(of: "~", with: "")
-        return (reading, endsWithSokuon)
+        segments.append(ReadingSegment(
+            surface: surface,
+            romaji: romaji,
+            furigana: Self.containsKanji(surface) ? reading : nil
+        ))
     }
 
-    /// Doubles the leading consonant of `reading` to realize a preceding
-    /// sokuon (か→"kka", さ→"ssa", ち→"cchi", ぱ→"ppa"). The は行 and ば行
-    /// realize the geminate as the p-series (ひ→"ppiki", ば→"ppai",
-    /// ふ→"ppuku"). Returns `nil` when the reading can't take a geminate
-    /// (vowel-initial, empty, digits…).
-    private static func geminate(_ reading: String) -> String? {
-        guard let first = reading.first?.lowercased().first else { return nil }
-        if reading.lowercased().hasPrefix("ch") {
-            return "c" + reading
+    /// Emits a kana reading (from the dictionary, the digit table, or a
+    /// fusion) as a segment, romaji derived with `KanaRomaji`.
+    private func append(
+        surface: String, kana: String, romaji: String? = nil, into segments: inout [ReadingSegment]
+    ) {
+        let converted = romaji ?? KanaRomaji.romaji(fromKana: kana) ?? surface
+        segments.append(ReadingSegment(
+            surface: surface,
+            romaji: converted,
+            furigana: Self.containsKanji(surface) ? kana : nil
+        ))
+    }
+
+    /// Emits a held-back numeral run as its own segment. Digit runs without
+    /// a table reading (123, 2026) stay unannotated.
+    private func appendNumber(
+        _ pending: PendingNumber, into segments: inout [ReadingSegment]
+    ) {
+        var held = pending
+        Self.resolveDigits(into: &held)
+        guard !held.unresolved, !held.kana.isEmpty else {
+            segments.append(ReadingSegment(
+                surface: held.surface, romaji: held.surface, furigana: nil
+            ))
+            return
         }
-        switch first {
-        case "h", "b", "f":
-            return "pp" + reading.dropFirst()
-        case "k", "s", "t", "p", "c":
-            return String(reading.first!) + reading
-        default:
-            return nil
+        append(surface: held.surface, kana: held.kana, into: &segments)
+    }
+
+    private func flush(
+        _ pending: inout PendingNumber?, into segments: inout [ReadingSegment]
+    ) {
+        guard let held = pending else { return }
+        pending = nil
+        appendNumber(held, into: &segments)
+    }
+
+    /// Uncovered spans (the tokenizer should cover everything, but a gap may
+    /// appear on engine hiccups) stay plain runs so surfaces concatenate back.
+    private func appendSpan(
+        from start: Int, to end: Int, of scalars: [Unicode.Scalar],
+        into segments: inout [ReadingSegment]
+    ) {
+        guard start < end else { return }
+        let gap = String(String.UnicodeScalarView(scalars[start ..< end]))
+        segments.append(ReadingSegment(surface: gap, romaji: gap, furigana: nil))
+    }
+
+    // MARK: - Numeral → counter fusion
+
+    /// A numeral run held back for counter fusion: the consumed surface plus
+    /// its kana reading so far. Digits accumulate as a normalized run and
+    /// resolve through the digit table when the run completes.
+    private struct PendingNumber {
+        var surface: String
+        var digits = "" // fullwidth-normalized digit run awaiting lookup
+        var kana = "" // accumulated kana of resolved parts
+        var unresolved = false // a digit run with no table reading poisons the whole
+
+        init(surface: String, digits: String = "", kana: String = "", unresolved: Bool = false) {
+            self.surface = surface
+            self.digits = digits
+            self.kana = kana
+            self.unresolved = unresolved
         }
     }
 
-    /// Digits whose readings geminate before a counter, with the reading
-    /// used when fusing (1回 → "ikkai", 8歳 → "hassai", 600回 →
-    /// "roppyakkai"). Digits outside this table never geminate but still
-    /// count as numbers for counter assimilation.
-    private static let digitNumberReadings: [String: String] = [
-        "1": "ichi", "2": "ni", "3": "san", "4": "yon", "5": "go",
-        "6": "roku", "7": "nana", "8": "hachi", "9": "kyuu", "10": "juu",
-        "20": "nijuu", "30": "sanjuu", "40": "yonjuu", "50": "gojuu",
-        "60": "rokujuu", "70": "nanajuu", "80": "hachijuu", "90": "kyuujuu",
-        "100": "hyaku", "200": "nihyaku", "300": "sanbyaku", "400": "yonhyaku",
-        "500": "gohyaku", "600": "roppyaku", "700": "nanahyaku",
-        "800": "happyaku", "900": "kyuuhyaku", "1000": "sen", "10000": "man"
-    ]
-
-    /// Calendar days where the tokenizer splits the native numeral from a
-    /// 日 read "ka" (二日 → "futa"|"ka", 六日 → "mui"|"ka", 二十日 →
-    /// "hatsu"|"ka"): the stems fused with "ka". 三日 arrives with a
-    /// straddling sokuon ("mi~tsu"|"ka") and fuses on the sokuon path; 四日
-    /// is a single token ("yon nichi") fused by the pair overrides below.
-    private static let dateCounterStems: [String: String] = [
-        "futa": "futsu", "itsu": "itsu",
-        "mui": "mui", "nana": "nana", "you": "you", "kokono": "kokono",
-        "too": "tou", "hatsu": "hatsu"
-    ]
-
-    /// 四日 and 七日 keep the plain "nichi" reading of 日; fuse the pair
-    /// into the correct calendar forms. 二十歳 is likewise split by the
-    /// tokenizer ("nijuu"|"sai") and would geminate on the generic path;
-    /// the coming-of-age form is "hatachi".
-    private static let datePairOverrides: [String: String] = [
-        "yon nichi": "yokka", "nana nichi": "nanoka",
-        "nijuu sai": "hatachi"
-    ]
-
-    /// Family terms whose honorific form the tokenizer can't see: it
-    /// transcribes each kanji with its standalone headword reading (母 →
-    /// "haha", correct in 私の母 but wrong before an honorific suffix,
-    /// where 母さん reads "kaasan"). Maps the term to the honorific stem.
-    private static let familyHonorificStems = [
-        "母": "kaa", "父": "tou", "姉": "nee", "兄": "nii",
-        "祖父": "jii", "祖母": "baa"
-    ]
-
-    /// Honorific suffixes that trigger the family fusion, with the romaji
-    /// they contribute (母さん → "kaasan", お母ちゃん → "okaachan",
-    /// お母様 → "okaasama").
-    private static let familySuffixRomaji = [
-        "さん": "san", "ちゃん": "chan", "様": "sama", "さま": "sama"
-    ]
-
-    /// Returns the romaji a number token is held back under, or nil when
-    /// the token isn't a number that may fuse with a following counter.
-    private static func numberReading(surface: String, reading: String) -> String? {
-        guard surface.range(
-            of: "^[一二三四五六七八九十百千万0-9]+$", options: .regularExpression
-        ) != nil else { return nil }
-        let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false)
-            ?? surface
-        if let mapped = digitNumberReadings[ascii] {
-            return mapped
+    /// Folds the held digit run into the kana (600 → ろっぴゃく).
+    private static func resolveDigits(into pending: inout PendingNumber) {
+        guard !pending.digits.isEmpty else { return }
+        if let mapped = digitReadings[pending.digits] {
+            pending.kana += mapped
+        } else {
+            pending.unresolved = true
         }
-        return reading.lowercased()
+        pending.digits = ""
     }
 
-    /// Fuses a held-back number with the next token's reading, returning
-    /// the combined romaji, or nil when the pair reads as separate words.
-    private static func fuseNumber(
-        number: (surface: String, romaji: String),
-        counterReading: String
-    ) -> String? {
-        let lower = counterReading.lowercased()
-        guard !lower.isEmpty else { return nil }
-
-        if let fused = datePairOverrides[number.romaji + " " + lower] {
-            return fused
+    /// Extends a held-back numeral run: digit tokens accumulate their
+    /// normalized glyphs, kanji numerals contribute their entry kana
+    /// (三→さん, 万→まん). Any unreadable part marks the run unannotatable.
+    private static func accumulate(
+        _ token: DictionaryToken, surface: String, into pending: inout PendingNumber?
+    ) {
+        let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? surface
+        if ascii.range(of: "^[0-9]+$", options: .regularExpression) != nil {
+            if pending != nil {
+                pending?.surface += surface
+                pending?.digits += ascii
+            } else {
+                pending = PendingNumber(surface: surface, digits: ascii)
+            }
+            return
         }
-
-        // 二日/五日/…: only the "ka" reading of 日 participates (三日 is
-        // fused upstream via the sokuon path, 四日 via the pair overrides).
-        if let stem = dateCounterStems[number.romaji] {
-            guard lower == "ka" else { return nil }
-            return stem + "ka"
+        let kana = selectReading(for: token)
+        if pending != nil {
+            pending?.surface += surface
+            resolveDigits(into: &pending!)
+            if let kana {
+                pending?.kana += kana
+            } else {
+                pending?.unresolved = true
+            }
+        } else {
+            pending = PendingNumber(
+                surface: surface, kana: kana ?? "", unresolved: kana == nil
+            )
         }
+    }
 
-        guard let stem = geminationStem(of: number.romaji),
-              let doubled = geminate(counterReading) else { return nil }
-        // Lexical, not phonological: 六歳 "rokusai", 六等 "rokutou" and
-        // 六千 "rokusen" keep their plain readings.
-        if number.romaji == "roku",
-           ["sai", "tou", "sen"].contains(where: lower.hasPrefix)
+    /// Fuses a held-back numeral run with the following token, or flushes
+    /// the run as its own segment. Returns true when `token` is fully
+    /// handled (fused into the number, or given a special-case counter
+    /// reading after the flush); false when the caller emits it normally.
+    private func fuse(
+        _ pending: inout PendingNumber?, with token: DictionaryToken, surface: String,
+        into segments: inout [ReadingSegment]
+    ) -> Bool {
+        guard var held = pending else { return false }
+        Self.resolveDigits(into: &held)
+        let reading = Self.selectReading(for: token)
+
+        // 年 after a number is the counter year (２年 → "ni nen"), never the
+        // standalone "toshi" reading, and it never geminates.
+        if surface == "年" {
+            pending = nil
+            appendNumber(held, into: &segments)
+            append(surface: surface, kana: "ねん", into: &segments)
+            return true
+        }
+        // 本 after さん/まん/せん voices to "bon" (三万本): the dictionary
+        // matches the shared もと/ほん entry, whose first reading is もと.
+        if surface == "本", !held.kana.isEmpty,
+           ["さん", "まん", "せん"].contains(where: held.kana.hasSuffix)
         {
-            return nil
+            pending = nil
+            appendNumber(held, into: &segments)
+            append(surface: surface, kana: "ほん", romaji: "bon", into: &segments)
+            return true
         }
-        return stem + doubled
+        // Generic fusion: the number keeps its geminating stem and the
+        // counter takes a sokuon (ろく+かい → ろっかい), except where the
+        // plain reading is lexical (六 + 歳/等/千).
+        if !held.unresolved, !held.kana.isEmpty, let reading,
+           !Self.rokuException(numberKana: held.kana, counterKana: reading),
+           let stem = Self.geminationStem(of: held.kana), Self.isGeminable(reading)
+        {
+            pending = nil
+            append(surface: held.surface + surface, kana: stem + "っ" + reading, into: &segments)
+            return true
+        }
+        pending = nil
+        appendNumber(held, into: &segments)
+        return false
     }
 
-    /// Drops the number's closing mora so the counter can geminate
-    /// (ichi → "i", roku → "ro", hyaku → "hya", juu → "ju").
-    private static func geminationStem(of romaji: String) -> String? {
-        for suffix in ["chi", "tsu", "ku"] where romaji.hasSuffix(suffix) {
-            return String(romaji.dropLast(suffix.count))
-        }
-        // じゅう geminates to じゅっ: only the trailing vowel elides
-        // (juu → "ju", nijuu → "niju").
-        if romaji.hasSuffix("juu") {
-            return String(romaji.dropLast(1))
-        }
-        return nil
+    /// Whether a counter reading can take a sokuon: its first mora must
+    /// start with a geminable consonant (k/s/t rows; the は/ば rows realize
+    /// as the p-series, the ち row as "cch" — `KanaRomaji` derives both).
+    private static let geminableOnsets =
+        "かきくけこさしすせそたちつてとはひふへほばびぶべぼぱぴぷぺぽ"
+
+    private static func isGeminable(_ kana: String) -> Bool {
+        guard let first = kana.unicodeScalars.first else { return false }
+        return geminableOnsets.unicodeScalars.contains(first)
     }
 
-    /// Common lexicalized greetings where the topic particle is fused into a
-    /// single dictionary token and the tokenizer's transcription is wrong,
-    /// plus established English loanword spellings (抹茶 → "matcha").
-    private static let lexicalOverrides = [
-        "こんにちは": "konnichiwa",
-        "こんばんは": "konbanwa",
-        "抹茶": "matcha",
-        // Fused by the tokenizer under its family reading ("mimoto").
-        "三本": "sanbon",
-        // Headword reading "watakushi"; the default is the colloquial
-        // "watashi" (私達 → "watashi" | "tachi" comes out right per-token).
-        "私": "watashi"
+    /// The stem a geminating numeral keeps before the っ: いち→い, ろく→ろ,
+    /// はち→は, …じゅう→…じゅ, …ゃく→…ゃ (ひゃく→ひゃ, ろっぴゃく→ろっぴゃ).
+    /// しち (七) never geminates; nor do に/さん/ご/よん/なな/せん/まん.
+    private static func geminationStem(of kana: String) -> String? {
+        let geminates = ["いち", "ろく", "はち", "じゅう", "ゃく"]
+        guard geminates.contains(where: kana.hasSuffix) else { return nil }
+        return String(kana.dropLast())
+    }
+
+    /// 六 keeps its plain reading before 歳/等/千 (ろくさい/ろくとう/ろくせん):
+    /// the fusion must not produce ろっさい.
+    private static func rokuException(numberKana: String, counterKana: String) -> Bool {
+        numberKana == "ろく" && ["さい", "とう", "せん"].contains { counterKana.hasPrefix($0) }
+    }
+
+    /// Digit runs whose counter readings the dictionary can't see, in kana
+    /// (the old heuristics' table transliterated): "600" → ろっぴゃく so
+    /// 600回 fuses to ろっぴゃっかい. Runs outside the table (123, 2026)
+    /// stay unannotated.
+    private static let digitReadings: [String: String] = [
+        "1": "いち", "2": "に", "3": "さん", "4": "よん", "5": "ご",
+        "6": "ろく", "7": "なな", "8": "はち", "9": "きゅう", "10": "じゅう",
+        "20": "にじゅう", "30": "さんじゅう", "40": "よんじゅう", "50": "ごじゅう",
+        "60": "ろくじゅう", "70": "ななじゅう", "80": "はちじゅう", "90": "きゅうじゅう",
+        "100": "ひゃく", "200": "にひゃく", "300": "さんびゃく", "400": "よんひゃく",
+        "500": "ごひゃく", "600": "ろっぴゃく", "700": "ななひゃく",
+        "800": "はっぴゃく", "900": "きゅうひゃく", "1000": "せん", "10000": "まん"
     ]
 
-    private static func romanize(surface: String, reading: String) -> String {
-        if let overridden = lexicalOverrides[surface] {
-            return overridden
-        }
-        let lower = reading.lowercased()
-        // The tokenizer spells っち as "tch" (めっちゃ→"metcha"); normalize to
-        // the doubled-consonant "cch" (meccha, kocchi, macchi). ん + な行 is
-        // written "nn" in Hepburn (かん'な → kanna), not with an apostrophe;
-        // ん + vowels/や行 keeps the apostrophe (まん'いん → man'in).
-        let sokuonCorrected = reading
-            .replacingOccurrences(of: "tch", with: "cch")
-            .replacingOccurrences(of: "n'n", with: "nn")
-        let particleCorrected: String
-        switch surface {
-        case "は":
-            particleCorrected = lower == "ha" ? "wa" : sokuonCorrected
-        case "へ":
-            particleCorrected = lower == "he" ? "e" : sokuonCorrected
-        case "を":
-            particleCorrected = lower == "wo" ? "o" : sokuonCorrected
-        default:
-            particleCorrected = sokuonCorrected
-        }
-        return KanaConversion.expandMacrons(particleCorrected)
+    /// Pure numeral surfaces (Arabic or fullwidth digits, kanji numerals):
+    /// held back for counter fusion. Engine-fused compounds (一回, 十四日)
+    /// contain non-numeral characters and never match.
+    private static func isNumeralRun(_ surface: String) -> Bool {
+        surface.range(
+            of: "^[0-9０-９一二三四五六七八九十百千万]+$", options: .regularExpression
+        ) != nil
     }
 
-    /// Kana furigana for a run: only kanji-bearing surfaces are annotated
-    /// (kana, katakana loanwords and particles need no furigana), and only
-    /// when the run's romaji reverses cleanly to kana (fused digit+counter
-    /// runs containing digits, or stray symbols, stay unannotated).
-    private static func furigana(surface: String, romaji: String) -> String? {
-        guard containsKanji(surface) else { return nil }
-        return KanaConversion.kana(fromRomaji: romaji)
+    // MARK: - Reading selection
+
+    /// Picks the kana reading to display for a token
+    /// (NOTES-dictionary-preflight.md §5): when the surface contains kana,
+    /// prefer the reading that agrees with it (こっち → こっち not こちら,
+    /// いい天気 → いいてんき not よいてんき); otherwise the highest-priority
+    /// reading that isn't a search-only form, else the first listed.
+    private static func selectReading(for token: DictionaryToken) -> String? {
+        guard let readings = token.dictionaryEntry?.kanaReadings, !readings.isEmpty else {
+            return nil
+        }
+        if token.text.unicodeScalars.contains(where: isKana) {
+            let agreeing = readings.filter { agreesWithSurface($0.text, surface: token.text) }
+            if !agreeing.isEmpty {
+                return best(of: agreeing).text
+            }
+        }
+        return best(of: readings).text
+    }
+
+    /// Readings whose text agrees with the surface's own kana: every kana in
+    /// the surface must appear literally, in order, in the reading; all
+    /// other characters (kanji, okurigana gaps) match freely.
+    private static func agreesWithSurface(_ reading: String, surface: String) -> Bool {
+        var pattern = "^"
+        for scalar in surface.unicodeScalars {
+            pattern += isKana(scalar) ? NSRegularExpression.escapedPattern(for: String(scalar)) : ".*"
+        }
+        pattern += "$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(reading.startIndex..., in: reading)
+        return regex.firstMatch(in: reading, range: range) != nil
+    }
+
+    /// The best reading of a list: the first of the highest JMdict priority
+    /// among readings that aren't search-only forms; if all are search-only,
+    /// the first reading.
+    private static func best(
+        of readings: [DictionaryToken.KanaReading]
+    ) -> DictionaryToken.KanaReading {
+        let eligible = readings.filter { $0.info?.contains("search-only") != true }
+        let pool = eligible.isEmpty ? readings : eligible
+        var winner = pool[0]
+        for candidate in pool.dropFirst() where priorityScore(candidate) > priorityScore(winner) {
+            winner = candidate
+        }
+        return winner
+    }
+
+    /// JMdict priority ranking: ichi1 > spec1 > gai1 > news1/nfXX > none.
+    private static func priorityScore(_ reading: DictionaryToken.KanaReading) -> Int {
+        guard let tags = reading.priority?.split(separator: ",") else { return 0 }
+        return tags.map { tag in
+            switch tag.trimmingCharacters(in: .whitespaces) {
+            case "ichi1": return 4
+            case "spec1": return 3
+            case "gai1": return 2
+            case "news1": return 1
+            default:
+                if tag.hasPrefix("nf"), Int(tag.dropFirst(2)) != nil {
+                    return 1
+                }
+                return 0
+            }
+        }.max() ?? 0
+    }
+
+    // MARK: - Overrides
+
+    /// Topic/directional/object particles read by function, not by their
+    /// dictionary reading (は → "wa", not "ha").
+    private static let particleRomaji = ["は": "wa", "へ": "e", "を": "o"]
+
+    /// Established spellings the kana conversion can't produce: the
+    /// greetings' fused particle (は → "ha" mechanically, "wa" by
+    /// convention; keyed by reading so the fused kanji forms 今日は and
+    /// 今晩は inherit it) and 抹茶's maccha → matcha.
+    private static let lexicalRomaji = [
+        "こんにちは": "konnichiwa", "こんばんは": "konbanwa", "まっちゃ": "matcha"
+    ]
+
+    // MARK: - Text helpers
+
+    /// Slices the token's scalar span — `start`/`end` are Unicode-scalar
+    /// indices into the original input, never `String.Index` values.
+    private static func scalarSlice(
+        _ token: DictionaryToken, of scalars: [Unicode.Scalar]
+    ) -> String {
+        let low = max(0, min(token.start, scalars.count))
+        let high = max(low, min(token.end, scalars.count))
+        return String(String.UnicodeScalarView(scalars[low ..< high]))
+    }
+
+    private static func isKana(_ scalar: Unicode.Scalar) -> Bool {
+        (0x3041 ... 0x309F).contains(scalar.value)
+            || (0x30A1 ... 0x30FF).contains(scalar.value)
     }
 
     private static func containsKanji(_ text: String) -> Bool {
