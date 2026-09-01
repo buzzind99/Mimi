@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Phase 1 — build the CrispASR native runtime (one-time, dev machine) and
+# Build the CrispASR native runtime (one-time, dev machine) and
 # install its SDK into the repo so the app can link/load it.
 #
 #   scripts/build_runtime.sh           # Metal (GPU) build — default
