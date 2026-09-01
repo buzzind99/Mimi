@@ -5,7 +5,7 @@ import Foundation
 /// hiragana), while kanji chunks freely consume the reading kana between
 /// their anchors (見た/みた → 見↔み + た↔た). With IPADIC's per-surface
 /// readings this succeeds for essentially every annotated token — the
-/// property the vibrato migration rests on; a nil result marks a reading
+/// property the tokenizer migration rests on; a nil result marks a reading
 /// that doesn't walk its surface.
 enum ReadingAlignment {
     /// One aligned chunk: the surface run and the kana reading it. Kanji

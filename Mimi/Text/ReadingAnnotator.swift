@@ -127,8 +127,8 @@ final class ReadingAnnotator {
     /// surface (`ReadingAlignment`) — under IPADIC's per-surface readings
     /// this succeeds for essentially every conjugated token (見た → み walks
     /// 見). Rare quirky readings that don't walk their surface fall back to
-    /// the whole-surface reading — shown, never hidden (the JMdict-era
-    /// reinflect/hidden paths are gone). Kana-only surfaces need none.
+    /// the whole-surface reading — shown, never hidden. Kana-only surfaces
+    /// need none.
     private static func furigana(surface: String, reading: String) -> String? {
         guard containsKanji(surface) else { return nil }
         return ReadingAlignment.runs(surface: surface, reading: reading)?

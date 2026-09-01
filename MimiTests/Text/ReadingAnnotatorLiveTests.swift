@@ -4,11 +4,12 @@ import Testing
 
 // MARK: - Live dictionary corpus
 
-/// Annotations pinned against the real IPADIC model (vibrato runtime): one
-/// surface-walking reading per token, MeCab segmentation (morpheme-level —
-/// conjugated verbs split into stem + ending where the JMdict engine emitted
-/// one token). The shared `LiveDictionaryRuntime` backs the suite (prepared
-/// dictionary, else the fetched model decompressed once into a temp file).
+/// Annotations pinned against the real IPADIC model (live tokenizer
+/// runtime): one surface-walking reading per token, MeCab segmentation
+/// (morpheme-level — conjugated verbs split into stem + ending where the
+/// JMdict engine emitted one token). The shared `LiveDictionaryRuntime`
+/// backs the suite (prepared dictionary, else the fetched model decompressed
+/// once into a temp file).
 @Suite("ReadingAnnotator dictionary corpus", .enabled(if: LiveDictionaryRuntime.isAvailable))
 struct ReadingAnnotatorLiveTests {
 
