@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Package release DMG:
-#   build/pkg/Mimi.dmg   (~20–40 MB; JMdict dictionary data bundled, ASR
+#   build/pkg/Mimi.dmg   (~20–40 MB; IPADIC dictionary model bundled, ASR
 #                        model downloaded on first launch)
 #
 # Signed with the local self-signed "Mimi Dev" certificate so TCC
@@ -33,9 +33,9 @@ build_app() {
   cp -R "${built}" "${out}"
   # Remove the un-staged build output. It carries no Resources (dictionary
   # data is staged below, only into the copy), and Release builds have no
-  # dev-checkout fallback for the bundled JMdict — launching it instead of
-  # the packaged app fails every session start with "Bundled JMdict_e.gz
-  # not found in the app bundle".
+  # dev-checkout fallback for the bundled dictionary model — launching it
+  # instead of the packaged app fails every session start with "Bundled
+  # system.dic.zst not found in the app bundle".
   rm -rf "${built}"
 }
 
@@ -51,8 +51,9 @@ stage_runtime() {
   local fwdir="${app}/Contents/Frameworks"
   mkdir -p "${fwdir}"
   # Dictionary tokenizer dylib — independent of the ASR runtime. Without it
-  # the dictionary DB can never be built, and session start (see
-  # AppModel.ensureDictionaryReady) fails — such a package is broken.
+  # the bundled dictionary model can never be decompressed, and session
+  # start (see AppModel.ensureDictionaryReady) fails — such a package is
+  # broken.
   if [[ -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" ]]; then
     cp -f "${REPO_ROOT}/local/frameworks/libdictionary.dylib" "${fwdir}/libdictionary.dylib"
     codesign --force --sign "${SIGN_IDENTITY}" "${fwdir}/libdictionary.dylib"
@@ -60,15 +61,15 @@ stage_runtime() {
     echo "ERROR: dictionary runtime not built. Run scripts/build_dictionary.sh first." >&2
     exit 1
   fi
-  # Bundled JMdict data — the SQLite DB is built from this locally on first
-  # launch (never bundled, never downloaded). Without it session start
-  # fails with "Bundled JMdict_e.gz not found in the app bundle".
-  if [[ -f "${REPO_ROOT}/local/dictionaries/JMdict_e.gz" ]]; then
+  # Bundled dictionary model — decompressed once on first launch (never
+  # bundled decompressed, never downloaded). Without it session start fails
+  # with "Bundled system.dic.zst not found in the app bundle".
+  if [[ -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" ]]; then
     local resdir="${app}/Contents/Resources"
     mkdir -p "${resdir}"
-    cp -f "${REPO_ROOT}/local/dictionaries/JMdict_e.gz" "${resdir}/JMdict_e.gz"
+    cp -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" "${resdir}/system.dic.zst"
   else
-    echo "ERROR: JMdict_e.gz not fetched. Run scripts/build_dictionary.sh first." >&2
+    echo "ERROR: system.dic.zst not fetched. Run scripts/build_dictionary.sh first." >&2
     exit 1
   fi
   if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then
