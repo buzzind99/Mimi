@@ -1,116 +1,126 @@
 #!/usr/bin/env bash
 #
-# Build the dictionary tokenizer dylib (one-time, dev machine) and stage it
-# into the repo so the app can load it.
+# Build the dictionary tokenizer dylib (one-time, dev machine), stage it into
+# the repo so the app can load it, and fetch the pinned IPADIC model.
 #
 #   scripts/build_dictionary.sh
 #
 # Outputs:
-#   local/frameworks/libdictionary.dylib   FFI dylib (SQLite compiled in)
-#   local/frameworks/dictionary            CLI for debugging
-#   local/dictionaries/JMdict_e.gz         pinned JMdict data (bundled into
-#                                          the app by package.sh; the SQLite
-#                                          DB itself is built on first launch)
+#   local/frameworks/libdictionary.dylib    FFI dylib (tokenizer core compiled
+#                                           in; no companion dylibs)
+#   local/dictionaries/ipadic-mecab-2_7_0/  pinned model: system.dic.zst
+#                                           (bundled into the app by
+#                                           package.sh) + COPYING + NOTICE
 #
-# The vendored source lives at vendor/tentoku-rs (cloned on first run) with a
-# small local FFI addition (a database-build export) applied from
-# scripts/MIMI_FFI.patch. The exported C symbols keep the upstream tentoku_
-# prefix — only the staged file name is generic. To move to a newer upstream,
-# delete vendor/tentoku-rs and re-run (the patch reapplies on the fresh
-# clone; manual conflict resolution may be needed on larger upstream drift).
+# The tokenizer core is the vendored daac-tools/vibrato (vendor/vibrato,
+# cloned on first run at the pinned ref). The C ABI lives in our own
+# vendor/vibrato-ffi crate — a path dependency on the vendored lib — so
+# nothing is patched upstream, and the exported symbols use the generic
+# dictionary_ prefix. To move to a newer vibrato: update VIBRATO_REF (and the
+# model digest if the release assets change), delete vendor/vibrato, re-run.
 #
 # Prereqs: xcode-select --install; rustup/cargo
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENDOR_DIR="${REPO_ROOT}/vendor/tentoku-rs"
+VENDOR_DIR="${REPO_ROOT}/vendor/vibrato"
+FFI_DIR="${REPO_ROOT}/vendor/vibrato-ffi"
 FRAMEWORKS_DIR="${REPO_ROOT}/local/frameworks"
-UPSTREAM="https://github.com/eridgd/tentoku-rs.git"
-TENTOKU_REF="${TENTOKU_REF:-9b9c111d2d7805ebe751265c1b7eff6eae28e56c}"  # v0.1.2
-FFI_PATCH="${REPO_ROOT}/scripts/MIMI_FFI.patch"
+UPSTREAM="https://github.com/daac-tools/vibrato.git"
+VIBRATO_REF="${VIBRATO_REF:-7462fa07a60a176e8d9ef3cb287c7973290a0f9d}"  # v0.5.2
 
-echo "==> Dictionary tokenizer build (upstream @ ${TENTOKU_REF})"
+echo "==> Dictionary tokenizer build (vibrato @ ${VIBRATO_REF})"
 
-# 1. Clone.
+# 1. Clone the vendored engine (gitignored; fresh checkout on first run).
 if [[ ! -d "${VENDOR_DIR}" ]]; then
-  echo "==> Cloning ${UPSTREAM} (pinned ${TENTOKU_REF})"
+  echo "==> Cloning ${UPSTREAM} (pinned ${VIBRATO_REF})"
   git clone "${UPSTREAM}" "${VENDOR_DIR}"
-  git -C "${VENDOR_DIR}" checkout -q "${TENTOKU_REF}"
+  git -C "${VENDOR_DIR}" checkout -q "${VIBRATO_REF}"
 else
   current_ref="$(git -C "${VENDOR_DIR}" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "${current_ref}" != "${TENTOKU_REF}" ]]; then
-    echo "WARNING: vendor/tentoku-rs is at ${current_ref:-<unknown>}, pinned ref is ${TENTOKU_REF}"
-    echo "         Override TENTOKU_REF to build a different commit intentionally."
+  if [[ "${current_ref}" != "${VIBRATO_REF}" ]]; then
+    echo "WARNING: vendor/vibrato is at ${current_ref:-<unknown>}, pinned ref is ${VIBRATO_REF}"
+    echo "         Override VIBRATO_REF to build a different commit intentionally."
   fi
 fi
-pushd "${VENDOR_DIR}" >/dev/null
 
-# 2. Apply the local FFI patch (idempotent — skipped when already present).
-if ! grep -q "tentoku_build_db" src/ffi.rs; then
-  echo "==> Applying local FFI patch (scripts/MIMI_FFI.patch)"
-  git apply --whitespace=nowarn "${FFI_PATCH}"
-fi
-# Keep a copy of the patch inside the vendor dir for reference.
-cp -f "${FFI_PATCH}" ./MIMI_FFI.patch
+# 2. Build our FFI crate. The cdylib statically embeds the engine and the
+#    zstd decoder, so the staged dylib needs no companion files.
+echo "==> Building vendor/vibrato-ffi (first run takes a while)"
+cargo build --release --manifest-path "${FFI_DIR}/Cargo.toml"
 
-# 3. Build. The cdylib carries rusqlite's bundled SQLite, so the staged dylib
-#    needs no companion files; the CLI is built by the same invocation.
-echo "==> Building (this takes a while)"
-cargo build --release
-popd >/dev/null
-
-# 4. Staging.
+# 3. Staging.
 echo "==> Staging into ${FRAMEWORKS_DIR}"
 mkdir -p "${FRAMEWORKS_DIR}"
-cp -f "${VENDOR_DIR}/target/release/libtentoku.dylib" "${FRAMEWORKS_DIR}/libdictionary.dylib"
+cp -f "${FFI_DIR}/target/release/libvibrato_ffi.dylib" "${FRAMEWORKS_DIR}/libdictionary.dylib"
 install_name_tool -id "@rpath/libdictionary.dylib" "${FRAMEWORKS_DIR}/libdictionary.dylib"
+# A pure-Rust cdylib carries no build-tree rpaths; strip defensively anyway —
+# the app must never depend on this machine's layout.
 for path in $(otool -l "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '/LC_RPATH/{getline; print $2}'); do
   install_name_tool -delete_rpath "$path" "${FRAMEWORKS_DIR}/libdictionary.dylib" 2>/dev/null || true
 done
-# A copy of the CLI next to the dylib is handy for manual debugging.
-cp -f "${VENDOR_DIR}/target/release/tentoku" "${FRAMEWORKS_DIR}/dictionary"
+
+# 4. Fetch the pinned IPADIC model (~7.7 MB tar.xz). package.sh bundles
+#    system.dic.zst into Contents/Resources; the app decompresses it once on
+#    first launch (no DB build step). The model ships in release DMGs, so its
+#    integrity is enforced on every build — refreshing to a different model
+#    is a deliberate digest bump.
+DICT_DIR="${REPO_ROOT}/local/dictionaries"
+MODEL_DIR="${DICT_DIR}/ipadic-mecab-2_7_0"
+IPADIC_URL="https://github.com/daac-tools/vibrato/releases/download/v0.5.0/ipadic-mecab-2_7_0.tar.xz"
+# Pinned digest (ipadic-mecab-2_7_0.tar.xz from the v0.5.0 release assets,
+# recorded by the Phase 0 preflight).
+VIBRATO_IPADIC_SHA256="${VIBRATO_IPADIC_SHA256:-4764f983b7c3a9e1cb6a5ee945e00558efd812980e0dad61224f63ee3b0475d9}"
+mkdir -p "${MODEL_DIR}"
+ARCHIVE="${MODEL_DIR}/model.tar.xz"
+if [[ ! -f "${ARCHIVE}" ]]; then
+  echo "==> Fetching ipadic-mecab-2_7_0.tar.xz"
+  curl -fL --retry 3 -o "${ARCHIVE}" "${IPADIC_URL}"
+fi
+echo "==> Verifying ipadic model digest"
+actual="$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')"
+if [[ "${actual}" != "${VIBRATO_IPADIC_SHA256}" ]]; then
+  echo "ERROR: ipadic model SHA-256 mismatch" >&2
+  echo "       expected ${VIBRATO_IPADIC_SHA256}" >&2
+  echo "       got      ${actual}" >&2
+  rm -f "${ARCHIVE}"
+  exit 1
+fi
+if [[ ! -f "${MODEL_DIR}/system.dic.zst" ]]; then
+  echo "==> Extracting model"
+  extract_dir="$(mktemp -d)"
+  tar -xJf "${ARCHIVE}" -C "${extract_dir}"
+  # The archive may nest its files in a versioned directory.
+  src_dir="${extract_dir}"
+  if [[ ! -f "${src_dir}/system.dic.zst" ]]; then
+    src_dir="$(dirname "$(find "${extract_dir}" -name system.dic.zst | head -1)")"
+  fi
+  cp -f "${src_dir}/system.dic.zst" "${src_dir}/COPYING" "${src_dir}/NOTICE" "${MODEL_DIR}/"
+  rm -rf "${extract_dir}"
+fi
 
 # 5. Ad-hoc sign so the app loads it locally.
 echo "==> Ad-hoc signing"
 codesign --force --sign - "${FRAMEWORKS_DIR}/libdictionary.dylib"
-codesign --force --sign - "${FRAMEWORKS_DIR}/dictionary"
 
-# 6. Self-check: the upstream 5 exports + our database-build export.
+# 6. Self-check: exactly the 5 generic exports, and no build-tree rpaths.
 echo "==> Verifying exported symbols"
-symbols="$(nm -gU "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '$3 ~ /_tentoku_/ {print $3}' | sed 's/^_//' | sort)"
+symbols="$(nm -gU "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '$3 ~ /_dictionary_/ {print $3}' | sed 's/^_//' | sort)"
 echo "${symbols}"
-count="$(echo "${symbols}" | grep -c '^tentoku_' || true)"
-if [[ "${count}" -ne 6 ]]; then
-  echo "ERROR: expected 6 exported tentoku_* symbols, found ${count}" >&2
+expected=$'dictionary_free\ndictionary_free_string\ndictionary_open\ndictionary_prepare\ndictionary_tokenize_json'
+if [[ "${symbols}" != "${expected}" ]]; then
+  echo "ERROR: expected exactly the 5 dictionary_* exports, found:" >&2
+  echo "${symbols}" >&2
   exit 1
 fi
-
-# 7. Fetch the JMdict dictionary data (~10 MB gz, EDRDG, CC BY-SA 4.0).
-#    package.sh bundles this file into Contents/Resources; the app builds the
-#    SQLite DB from it locally on first launch (no network). The bundled copy
-#    ships in release DMGs, so its integrity is enforced on every build —
-#    refreshing to a newer JMdict is a deliberate digest bump.
-DICT_DIR="${REPO_ROOT}/local/dictionaries"
-JMDICT_GZ="${DICT_DIR}/JMdict_e.gz"
-JMDICT_URL="https://www.edrdg.org/pub/Nihongo/JMdict_e.gz"
-# Pinned digest (JMdict_e fetched 2026-08-31 from EDRDG).
-TENTOKU_JMDICT_SHA256="${TENTOKU_JMDICT_SHA256:-5f89bc7db70f2656ba78535d83e4bfe9d56fb5f0fe08290e99ecebc3d1386812}"
-mkdir -p "${DICT_DIR}"
-if [[ ! -f "${JMDICT_GZ}" ]]; then
-  echo "==> Fetching JMdict_e.gz"
-  curl -fL --retry 3 -o "${JMDICT_GZ}" "${JMDICT_URL}"
-fi
-echo "==> Verifying JMdict_e.gz"
-jmdict_actual="$(shasum -a 256 "${JMDICT_GZ}" | awk '{print $1}')"
-if [[ "${jmdict_actual}" != "${TENTOKU_JMDICT_SHA256}" ]]; then
-  echo "ERROR: JMdict_e.gz SHA-256 mismatch" >&2
-  echo "       expected ${TENTOKU_JMDICT_SHA256}" >&2
-  echo "       got      ${jmdict_actual}" >&2
-  rm -f "${JMDICT_GZ}"
+rpaths="$(otool -l "${FRAMEWORKS_DIR}/libdictionary.dylib" | awk '/LC_RPATH/{getline; print $2}' | wc -l | tr -d ' ')"
+if [[ "${rpaths}" -ne 0 ]]; then
+  echo "ERROR: expected zero LC_RPATH load commands, found ${rpaths}" >&2
   exit 1
 fi
 
 echo
 echo "Done. The app loads ${FRAMEWORKS_DIR}/libdictionary.dylib when run from"
-echo "this checkout; scripts/package.sh bundles it into Mimi.app/Contents/Frameworks."
+echo "this checkout; scripts/package.sh bundles the dylib into"
+echo "Mimi.app/Contents/Frameworks and system.dic.zst into Contents/Resources."
