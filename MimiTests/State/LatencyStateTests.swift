@@ -1,90 +1,92 @@
 import Combine
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `LatencyState` rounding/publish behavior: values round to 0.1 s,
 /// the 0.05 boundary rounds up, equal rounded values never republish, and
 /// `reset()` is a no-op at zero.
 @MainActor
-final class LatencyStateTests: XCTestCase {
-
-    // MARK: - Fixtures
-
-    private var publishedValues: [Double] = []
-    private var cancellable: AnyCancellable?
+@Suite("LatencyState")
+struct LatencyStateTests {
 
     // MARK: - Helpers
 
-    private func makeSUT() -> LatencyState {
+    private func makeSUT() -> (LatencyState, PublishedValuesRecorder<Double>) {
         let sut = LatencyState()
-        cancellable = sut.$seconds.dropFirst().sink { [weak self] value in
-            self?.publishedValues.append(value)
-        }
-        return sut
+        let published = PublishedValuesRecorder(sut.$seconds)
+        return (sut, published)
     }
 
     // MARK: - update(_:)
 
-    func test_update_whenSubTenthValue_shouldRoundToTenthOfASecond() {
-        let sut = makeSUT()
+    @Test("rounds a sub-tenth value to the tenth of a second")
+    func subTenthValueRoundsToTenth() {
+        let (sut, published) = makeSUT()
 
         sut.update(0.14)
 
-        XCTAssertEqual(sut.seconds, 0.1)
+        #expect(sut.seconds == 0.1)
+        #expect(published.values == [0.1])
     }
 
-    func test_update_whenAboveRoundingBoundary_shouldRoundToNextTenth() {
-        let sut = makeSUT()
+    @Test("rounds a value above the boundary up to the next tenth")
+    func aboveBoundaryRoundsUp() {
+        let (sut, published) = makeSUT()
 
         sut.update(0.16)
 
-        XCTAssertEqual(sut.seconds, 0.2)
+        #expect(sut.seconds == 0.2)
     }
 
-    func test_update_whenExactlyAtBoundary_shouldRoundUp() {
-        let sut = makeSUT()
+    @Test("rounds the exact 0.05 boundary up")
+    func exactBoundaryRoundsUp() {
+        let (sut, published) = makeSUT()
 
         sut.update(0.05)
 
-        XCTAssertEqual(sut.seconds, 0.1)
+        #expect(sut.seconds == 0.1)
     }
 
-    func test_update_whenJustBelowBoundary_shouldRoundDown() {
-        let sut = makeSUT()
+    @Test("rounds a value just below the boundary down")
+    func justBelowBoundaryRoundsDown() {
+        let (sut, published) = makeSUT()
 
         sut.update(0.04)
 
-        XCTAssertEqual(sut.seconds, 0.0)
+        #expect(sut.seconds == 0.0)
     }
 
-    func test_update_whenRoundedValueUnchanged_shouldNotPublish() {
-        let sut = makeSUT()
+    @Test("does not republish when the rounded value is unchanged")
+    func unchangedValueDoesNotRepublish() {
+        let (sut, published) = makeSUT()
 
         sut.update(0.3)
         sut.update(0.31)
 
-        XCTAssertEqual(publishedValues, [0.3])
-        XCTAssertEqual(sut.seconds, 0.3)
+        #expect(published.values == [0.3])
+        #expect(sut.seconds == 0.3)
     }
 
     // MARK: - reset()
 
-    func test_reset_whenNonZero_shouldPublishZero() {
-        let sut = makeSUT()
+    @Test("reset publishes zero after a nonzero value")
+    func resetPublishesZero() {
+        let (sut, published) = makeSUT()
         sut.update(0.42)
 
         sut.reset()
 
-        XCTAssertEqual(sut.seconds, 0.0)
-        XCTAssertEqual(publishedValues, [0.4, 0.0])
+        #expect(sut.seconds == 0.0)
+        #expect(published.values == [0.4, 0.0])
     }
 
-    func test_reset_whenAlreadyZero_shouldNotPublish() {
-        let sut = makeSUT()
+    @Test("reset is a no-op at zero and publishes nothing")
+    func resetAtZeroDoesNotPublish() {
+        let (sut, published) = makeSUT()
 
         sut.reset()
 
-        XCTAssertEqual(sut.seconds, 0.0)
-        XCTAssertTrue(publishedValues.isEmpty)
+        #expect(sut.seconds == 0.0)
+        #expect(published.values.isEmpty)
     }
 }

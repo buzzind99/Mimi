@@ -1,44 +1,40 @@
 import Combine
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `LivePartialState` published partial set/clear.
 @MainActor
-final class LivePartialStateTests: XCTestCase {
-
-    // MARK: - Fixtures
-
-    private var publishedValues: [String] = []
-    private var cancellable: AnyCancellable?
+@Suite("LivePartialState")
+struct LivePartialStateTests {
 
     // MARK: - Helpers
 
-    private func makeSUT() -> LivePartialState {
+    private func makeSUT() -> (LivePartialState, PublishedValuesRecorder<String>) {
         let sut = LivePartialState()
-        cancellable = sut.$partial.dropFirst().sink { [weak self] value in
-            self?.publishedValues.append(value)
-        }
-        return sut
+        let published = PublishedValuesRecorder(sut.$partial)
+        return (sut, published)
     }
 
     // MARK: - Published partial
 
-    func test_partial_whenSet_shouldPublishNewValue() {
-        let sut = makeSUT()
+    @Test("setting the partial publishes the new value")
+    func setPublishesNewValue() {
+        let (sut, published) = makeSUT()
 
         sut.partial = "こんにちは"
 
-        XCTAssertEqual(sut.partial, "こんにちは")
-        XCTAssertEqual(publishedValues, ["こんにちは"])
+        #expect(sut.partial == "こんにちは")
+        #expect(published.values == ["こんにちは"])
     }
 
-    func test_partial_whenCleared_shouldPublishEmptyString() {
-        let sut = makeSUT()
+    @Test("clearing the partial publishes an empty string")
+    func clearPublishesEmptyString() {
+        let (sut, published) = makeSUT()
         sut.partial = "こんにちは"
 
         sut.partial = ""
 
-        XCTAssertEqual(sut.partial, "")
-        XCTAssertEqual(publishedValues, ["こんにちは", ""])
+        #expect(sut.partial == "")
+        #expect(published.values == ["こんにちは", ""])
     }
 }
