@@ -1,9 +1,10 @@
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `SessionClock` formatting/conversion and `SessionEntry`'s
 /// precomputed display strings.
-final class SessionModelsTests: XCTestCase {
+@Suite("Session models")
+struct SessionModelsTests {
 
     // MARK: - Fixtures
 
@@ -26,111 +27,126 @@ final class SessionModelsTests: XCTestCase {
 
     // MARK: - SessionClock.seconds
 
-    func test_seconds_whenGivenSampleCount_shouldConvertToSeconds() {
+    @Test("converts a sample count at the session rate to seconds")
+    func sampleCountToSeconds() {
         let seconds = SessionClock.seconds(sampleRateSamples)
 
-        XCTAssertEqual(seconds, 1.0)
+        #expect(seconds == 1.0)
     }
 
-    func test_seconds_whenZeroSamples_shouldBeZero() {
+    @Test("zero samples is zero seconds")
+    func zeroSamplesIsZero() {
         let seconds = SessionClock.seconds(0)
 
-        XCTAssertEqual(seconds, 0.0)
+        #expect(seconds == 0.0)
     }
 
-    func test_seconds_whenHalfASecondOfSamples_shouldConvertToSeconds() {
+    @Test("half a second of samples converts to half a second")
+    func halfSecondOfSamples() {
         let seconds = SessionClock.seconds(sampleRateSamples / 2)
 
-        XCTAssertEqual(seconds, 0.5)
+        #expect(seconds == 0.5)
     }
 
     // MARK: - SessionClock.timestamp
 
-    func test_timestamp_whenUnderOneHour_shouldFormatAsMinutesAndSeconds() {
+    @Test("formats under an hour as minutes and seconds")
+    func underHourTimestamp() {
         let timestamp = SessionClock.timestamp(underHourSeconds)
 
-        XCTAssertEqual(timestamp, expectedUnderHourTimestamp)
+        #expect(timestamp == expectedUnderHourTimestamp)
     }
 
-    func test_timestamp_whenOverOneHour_shouldFormatAsHoursMinutesAndSeconds() {
+    @Test("formats over an hour as hours, minutes and seconds")
+    func overHourTimestamp() {
         let timestamp = SessionClock.timestamp(overHourSeconds)
 
-        XCTAssertEqual(timestamp, expectedOverHourTimestamp)
+        #expect(timestamp == expectedOverHourTimestamp)
     }
 
-    func test_timestamp_whenExactlyOneHour_shouldFormatAsHoursMinutesAndSeconds() {
+    @Test("formats exactly one hour as hours, minutes and seconds")
+    func exactlyOneHourTimestamp() {
         let timestamp = SessionClock.timestamp(3600)
 
-        XCTAssertEqual(timestamp, "01:00:00")
+        #expect(timestamp == "01:00:00")
     }
 
-    func test_timestamp_whenJustUnderOneHour_shouldFormatAsMinutesAndSeconds() {
+    @Test("formats just under an hour as minutes and seconds")
+    func justUnderHourTimestamp() {
         let timestamp = SessionClock.timestamp(3599.9)
 
-        XCTAssertEqual(timestamp, "59:59")
+        #expect(timestamp == "59:59")
     }
 
-    func test_timestamp_whenSubSecond_shouldRoundDown() {
+    @Test("rounds sub-second remainders down")
+    func subSecondTimestampRoundsDown() {
         let timestamp = SessionClock.timestamp(underHourSeconds + 0.9)
 
-        XCTAssertEqual(timestamp, expectedUnderHourTimestamp)
+        #expect(timestamp == expectedUnderHourTimestamp)
     }
 
-    func test_timestamp_whenNegative_shouldClampToZero() {
+    @Test("clamps negative seconds to zero")
+    func negativeTimestampClampsToZero() {
         let timestamp = SessionClock.timestamp(negativeSeconds)
 
-        XCTAssertEqual(timestamp, expectedClampedTimestamp)
+        #expect(timestamp == expectedClampedTimestamp)
     }
 
     // MARK: - Sentence
 
-    func test_sentence_id_shouldMirrorIndex() {
+    @Test("a sentence's id mirrors its index")
+    func sentenceIDMirrorsIndex() {
         let sentence = Sentence(index: 7, startS: 0, endS: 1, lang: "ja", text: "テスト")
 
-        XCTAssertEqual(sentence.id, 7)
+        #expect(sentence.id == 7)
     }
 
     // MARK: - SessionEntry
 
-    func test_init_whenUntranslated_shouldLeaveJoinedTranslationsNil() {
+    @Test("an untranslated entry has no joined translations")
+    func untranslatedEntryHasNoTranslations() {
         let entry = makeEntry()
 
-        XCTAssertTrue(entry.translations.isEmpty)
-        XCTAssertNil(entry.joinedTranslations)
+        #expect(entry.translations.isEmpty)
+        #expect(entry.joinedTranslations == nil)
     }
 
-    func test_init_shouldPrecomputeTimestampsFromSentence() {
+    @Test("an entry precomputes its timestamps from the sentence")
+    func entryPrecomputesTimestamps() {
         let sentence = Sentence(index: 3, startS: 0, endS: 61, lang: "ja", text: "テスト")
 
         let entry = SessionEntry(sentence: sentence)
 
-        XCTAssertEqual(entry.startTimestamp, "00:00")
-        XCTAssertEqual(entry.endTimestamp, "01:01")
+        #expect(entry.startTimestamp == "00:00")
+        #expect(entry.endTimestamp == "01:01")
     }
 
-    func test_id_shouldMirrorSentenceIndex() {
+    @Test("an entry's id mirrors the sentence index")
+    func entryIDMirrorsSentenceIndex() {
         let entry = makeEntry()
 
-        XCTAssertEqual(entry.id, 0)
+        #expect(entry.id == 0)
     }
 
-    func test_appendTranslation_whenCalledOnce_shouldJoinWithoutSeparator() {
+    @Test("a single translation joins without a separator")
+    func singleTranslationJoinsWithoutSeparator() {
         var entry = makeEntry()
 
         entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
 
-        XCTAssertEqual(entry.joinedTranslations, firstTranslationText)
-        XCTAssertEqual(entry.translations, [
+        #expect(entry.joinedTranslations == firstTranslationText)
+        #expect(entry.translations == [
             SentenceTranslation(lang: "en", text: firstTranslationText)
         ])
     }
 
-    func test_appendTranslation_whenCalledTwice_shouldJoinWithSlash() {
+    @Test("two translations join with a slash")
+    func twoTranslationsJoinWithSlash() {
         var entry = makeEntry()
 
         entry.appendTranslation(SentenceTranslation(lang: "en", text: firstTranslationText))
         entry.appendTranslation(SentenceTranslation(lang: "en", text: secondTranslationText))
 
-        XCTAssertEqual(entry.joinedTranslations, "\(firstTranslationText) / \(secondTranslationText)")
+        #expect(entry.joinedTranslations == "\(firstTranslationText) / \(secondTranslationText)")
     }
 }
