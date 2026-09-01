@@ -21,29 +21,38 @@ enum ModelLocator {
         modelsDirectory.appendingPathComponent(modelName)
     }
 
+    /// Development checkout candidate: scripts/build_runtime.sh puts the dev
+    /// model in <repo>/models/; Xcode runs the app with that as working
+    /// directory. Debug-only so release never depends on the cwd.
+    static var devCheckoutURL: URL? {
+        #if DEBUG
+            return URL(fileURLWithPath: "models/\(modelName)")
+        #else
+            return nil
+        #endif
+    }
+
     /// Resolve the model for a session; nil means the onboarding/downloader
-    /// must run first (or the user drops a GGUF in manually).
-    static func resolve() -> URL? {
-        if let bundled = bundledURL, ModelVerifier.isVerified(bundled) {
+    /// must run first (or the user drops a GGUF in manually). Candidates,
+    /// existence, and verification are injectable so tests can pin the
+    /// search order without touching the real model locations; the defaults
+    /// drive the bundled → downloaded → dev lookup.
+    static func resolve(
+        bundled: URL? = ModelLocator.bundledURL,
+        downloaded: URL = ModelLocator.downloadedURL,
+        dev: () -> URL? = { ModelLocator.devCheckoutURL },
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        isVerified: (URL) -> Bool = { ModelVerifier.isVerified($0) }
+    ) -> URL? {
+        if let bundled, isVerified(bundled) {
             return bundled
         }
-        let downloaded = downloadedURL
-        if FileManager.default.fileExists(atPath: downloaded.path),
-           ModelVerifier.isVerified(downloaded)
-        {
+        if fileExists(downloaded.path), isVerified(downloaded) {
             return downloaded
         }
-        #if DEBUG
-            // Development checkout: scripts/build_runtime.sh puts the dev model
-            // in <repo>/models/; Xcode runs the app with that as working
-            // directory. Debug-only so release never depends on the cwd
-            let devURL = URL(fileURLWithPath: "models/\(modelName)")
-            if FileManager.default.fileExists(atPath: devURL.path),
-               ModelVerifier.isVerified(devURL)
-            {
-                return devURL.absoluteURL
-            }
-        #endif
+        if let devURL = dev(), fileExists(devURL.path), isVerified(devURL) {
+            return devURL.absoluteURL
+        }
         return nil
     }
 }

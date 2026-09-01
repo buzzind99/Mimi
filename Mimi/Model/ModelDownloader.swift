@@ -22,6 +22,28 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     static let downloadURL = URL(string:
         "https://huggingface.co/cstr/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
 
+    private let destination: URL
+    private let makeSession: (URLSessionDownloadDelegate) -> URLSession
+    private let makeTask: (URLSession) -> URLSessionDownloadTask?
+
+    /// Transport seams for tests: the destination and the session/task
+    /// factories default to the real model location and URL session; tests
+    /// inject a temp destination and a no-op or suspended transport so
+    /// `begin()`'s file arms run without network.
+    init(
+        destination: URL = ModelLocator.downloadedURL,
+        makeSession: @escaping (URLSessionDownloadDelegate) -> URLSession = {
+            URLSession(configuration: .default, delegate: $0, delegateQueue: nil)
+        },
+        makeTask: @escaping (URLSession) -> URLSessionDownloadTask? = {
+            $0.downloadTask(with: ModelDownloader.downloadURL)
+        }
+    ) {
+        self.destination = destination
+        self.makeSession = makeSession
+        self.makeTask = makeTask
+    }
+
     private var task: URLSessionDownloadTask?
     private var session: URLSession?
     private var resumeData: Data?
@@ -39,26 +61,25 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     private func begin() {
         let fm = FileManager.default
         try? fm.createDirectory(at: ModelLocator.modelsDirectory, withIntermediateDirectories: true)
-        let destination = ModelLocator.downloadedURL
 
         if fm.fileExists(atPath: destination.path) {
             if ModelVerifier.isVerified(destination) {
                 setState(.done(destination))
                 return
             }
-            // Corrupt or replaced file at Mimi's own model path: remove and
+            // Corrupt or replaced file at the model destination: remove and
             // re-download (never trust an unverifiable GGUF).
             try? fm.removeItem(at: destination)
         }
 
         guard session == nil else { return } // already downloading
         setState(.downloading(progress: 0, bytes: 0, total: expectedBytes))
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        let session = makeSession(self)
         self.session = session
         if let resumeData {
             task = session.downloadTask(withResumeData: resumeData)
         } else {
-            task = session.downloadTask(with: Self.downloadURL)
+            task = makeTask(session)
         }
         task?.resume()
     }
@@ -112,7 +133,6 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         // verification (at the temp location — a bad file never reaches the
         // well-known model path) and the move happen synchronously here.
         // State updates hop to the main actor afterwards.
-        let destination = ModelLocator.downloadedURL
         let fm = FileManager.default
         var failure: Error?
         do {

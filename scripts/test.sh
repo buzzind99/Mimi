@@ -110,7 +110,7 @@ floors = {
     "Text/":        98.0,
     "Session/":     65.0,
     "Translation/": 96.5,
-    "Model/":       79.5,
+    "Model/":       89.9,
     "ASR/":         43.0,
     "Audio/":       74.6,
 }

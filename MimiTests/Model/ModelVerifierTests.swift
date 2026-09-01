@@ -1,82 +1,83 @@
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `ModelVerifier` against its pinned SHA-256. Mismatch/missing-file
 /// verdicts run on tiny arbitrary files; the cache-hit and size-invalidation
 /// paths need a digest-matching file and therefore clone the repo's dev GGUF
-/// (skipped when the fixture is absent — see ModelTestFixtures).
-final class ModelVerifierTests: XCTestCase {
+/// (skipped via `.enabled(if:)` when the fixture is absent — see
+/// `ModelTestFixtures`).
+@Suite("ModelVerifier")
+struct ModelVerifierTests {
 
-    // MARK: - Helpers
+    private let temporary: TemporaryDirectory
 
-    private func makeTempFile(bytes: [UInt8]) throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimi-verify-\(UUID().uuidString)")
-        try Data(bytes).write(to: url)
-        return url
+    init() throws {
+        temporary = try TemporaryDirectory(prefix: "mimi-verify")
     }
 
     // MARK: - isVerified
 
-    func test_isVerified_whenFileMissing_shouldReturnFalse() {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimi-missing-\(UUID().uuidString)")
+    @Test("a missing file is not verified")
+    func missingFileIsUnverified() {
+        let url = temporary.fileURL("missing-\(UUID().uuidString).gguf")
 
-        XCTAssertFalse(ModelVerifier.isVerified(url))
+        #expect(!ModelVerifier.isVerified(url))
     }
 
-    func test_isVerified_whenDigestMismatches_shouldReturnFalse() throws {
-        let file = try makeTempFile(bytes: [0x00, 0x01, 0x02])
+    @Test("a file that mismatches the pinned digest is not verified")
+    func mismatchedDigestIsUnverified() throws {
+        let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: "mismatch.gguf")
 
-        XCTAssertFalse(ModelVerifier.isVerified(file))
-        XCTAssertFalse(ModelVerifier.isVerified(file))
+        #expect(!ModelVerifier.isVerified(file))
+        #expect(!ModelVerifier.isVerified(file))
     }
 
     /// The verdict cache only stores positives, so a cache hit is observable
     /// by mutating the file without changing its size: a re-hash would now
     /// mismatch, so a `true` verdict can only come from the cache.
-    func test_isVerified_whenDigestMatches_shouldCacheVerdict_untilSizeChanges() throws {
-        guard let file = try ModelTestFixtures.cloneRepoModel() else {
-            throw XCTSkip("repo dev model (pinned-digest fixture) is not present")
-        }
-        XCTAssertTrue(ModelVerifier.isVerified(file), "first call hashes and caches the verdict")
+    @Test(
+        "a digest-matching file caches its verdict until the size changes",
+        .enabled(if: TestEnvironment.repoDevModelInstalled)
+    )
+    func cachesVerdictUntilSizeChanges() throws {
+        let file = try #require(try ModelTestFixtures.cloneRepoModel())
+        #expect(ModelVerifier.isVerified(file), "first call hashes and caches the verdict")
 
         let handle = try FileHandle(forWritingTo: file)
         defer { try? handle.close() }
         try handle.write(contentsOf: Data([0x5A])) // mutate content, same size
 
-        XCTAssertTrue(ModelVerifier.isVerified(file), "second call must skip hashing (cache hit)")
+        #expect(ModelVerifier.isVerified(file), "second call must skip hashing (cache hit)")
 
         try handle.seekToEnd()
         try handle.write(contentsOf: Data([0x5B])) // size change invalidates the cache key
 
-        XCTAssertFalse(ModelVerifier.isVerified(file), "size change forces a re-hash")
+        #expect(!ModelVerifier.isVerified(file), "size change forces a re-hash")
     }
 
     // MARK: - verify
 
-    func test_verify_whenDigestMismatches_shouldThrowVerificationErrorWithPinnedMessage() throws {
-        let file = try makeTempFile(bytes: [0xFF])
+    @Test("verify rejects a mismatching file with the pinned message")
+    func verifyRejectsMismatch() throws {
+        let file = try temporary.write(Data([0xFF]), named: "mismatch-verify.gguf")
 
-        do {
+        let error = #expect(throws: ModelVerifier.VerificationError.self) {
             try ModelVerifier.verify(file)
-            XCTFail("verify must reject a file that does not match the pinned digest")
-        } catch let error as ModelVerifier.VerificationError {
-            XCTAssertEqual(
-                error.message,
-                "model file does not match Mimi's pinned checksum — "
-                    + "delete it and re-download, or replace it with an authentic copy"
-            )
-            XCTAssertEqual(error.errorDescription, error.message)
-        } catch {
-            XCTFail("unexpected error type: \(error)")
         }
+        let failure = try #require(error)
+
+        #expect(failure.message == "model file does not match Mimi's pinned checksum — "
+            + "delete it and re-download, or replace it with an authentic copy")
+        #expect(failure.errorDescription == failure.message)
     }
 
-    func test_verify_whenDigestMatches_shouldNotThrow() throws {
-        guard let file = try ModelTestFixtures.cloneRepoModel() else {
-            throw XCTSkip("repo dev model (pinned-digest fixture) is not present")
-        }
+    @Test(
+        "verify accepts a digest-matching file",
+        .enabled(if: TestEnvironment.repoDevModelInstalled)
+    )
+    func verifyAcceptsMatch() throws {
+        let file = try #require(try ModelTestFixtures.cloneRepoModel())
 
         try ModelVerifier.verify(file)
     }

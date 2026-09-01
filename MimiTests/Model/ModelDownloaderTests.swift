@@ -1,30 +1,33 @@
 import Combine
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `ModelDownloader` state transitions by invoking the
-/// `URLSessionDownloadDelegate` callbacks directly (no network). The live
-/// download path — `begin()`'s session/task setup, the resume-data and
-/// corrupt-file arms, and `cancel()` while a transfer is in flight — needs a
-/// real HuggingFace transfer. The
+/// `URLSessionDownloadDelegate` callbacks directly (no network). `begin()`'s
+/// file arms run over injected transports — a temp destination plus a no-op
+/// or suspended task factory, so nothing touches the network or the real
+/// installed model. The live download path — the resume-data arm, a real
+/// transfer in flight, and the session/task wiring against HuggingFace —
+/// needs a real HuggingFace transfer and stays excluded. The
 /// `didFinishDownloadingTo` success path uses a clone of the repo's dev GGUF
-/// (digest matches the pin; skipped when absent). That clone is moved into the
-/// installed-model location, replacing the previous file byte-for-byte.
+/// (digest matches the pin; skipped when absent). That clone is moved into
+/// the installed-model location, replacing the previous file byte-for-byte.
 @MainActor
-final class ModelDownloaderTests: XCTestCase {
+@Suite("ModelDownloader")
+struct ModelDownloaderTests {
+
+    private let temporary: TemporaryDirectory
+
+    init() throws {
+        temporary = try TemporaryDirectory(prefix: "mimi-download")
+    }
 
     // MARK: - Helpers
 
     private func makeDownloadTask() throws -> URLSessionDownloadTask {
-        let url = try XCTUnwrap(URL(string: "https://example.invalid/mimi-test.gguf"))
+        let url = try #require(URL(string: "https://example.invalid/mimi-test.gguf"))
         return URLSession.shared.downloadTask(with: url)
-    }
-
-    private func makeTempFile(bytes: [UInt8]) throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimi-download-\(UUID().uuidString)")
-        try Data(bytes).write(to: url)
-        return url
     }
 
     /// Lets the unstructured `Task { @MainActor }` hops spawned by the
@@ -50,54 +53,139 @@ final class ModelDownloaderTests: XCTestCase {
         return false
     }
 
+    /// A transport whose task factory is never called: `begin()` runs its
+    /// file-side effects and stops before any network work.
+    private func makeOfflineTransport(destination: URL) -> ModelDownloader {
+        ModelDownloader(
+            destination: destination,
+            makeSession: { _ in URLSession(configuration: .ephemeral) },
+            makeTask: { _ in nil }
+        )
+    }
+
     // MARK: - cancel
 
-    func test_cancel_whenIdle_shouldBeTrueNoOp() async {
+    @Test("cancel while idle is a no-op that republishes nothing")
+    func cancelWhileIdle() async {
         let downloader = ModelDownloader()
-        var emissions: [ModelDownloader.State] = []
-        let subscription = downloader.$state.dropFirst().sink { emissions.append($0) }
-        defer { subscription.cancel() }
+        let emissions = PublishedValuesRecorder(downloader.$state)
 
         downloader.cancel()
         downloader.cancel()
         await settle()
 
-        XCTAssertEqual(downloader.state, .idle)
-        XCTAssertTrue(emissions.isEmpty, "idle cancel must not republish .idle")
+        #expect(downloader.state == .idle)
+        #expect(emissions.values.isEmpty, "idle cancel must not republish .idle")
     }
 
     // MARK: - start
 
-    func test_start_whenVerifiedModelAlreadyPresent_shouldFinishDone_andIgnoreFurtherStarts() async throws {
+    @Test(
+        "start finishes done for an already-verified model and ignores further starts",
+        .enabled(if: ModelVerifier.isVerified(ModelLocator.downloadedURL))
+    )
+    func startWhenVerifiedModelAlreadyPresent() async {
         let destination = ModelLocator.downloadedURL
-        guard FileManager.default.fileExists(atPath: destination.path),
-              ModelVerifier.isVerified(destination)
-        else {
-            throw XCTSkip("no verified model at the download path; start() would run a real download")
-        }
         let downloader = ModelDownloader()
 
         downloader.start()
-        let done = await waitFor(downloader, timeout: 30) {
-            if case .done = $0 {
+        let done = await waitFor(downloader, timeout: 30) { state in
+            if case .done = state {
                 return true
-            }; return false
+            }
+            return false
         }
-        XCTAssertTrue(done, "state should reach .done via the already-verified-model arm")
-        XCTAssertEqual(downloader.state, .done(destination))
+        #expect(done, "state should reach .done via the already-verified-model arm")
+        #expect(downloader.state == .done(destination))
 
-        var emissions: [ModelDownloader.State] = []
-        let subscription = downloader.$state.dropFirst().sink { emissions.append($0) }
-        defer { subscription.cancel() }
+        let emissions = PublishedValuesRecorder(downloader.$state)
         downloader.start()
         await settle()
 
-        XCTAssertTrue(emissions.isEmpty, "start() once .done must be a no-op")
+        #expect(emissions.values.isEmpty, "start() once .done must be a no-op")
+    }
+
+    @Test(
+        "start finishes done for a verified file at the destination",
+        .enabled(if: TestEnvironment.repoDevModelInstalled)
+    )
+    func startWithVerifiedDestinationFinishesDone() async throws {
+        let file = try #require(try ModelTestFixtures.cloneRepoModel())
+        let downloader = makeOfflineTransport(destination: file)
+
+        downloader.start()
+        let done = await waitFor(downloader, timeout: 30) { state in
+            if case .done = state {
+                return true
+            }
+            return false
+        }
+
+        #expect(done, "state should reach .done via the already-verified-model arm")
+        #expect(downloader.state == .done(file))
+    }
+
+    @Test("start removes an unverified file at the destination before downloading")
+    func startRemovesUnverifiedDestination() async throws {
+        let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: ModelLocator.modelName)
+        let downloader = makeOfflineTransport(destination: file)
+
+        downloader.start()
+        let downloading = await waitFor(downloader, timeout: 5) { state in
+            if case .downloading = state {
+                return true
+            }
+            return false
+        }
+        #expect(downloading, "state should reach .downloading after clearing the bad file")
+        #expect(downloader.state == .downloading(progress: 0, bytes: 0, total: nil))
+        #expect(!FileManager.default.fileExists(atPath: file.path), "an unverifiable destination is removed")
+
+        let emissions = PublishedValuesRecorder(downloader.$state)
+        downloader.start()
+        await settle()
+
+        #expect(emissions.values.isEmpty, "a second start while already downloading is a no-op")
+    }
+
+    @Test("cancel while a task is in flight returns to idle without a failure")
+    func cancelWhileTaskInFlight() async throws {
+        let url = try #require(URL(string: "https://example.invalid/mimi-test.gguf"))
+        let downloader = ModelDownloader(
+            destination: temporary.fileURL("in-flight.gguf"),
+            makeSession: { _ in URLSession(configuration: .ephemeral) },
+            makeTask: { session in
+                let task = session.downloadTask(with: url)
+                task.suspend() // begin()'s resume() then leaves it suspended: no network
+                return task
+            }
+        )
+        let emissions = PublishedValuesRecorder(downloader.$state)
+
+        downloader.start()
+        _ = await waitFor(downloader, timeout: 5) { state in
+            if case .downloading = state {
+                return true
+            }
+            return false
+        }
+        downloader.cancel()
+        let idle = await waitFor(downloader, timeout: 5) { state in
+            if case .idle = state {
+                return true
+            }
+            return false
+        }
+
+        #expect(idle, "cancel() publishes the idle state")
+        #expect(downloader.state == .idle)
+        #expect(emissions.values.last == .idle)
     }
 
     // MARK: - didWriteData
 
-    func test_didWriteData_withKnownTotal_shouldPublishFractionalProgress() async throws {
+    @Test("didWriteData publishes fractional progress for a known total")
+    func didWriteDataPublishesFractionalProgress() async throws {
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
 
@@ -107,10 +195,11 @@ final class ModelDownloaderTests: XCTestCase {
         )
         await settle()
 
-        XCTAssertEqual(downloader.state, .downloading(progress: 0.25, bytes: 250, total: 1000))
+        #expect(downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000))
     }
 
-    func test_didWriteData_withUnknownTotal_shouldPublishZeroProgressAndNilTotal() async throws {
+    @Test("didWriteData publishes zero progress and nil total for an unknown total")
+    func didWriteDataPublishesZeroProgressForUnknownTotal() async throws {
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
 
@@ -120,14 +209,15 @@ final class ModelDownloaderTests: XCTestCase {
         )
         await settle()
 
-        XCTAssertEqual(downloader.state, .downloading(progress: 0, bytes: 300, total: nil))
+        #expect(downloader.state == .downloading(progress: 0, bytes: 300, total: nil))
     }
 
     // MARK: - didFinishDownloadingTo
 
-    func test_didFinishDownloadingTo_whenDigestMismatches_shouldFailAndRemoveTempFile() async throws {
+    @Test("didFinishDownloadingTo fails on a digest mismatch and removes the temp file")
+    func didFinishDownloadingToDigestMismatch() async throws {
         let downloader = ModelDownloader()
-        let tempFile = try makeTempFile(bytes: [0x01, 0x02, 0x03])
+        let tempFile = try temporary.write(Data([0x01, 0x02, 0x03]), named: "bad-digest.gguf")
         let task = try makeDownloadTask()
         let destination = ModelLocator.downloadedURL
         let destinationExisted = FileManager.default.fileExists(atPath: destination.path)
@@ -135,54 +225,58 @@ final class ModelDownloaderTests: XCTestCase {
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
         await settle()
 
-        XCTAssertEqual(
-            downloader.state,
-            .failed(
-                "Verification failed: model file does not match Mimi's pinned checksum — "
-                    + "delete it and re-download, or replace it with an authentic copy"
-            )
+        #expect(
+            downloader.state ==
+                .failed(
+                    "Verification failed: model file does not match Mimi's pinned checksum — "
+                        + "delete it and re-download, or replace it with an authentic copy"
+                )
         )
-        XCTAssertFalse(FileManager.default.fileExists(atPath: tempFile.path), "temp file must be removed")
-        XCTAssertEqual(
-            FileManager.default.fileExists(atPath: destination.path),
-            destinationExisted,
+        #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file must be removed")
+        #expect(
+            FileManager.default.fileExists(atPath: destination.path) == destinationExisted,
             "a failed verification must never touch the model destination"
         )
     }
 
-    func test_didFinishDownloadingTo_whenDigestMatches_shouldMoveIntoPlaceAndFinish() async throws {
-        guard let tempFile = try ModelTestFixtures.cloneRepoModel() else {
-            throw XCTSkip("repo dev model (pinned-digest fixture) is not present")
-        }
+    @Test(
+        "didFinishDownloadingTo moves a digest-matching file into place and finishes",
+        .enabled(if: TestEnvironment.repoDevModelInstalled)
+    )
+    func didFinishDownloadingToDigestMatch() async throws {
+        let tempFile = try #require(try ModelTestFixtures.cloneRepoModel())
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
         let destination = ModelLocator.downloadedURL
 
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
-        let done = await waitFor(downloader, timeout: 30) {
-            if case .done = $0 {
+        let done = await waitFor(downloader, timeout: 30) { state in
+            if case .done = state {
                 return true
-            }; return false
+            }
+            return false
         }
-        XCTAssertTrue(done, "state should reach .done after verification and move")
-        XCTAssertEqual(downloader.state, .done(destination))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: tempFile.path), "temp file is consumed by the move")
+        #expect(done, "state should reach .done after verification and move")
+        #expect(downloader.state == .done(destination))
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+        #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file is consumed by the move")
     }
 
     // MARK: - didCompleteWithError
 
-    func test_didCompleteWithError_withNilError_shouldStayIdle() async throws {
+    @Test("didCompleteWithError with a nil error stays idle")
+    func didCompleteWithErrorNilStaysIdle() async throws {
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
 
         downloader.urlSession(.shared, task: task, didCompleteWithError: nil)
         await settle()
 
-        XCTAssertEqual(downloader.state, .idle, "success is handled by didFinishDownloadingTo")
+        #expect(downloader.state == .idle, "success is handled by didFinishDownloadingTo")
     }
 
-    func test_didCompleteWithError_whenCancelled_shouldStayIdle() async throws {
+    @Test("didCompleteWithError with a cancelled error stays idle")
+    func didCompleteWithErrorCancelledStaysIdle() async throws {
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
         let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
@@ -190,10 +284,11 @@ final class ModelDownloaderTests: XCTestCase {
         downloader.urlSession(.shared, task: task, didCompleteWithError: error)
         await settle()
 
-        XCTAssertEqual(downloader.state, .idle, "cancel() already published the idle state")
+        #expect(downloader.state == .idle, "cancel() already published the idle state")
     }
 
-    func test_didCompleteWithError_whenFailure_shouldPublishFailedMessage() async throws {
+    @Test("didCompleteWithError with a failure publishes the failed message")
+    func didCompleteWithErrorPublishesFailure() async throws {
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
         let error = NSError(
@@ -204,12 +299,12 @@ final class ModelDownloaderTests: XCTestCase {
         downloader.urlSession(.shared, task: task, didCompleteWithError: error)
         await settle()
 
-        XCTAssertEqual(
-            downloader.state,
-            .failed(
-                "Download failed: offline. Retry, or drop the GGUF into "
-                    + "\(ModelLocator.modelsDirectory.path) manually."
-            )
+        #expect(
+            downloader.state ==
+                .failed(
+                    "Download failed: offline. Retry, or drop the GGUF into "
+                        + "\(ModelLocator.modelsDirectory.path) manually."
+                )
         )
     }
 }
