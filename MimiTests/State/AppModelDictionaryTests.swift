@@ -3,14 +3,15 @@ import Foundation
 import Testing
 
 /// Tests the first-launch dictionary kick-off wiring on `AppModel`: the
-/// build starts only when no database resolves, and a failed build stays
-/// log-only (no user-visible error state). Both entry points drive
-/// `prepareDictionaryIfNeeded` with fake closures — no real store touched.
+/// preparation starts only when no dictionary resolves, and a failed
+/// preparation stays log-only (no user-visible error state). Both entry
+/// points drive `prepareDictionaryIfNeeded` with fake closures — no real
+/// store touched.
 @MainActor
 @Suite("AppModel dictionary preparation")
 struct AppModelDictionaryTests {
 
-    @Test("kicks the dictionary build when no database resolves")
+    @Test("kicks dictionary preparation when no dictionary resolves")
     func kicksWhenUnresolved() {
         let model = AppModel()
         var prepareCalls = 0
@@ -23,10 +24,10 @@ struct AppModelDictionaryTests {
         #expect(prepareCalls == 1)
     }
 
-    @Test("skips the dictionary build when a database already resolves")
+    @Test("skips dictionary preparation when a dictionary already resolves")
     func skipsWhenResolved() {
         let model = AppModel()
-        let resolved = URL(fileURLWithPath: "/tmp/jmdict.db")
+        let resolved = URL(fileURLWithPath: "/tmp/ipadic.dic")
         var prepareCalls = 0
 
         model.prepareDictionaryIfNeeded(
@@ -37,7 +38,7 @@ struct AppModelDictionaryTests {
         #expect(prepareCalls == 0)
     }
 
-    @Test("a failed build is log-only and raises no user-visible error")
+    @Test("a failed preparation is log-only and raises no user-visible error")
     func failedBuildStaysQuiet() {
         let model = AppModel()
         var completion: ((Result<URL, Error>) -> Void)?
@@ -54,10 +55,10 @@ struct AppModelDictionaryTests {
 
     // MARK: - Session-start gate (`ensureDictionaryReady`)
 
-    @Test("session-start gate skips the build when a database already resolves")
+    @Test("session-start gate skips preparation when a dictionary already resolves")
     func gateSkipsWhenResolved() async throws {
         let model = AppModel()
-        let resolved = URL(fileURLWithPath: "/tmp/jmdict.db")
+        let resolved = URL(fileURLWithPath: "/tmp/ipadic.dic")
         var prepareCalls = 0
 
         try await model.ensureDictionaryReady(
@@ -69,28 +70,28 @@ struct AppModelDictionaryTests {
         #expect(!model.isPreparingDictionary)
     }
 
-    @Test("session-start gate builds when no database resolves and clears the flag")
-    func gateBuildsWhenUnresolved() async throws {
+    @Test("session-start gate prepares when no dictionary resolves and clears the flag")
+    func gatePreparesWhenUnresolved() async throws {
         let model = AppModel()
         var prepareCalls = 0
-        var preparingDuringBuild = false
+        var preparingDuringPreparation = false
 
         try await model.ensureDictionaryReady(
             resolve: { nil },
             prepare: { completion in
                 prepareCalls += 1
-                preparingDuringBuild = model.isPreparingDictionary
-                completion(.success(URL(fileURLWithPath: "/tmp/jmdict.db")))
+                preparingDuringPreparation = model.isPreparingDictionary
+                completion(.success(URL(fileURLWithPath: "/tmp/ipadic.dic")))
             }
         )
 
         #expect(prepareCalls == 1)
-        #expect(preparingDuringBuild)
+        #expect(preparingDuringPreparation)
         #expect(!model.isPreparingDictionary)
     }
 
-    @Test("session-start gate rethrows a failed build so the start fails visibly")
-    func gateRethrowsFailedBuild() async throws {
+    @Test("session-start gate rethrows a failed preparation so the start fails visibly")
+    func gateRethrowsFailedPreparation() async throws {
         let model = AppModel()
         let failure = DictionaryStore.DictionaryStoreError.prepareFailed(returnCode: 1)
 

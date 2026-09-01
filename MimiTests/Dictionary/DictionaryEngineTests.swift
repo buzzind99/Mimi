@@ -261,8 +261,8 @@ struct DictionaryEngineTests {
 // MARK: - DictionaryEngine (live runtime)
 
 /// Exercises the real `libdictionary.dylib` against the real IPADIC model.
-/// Gate B lives here: vibrato performs no normalization, so every span must
-/// index the original input's Unicode scalars by construction — the
+/// Gate B lives here: the runtime performs no normalization, so every span
+/// must index the original input's Unicode scalars by construction — the
 /// adversarial tests pin it. The shared `LiveDictionaryRuntime` backs the
 /// suite (see its doc comment for the leak-test footprint constraint).
 @Suite("DictionaryEngine live runtime", .enabled(if: LiveDictionaryRuntime.isAvailable))
