@@ -24,6 +24,7 @@ models/
 # Local build artifacts & vendored runtime sources
 vendor/
 local/
+debug/
 
 # Logs & temp
 *.log
