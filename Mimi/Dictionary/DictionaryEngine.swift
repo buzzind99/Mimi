@@ -5,9 +5,8 @@ import Foundation
 /// and deinflection reasons are skipped to keep the payload cheap.
 ///
 /// `start`/`end` are Unicode-scalar indices into the **original** input
-/// (end-exclusive). The runtime normalizes internally (NFC, halfwidth digits,
-/// ZWNJ stripping) but always maps indices back, so spans must be sliced via
-/// `unicodeScalars` — never `String.Index` or `Character` views.
+/// (end-exclusive). The runtime performs no normalization, so spans must be
+/// sliced via `unicodeScalars` — never `String.Index` or `Character` views.
 struct DictionaryToken: Codable, Equatable {
     let text: String
     let start: Int
@@ -72,15 +71,13 @@ final class DictionaryEngine {
     }
 
     /// Tokenizes `text` into dictionary-backed tokens, or nil when the
-    /// runtime, database, payload, or decoding is unavailable. `max` caps the
-    /// per-token candidate search inside the runtime; the JSON payload only
-    /// ever carries the best match, so the default of 1 suffices.
-    func tokenize(_ text: String, max: Int32 = 1) -> [DictionaryToken]? {
-        guard let ffi, max >= 1 else { return nil }
+    /// runtime, dictionary, payload, or decoding is unavailable.
+    func tokenize(_ text: String) -> [DictionaryToken]? {
+        guard let ffi else { return nil }
         let payload: Data? = lock.withLock {
             guard let handle = openedHandle(ffi: ffi) else { return nil }
             return text.withCString { cText in
-                guard let pointer = ffi.tokenizeJSON(handle, cText, UInt32(max)) else {
+                guard let pointer = ffi.tokenizeJSON(handle, cText) else {
                     return nil
                 }
                 defer { ffi.freeString(pointer) }

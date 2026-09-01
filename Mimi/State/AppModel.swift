@@ -110,12 +110,13 @@ final class AppModel: ObservableObject {
 
     // MARK: - Dictionary preparation
 
-    /// Kicks the first-launch dictionary build (bundled `JMdict_e.gz` → local
-    /// SQLite, see `DictionaryStore`) in the background so ruby annotations
-    /// come up soon after startup. Purely opportunistic: until it succeeds
-    /// (or if it never does) text renders unannotated, so failures are
-    /// logged only and retried on the next launch. `resolve`/`prepare` are
-    /// injectable for tests; the defaults drive the real store.
+    /// Kicks the first-launch dictionary preparation (bundled `system.dic.zst`
+    /// → decompressed dictionary, see `DictionaryStore`) in the background so
+    /// ruby annotations come up soon after startup. Purely opportunistic:
+    /// until it succeeds (or if it never does) text renders unannotated, so
+    /// failures are logged only and retried on the next launch.
+    /// `resolve`/`prepare` are injectable for tests; the defaults drive the
+    /// real store.
     func prepareDictionaryIfNeeded(
         resolve: () -> URL? = { DictionaryStore.resolve() },
         prepare: ((@escaping (Result<URL, Error>) -> Void) -> Void) = {

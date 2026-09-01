@@ -34,7 +34,7 @@ final class ReadingAnnotator {
     private let tokenize: (String) -> [DictionaryToken]?
 
     init(tokenize: @escaping (String) -> [DictionaryToken]? = {
-        DictionaryEngine.shared.tokenize($0, max: 1)
+        DictionaryEngine.shared.tokenize($0)
     }) {
         self.tokenize = tokenize
     }
