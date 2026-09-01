@@ -1,9 +1,11 @@
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests the 3-tier sentence boundary policy through the public
 /// `append` / `tick` / `flush` API, capturing emitted `Sentence` values.
-final class SentenceBufferTests: XCTestCase {
+@Suite("SentenceBuffer boundary policy")
+struct SentenceBufferTests {
 
     // MARK: - Fixtures
 
@@ -56,23 +58,26 @@ final class SentenceBufferTests: XCTestCase {
 
     // MARK: - Tier 1: terminal punctuation
 
-    func test_append_whenTerminalPunctuation_shouldEmitSentenceImmediately() {
+    @Test("terminal punctuation emits a sentence immediately")
+    func terminalPunctuationEmitsImmediately() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(finalText: punctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
-        XCTAssertEqual(sink.sentences.count, 1)
+        #expect(sink.sentences.count == 1)
     }
 
-    func test_append_whenTerminalPunctuation_shouldEmitFullText() {
+    @Test("terminal punctuation emits the full text")
+    func terminalPunctuationEmitsFullText() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(finalText: punctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
-        XCTAssertEqual(sink.sentences.first?.text, punctuatedSentence)
+        #expect(sink.sentences.first?.text == punctuatedSentence)
     }
 
-    func test_append_whenTerminalPunctuation_shouldRecordStartTimestamp() {
+    @Test("terminal punctuation records the start timestamp")
+    func terminalPunctuationRecordsStartTimestamp() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -80,10 +85,11 @@ final class SentenceBufferTests: XCTestCase {
             endSample: twoSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.first?.startS, 1.0)
+        #expect(sink.sentences.first?.startS == 1.0)
     }
 
-    func test_append_whenTerminalPunctuation_shouldRecordEndTimestamp() {
+    @Test("terminal punctuation records the end timestamp")
+    func terminalPunctuationRecordsEndTimestamp() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -91,10 +97,11 @@ final class SentenceBufferTests: XCTestCase {
             endSample: twoSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.first?.endS, 2.0)
+        #expect(sink.sentences.first?.endS == 2.0)
     }
 
-    func test_append_whenMultipleSentencesEmitted_shouldIncrementIndex() {
+    @Test("multiple emitted sentences increment the index")
+    func multipleSentencesIncrementIndex() {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: punctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
@@ -103,60 +110,66 @@ final class SentenceBufferTests: XCTestCase {
             endSample: twoSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.last?.index, 1)
+        #expect(sink.sentences.last?.index == 1)
     }
 
     // MARK: - Symbol-only finals
 
-    func test_append_whenSymbolOnlyFinalAndBufferEmpty_shouldNotEmit() {
+    @Test("a symbol-only final with an empty buffer is not emitted")
+    func symbolOnlyFinalWithEmptyBufferNotEmitted() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(finalText: symbolOnlyFinal, startSample: 0, endSample: oneSecondInSamples)
 
-        XCTAssertEqual(sink.sentences.count, 0)
+        #expect(sink.sentences.count == 0)
     }
 
-    func test_append_whenSymbolOnlyFinalAfterContent_shouldKeepAsTrailing() {
+    @Test("a symbol-only final after content stays as trailing punctuation")
+    func symbolOnlyFinalAfterContentStaysTrailing() {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: contentFinal, startSample: 0, endSample: oneSecondInSamples)
         buffer.append(finalText: symbolOnlyFinal, startSample: oneSecondInSamples, endSample: oneSecondInSamples)
 
         buffer.flush()
 
-        XCTAssertEqual(sink.sentences.first?.text, contentFinal + symbolOnlyFinal)
+        #expect(sink.sentences.first?.text == contentFinal + symbolOnlyFinal)
     }
 
     // MARK: - Tier 2: silence timeout
 
-    func test_tick_afterSilenceTimeout_shouldCloseSentence() {
+    @Test("tick after the silence timeout closes the sentence")
+    func tickAfterSilenceTimeoutCloses() {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
         buffer.tick(now: Date().addingTimeInterval(2))
 
-        XCTAssertEqual(sink.sentences.first?.text, unpunctuatedSentence)
+        #expect(sink.sentences.first?.text == unpunctuatedSentence)
     }
 
-    func test_tick_beforeSilenceTimeout_shouldKeepBufferOpen() {
+    @Test("tick before the silence timeout keeps the buffer open")
+    func tickBeforeSilenceTimeoutKeepsOpen() {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
         buffer.tick(now: Date())
 
-        XCTAssertEqual(sink.sentences.count, 0)
+        #expect(sink.sentences.count == 0)
     }
 
-    func test_tick_whenBufferEmpty_shouldNotEmit() {
+    @Test("tick with an empty buffer emits nothing")
+    func tickWithEmptyBufferNotEmitted() {
         let (buffer, sink) = makeSUT()
 
         buffer.tick(now: Date().addingTimeInterval(60))
 
-        XCTAssertEqual(sink.sentences.count, 0)
+        #expect(sink.sentences.count == 0)
     }
 
     // MARK: - Tier 3: length cap
 
-    func test_append_beyondLengthCap_shouldSplitAtClauseBoundary() {
+    @Test("beyond the length cap the buffer splits at the clause boundary")
+    func overCapSplitsAtClauseBoundary() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -164,10 +177,11 @@ final class SentenceBufferTests: XCTestCase {
             endSample: fourSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.first?.text, expectedSplitHead)
+        #expect(sink.sentences.first?.text == expectedSplitHead)
     }
 
-    func test_append_beyondLengthCap_shouldRecordHeadStartTimestamp() {
+    @Test("beyond the length cap the split head records its start timestamp")
+    func overCapRecordsHeadStartTimestamp() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -175,22 +189,11 @@ final class SentenceBufferTests: XCTestCase {
             endSample: fourSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.first?.startS, 2.0)
+        #expect(sink.sentences.first?.startS == 2.0)
     }
 
-    func test_flush_afterClauseSplit_shouldEmitTail() {
-        let (buffer, sink) = makeSUT()
-        buffer.append(
-            finalText: longClauseSentence, startSample: twoSecondsInSamples,
-            endSample: fourSecondsInSamples
-        )
-
-        buffer.flush()
-
-        XCTAssertEqual(sink.sentences.last?.text, expectedSplitTail)
-    }
-
-    func test_flush_afterClauseSplit_shouldRecordTailStartTimestamp() {
+    @Test("flush after a clause split emits the tail")
+    func flushAfterClauseSplitEmitsTail() {
         let (buffer, sink) = makeSUT()
         buffer.append(
             finalText: longClauseSentence, startSample: twoSecondsInSamples,
@@ -199,10 +202,24 @@ final class SentenceBufferTests: XCTestCase {
 
         buffer.flush()
 
-        XCTAssertEqual(sink.sentences.last?.startS, 4.0)
+        #expect(sink.sentences.last?.text == expectedSplitTail)
     }
 
-    func test_append_beyondLengthCap_whenNoClauseBoundary_shouldKeepBufferGrowing() {
+    @Test("flush after a clause split records the tail start timestamp")
+    func flushAfterClauseSplitRecordsTailTimestamp() {
+        let (buffer, sink) = makeSUT()
+        buffer.append(
+            finalText: longClauseSentence, startSample: twoSecondsInSamples,
+            endSample: fourSecondsInSamples
+        )
+
+        buffer.flush()
+
+        #expect(sink.sentences.last?.startS == 4.0)
+    }
+
+    @Test("beyond the length cap with no clause boundary the buffer keeps growing")
+    func overCapWithoutBoundaryKeepsGrowing() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -212,26 +229,28 @@ final class SentenceBufferTests: XCTestCase {
             finalText: "いいね", startSample: oneSecondInSamples, endSample: twoSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.count, 0)
+        #expect(sink.sentences.count == 0)
 
         buffer.flush()
 
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(sink.sentences.first?.text, boundarylessOverCapText + "いいね")
+        #expect(sink.sentences.count == 1)
+        #expect(sink.sentences.first?.text == boundarylessOverCapText + "いいね")
     }
 
-    func test_append_whenTerminalPunctuationExceedsLengthCap_shouldCloseWholeBufferWithoutSplit() {
+    @Test("terminal punctuation beyond the length cap closes the whole buffer without splitting")
+    func terminalTailedOverCapClosesWholeBuffer() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
             finalText: terminalTailedOverCapText, startSample: 0, endSample: oneSecondInSamples
         )
 
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(sink.sentences.first?.text, terminalTailedOverCapText)
+        #expect(sink.sentences.count == 1)
+        #expect(sink.sentences.first?.text == terminalTailedOverCapText)
     }
 
-    func test_append_beyondLengthCap_shouldSplitAtAsciiCommaBoundary() {
+    @Test("beyond the length cap the buffer splits at an ASCII comma boundary")
+    func overCapSplitsAtAsciiComma() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -239,27 +258,29 @@ final class SentenceBufferTests: XCTestCase {
             endSample: fourSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(sink.sentences.first?.text, expectedAsciiCommaSplitHead)
+        #expect(sink.sentences.count == 1)
+        #expect(sink.sentences.first?.text == expectedAsciiCommaSplitHead)
     }
 
-    func test_append_whenSplitTailIsSymbolOnly_shouldDropTailSilentlyOnFlush() {
+    @Test("a symbol-only split tail is dropped silently on flush")
+    func symbolOnlyTailDroppedOnFlush() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
             finalText: symbolOnlyTailSplitText, startSample: twoSecondsInSamples,
             endSample: fourSecondsInSamples
         )
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(sink.sentences.first?.text, expectedSymbolOnlyTailHead)
+        #expect(sink.sentences.count == 1)
+        #expect(sink.sentences.first?.text == expectedSymbolOnlyTailHead)
 
         buffer.flush()
 
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(buffer.nextIndex, 1)
+        #expect(sink.sentences.count == 1)
+        #expect(buffer.nextIndex == 1)
     }
 
-    func test_append_whenTerminalPunctuationFollowsClauseSplit_shouldCloseReinstatedTail() {
+    @Test("terminal punctuation after a clause split closes the reinstated tail")
+    func terminalAfterClauseSplitClosesTail() {
         let (buffer, sink) = makeSUT()
         buffer.append(
             finalText: asciiCommaSplitText, startSample: twoSecondsInSamples,
@@ -270,10 +291,11 @@ final class SentenceBufferTests: XCTestCase {
             finalText: "。", startSample: fourSecondsInSamples, endSample: fourSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.map(\.text), [expectedAsciiCommaSplitHead, "です。"])
+        #expect(sink.sentences.map(\.text) == [expectedAsciiCommaSplitHead, "です。"])
     }
 
-    func test_append_acrossClauseSplitsFlushesAndAppends_shouldKeepIndicesContinuous() {
+    @Test("indices stay continuous across clause splits, flushes, and appends")
+    func indicesContinuousAcrossSplitsFlushesAndAppends() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
@@ -285,49 +307,53 @@ final class SentenceBufferTests: XCTestCase {
             endSample: twoSecondsInSamples
         )
 
-        XCTAssertEqual(sink.sentences.map(\.index), [0, 1, 2])
+        #expect(sink.sentences.map(\.index) == [0, 1, 2])
     }
 
     // MARK: - ASCII terminals
 
-    func test_append_whenAsciiQuestionMarkTerminal_shouldCloseImmediately() {
+    @Test("an ASCII question mark terminal closes immediately")
+    func asciiQuestionTerminalClosesImmediately() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
             finalText: asciiQuestionSentence, startSample: 0, endSample: oneSecondInSamples
         )
 
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(sink.sentences.first?.text, asciiQuestionSentence)
+        #expect(sink.sentences.count == 1)
+        #expect(sink.sentences.first?.text == asciiQuestionSentence)
     }
 
-    func test_append_whenAsciiExclamationTerminal_shouldCloseImmediately() {
+    @Test("an ASCII exclamation terminal closes immediately")
+    func asciiExclamationTerminalClosesImmediately() {
         let (buffer, sink) = makeSUT()
 
         buffer.append(
             finalText: asciiExclamationSentence, startSample: 0, endSample: oneSecondInSamples
         )
 
-        XCTAssertEqual(sink.sentences.count, 1)
-        XCTAssertEqual(sink.sentences.first?.text, asciiExclamationSentence)
+        #expect(sink.sentences.count == 1)
+        #expect(sink.sentences.first?.text == asciiExclamationSentence)
     }
 
     // MARK: - Flush
 
-    func test_flush_whenBufferHasPartialSentence_shouldEmit() {
+    @Test("flush emits a partial buffer")
+    func flushEmitsPartialBuffer() {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
         buffer.flush()
 
-        XCTAssertEqual(sink.sentences.first?.text, unpunctuatedSentence)
+        #expect(sink.sentences.first?.text == unpunctuatedSentence)
     }
 
-    func test_flush_whenBufferEmpty_shouldNotEmit() {
+    @Test("flush with an empty buffer emits nothing")
+    func flushWithEmptyBufferNotEmitted() {
         let (buffer, sink) = makeSUT()
 
         buffer.flush()
 
-        XCTAssertEqual(sink.sentences.count, 0)
+        #expect(sink.sentences.count == 0)
     }
 }
