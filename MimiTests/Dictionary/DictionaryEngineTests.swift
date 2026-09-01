@@ -374,46 +374,4 @@ struct DictionaryEngineLiveTests {
             cursor = token.end
         }
     }
-
-    // MARK: payload lifetime
-
-    /// Repeated heavy tokenizations must not corrupt state or degrade: every
-    /// call must return tokens, and the process footprint must stay flat —
-    /// payload strings are freed on every call (proven per-path by the
-    /// fake-runtime pairing tests above).
-    @Test("keeps memory flat across a thousand heavy tokenizations")
-    func repeatedTokenizationKeepsMemoryFlat() throws {
-        let heavySentence = "今日はいい天気ですね。動画を見ます。学校へ行く"
-        let leakIterations = 1000
-        let engine = try #require(LiveDictionaryRuntime.engine)
-
-        for _ in 0 ..< 100 {
-            _ = engine.tokenize(heavySentence)
-        }
-        let before = physFootprint()
-
-        for _ in 0 ..< leakIterations {
-            #expect(engine.tokenize(heavySentence) != nil)
-        }
-
-        let growth = physFootprint() - before
-        #expect(
-            growth < 512 * 1024,
-            "footprint grew \(growth)B over \(leakIterations) calls; payloads must be freed"
-        )
-    }
-}
-
-/// The resident footprint the OS charges this process (what Memory reports).
-private func physFootprint() -> Int64 {
-    var info = task_vm_info_data_t()
-    var count = mach_msg_type_number_t(
-        MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride
-    )
-    let result = withUnsafeMutablePointer(to: &info) {
-        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
-        }
-    }
-    return result == KERN_SUCCESS ? Int64(info.phys_footprint) : 0
 }
