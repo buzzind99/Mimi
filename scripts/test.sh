@@ -108,7 +108,7 @@ floors = {
     "Export/":     100.0,
     "Dictionary/":  98.0,
     "Text/":        98.0,
-    "Session/":     65.0,
+    "Session/":     94.0,
     "Translation/": 96.5,
     "Model/":       89.9,
     "ASR/":         43.0,

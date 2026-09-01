@@ -32,6 +32,16 @@ enum CaptureError: LocalizedError {
     }
 }
 
+/// The capture surface `SessionController` drives. `SystemAudioCapture`
+/// conforms as-is; tests inject a scripted double so `begin()` and the
+/// chunk path run without ScreenCaptureKit.
+protocol AudioCapturing: AnyObject {
+    var onChunk: ((AudioChunk) -> Void)? { get set }
+    var onIOError: ((CaptureError) -> Void)? { get set }
+    func start() async throws
+    func stop()
+}
+
 /// Captures the entirety of system audio with a ScreenCaptureKit audio-only
 /// stream and delivers mono 16 kHz chunks.
 ///
@@ -39,7 +49,7 @@ enum CaptureError: LocalizedError {
 /// delegate downmixes/resamples when needed, slices 160 ms chunks, and calls
 /// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
 /// engine's job.
-final class SystemAudioCapture: NSObject, SCStreamDelegate, SCStreamOutput {
+final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCStreamOutput {
     static let outputSampleRate: Double = 16000
     static let chunkSamples = Int(outputSampleRate * 0.16)
 

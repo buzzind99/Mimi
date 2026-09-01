@@ -9,6 +9,9 @@ final class SessionController {
     private let live: LivePartialState
     private let latency: LatencyState
     private let translationQueue: TranslationQueue
+    private let makeEngine: (URL?, Bool) -> ASREngine?
+    private let makeCapture: () -> any AudioCapturing
+    private let ensurePermission: () async -> Bool
 
     /// A session is about to run: clear transcript state.
     var onSessionBegin: (() -> Void)?
@@ -25,7 +28,7 @@ final class SessionController {
     private(set) var sessionMetadata: SessionMetadata?
 
     private var engine: ASREngine?
-    private var capture: SystemAudioCapture?
+    private var capture: (any AudioCapturing)?
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
     private var tickTimer: Timer?
@@ -35,10 +38,29 @@ final class SessionController {
         private var debugIngressChunks = 0
     #endif
 
-    init(live: LivePartialState, latency: LatencyState, translationQueue: TranslationQueue) {
+    /// Injection seams for tests: engine, capture, and permission default to
+    /// the real implementations; tests inject doubles so `begin()` and the
+    /// event paths run without TCC, ScreenCaptureKit, or the native runtime.
+    /// `makeEngine` receives `allowMock` (true from `begin`, false from the
+    /// warm-up, which must never fall back to the mock).
+    init(
+        live: LivePartialState,
+        latency: LatencyState,
+        translationQueue: TranslationQueue,
+        makeEngine: @escaping (URL?, Bool) -> ASREngine? = {
+            ASREngineFactory.makeEngine(modelURL: $0, allowMock: $1)
+        },
+        makeCapture: @escaping () -> any AudioCapturing = { SystemAudioCapture() },
+        ensurePermission: @escaping () async -> Bool = {
+            await SystemAudioCapture.ensurePermission()
+        }
+    ) {
         self.live = live
         self.latency = latency
         self.translationQueue = translationQueue
+        self.makeEngine = makeEngine
+        self.makeCapture = makeCapture
+        self.ensurePermission = ensurePermission
     }
 
     // MARK: - Warm-up
@@ -54,8 +76,9 @@ final class SessionController {
         #if DEBUG
             print("[warmup] preparing ASR engine in background")
         #endif
+        let makeEngine = self.makeEngine
         Task.detached(priority: .utility) {
-            if let engine = ASREngineFactory.makeEngine(modelURL: url, allowMock: false) {
+            if let engine = makeEngine(url, false) {
                 try? engine.prepare()
             }
         }
@@ -68,12 +91,12 @@ final class SessionController {
     /// permission or capture setup fails.
     func begin() async throws -> Bool {
         // Screen Recording permission (TCC) covers SCK system-audio capture.
-        guard await SystemAudioCapture.ensurePermission() else {
+        guard await ensurePermission() else {
             throw CaptureError.permissionDenied
         }
 
         let modelURL = ModelLocator.resolve()
-        guard let engine = ASREngineFactory.makeEngine(modelURL: modelURL, allowMock: true) else {
+        guard let engine = makeEngine(modelURL, true) else {
             return false
         }
         self.engine = engine
@@ -92,7 +115,7 @@ final class SessionController {
         }
         sentenceBuffer = buffer
 
-        let capture = SystemAudioCapture()
+        let capture = makeCapture()
         capture.onChunk = { [weak self] chunk in
             guard let self, let engine = self.engine else { return }
             self.handleCaptureChunk(chunk, engine: engine)
