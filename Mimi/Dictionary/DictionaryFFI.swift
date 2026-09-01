@@ -19,6 +19,9 @@ struct DictionaryFFI {
     typealias FnTokenizeJSON = @convention(c) (
         UnsafeMutableRawPointer?, UnsafePointer<CChar>, UInt32
     ) -> UnsafeMutablePointer<CChar>?
+    typealias FnLookupJSON = @convention(c) (
+        UnsafeMutableRawPointer?, UnsafePointer<CChar>, UInt32
+    ) -> UnsafeMutablePointer<CChar>?
     typealias FnFreeString = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
 
     /// Build a JMdict SQLite database from a local JMdict_e.gz file.
@@ -30,6 +33,9 @@ struct DictionaryFFI {
     let free: FnFree
     /// Tokenize text into a JSON string owned by the runtime; null on error.
     let tokenizeJSON: FnTokenizeJSON
+    /// Look up a word as JSON entries owned by the runtime; null when nothing
+    /// matches (reserved for future word-lookup UI; the annotator never calls it).
+    let lookupJSON: FnLookupJSON
     /// Free a string returned by a `*JSON` function (null is a no-op).
     let freeString: FnFreeString
 
@@ -77,6 +83,7 @@ struct DictionaryFFI {
               let open = symbol(handle, "tentoku_open"),
               let free = symbol(handle, "tentoku_free"),
               let tokenizeJSON = symbol(handle, "tentoku_tokenize_json"),
+              let lookupJSON = symbol(handle, "tentoku_lookup_json"),
               let freeString = symbol(handle, "tentoku_free_string")
         else { return nil }
         return DictionaryFFI(
@@ -84,6 +91,7 @@ struct DictionaryFFI {
             open: unsafeBitCast(open, to: FnOpen.self),
             free: unsafeBitCast(free, to: FnFree.self),
             tokenizeJSON: unsafeBitCast(tokenizeJSON, to: FnTokenizeJSON.self),
+            lookupJSON: unsafeBitCast(lookupJSON, to: FnLookupJSON.self),
             freeString: unsafeBitCast(freeString, to: FnFreeString.self)
         )
     }

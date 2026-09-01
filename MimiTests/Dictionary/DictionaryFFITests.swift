@@ -44,6 +44,20 @@ final class DictionaryFFITests: XCTestCase {
         XCTAssertNil(ffi)
     }
 
+    func test_load_whenLookupSymbolMissing_shouldReturnNil() {
+        let openLibrary: (String) -> UnsafeMutableRawPointer? = { _ in
+            UnsafeMutableRawPointer(bitPattern: 1)
+        }
+        let symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { _, name in
+            // "tentoku_lookup_json" is the dylib's ABI literal, mirrored here.
+            name == "tentoku_lookup_json" ? nil : UnsafeMutableRawPointer(strdup(name))
+        }
+
+        let ffi = DictionaryFFI.load(openLibrary: openLibrary, symbol: symbol)
+
+        XCTAssertNil(ffi)
+    }
+
     func test_load_withRealRuntime_shouldBindAllSymbols() throws {
         try XCTSkipIf(DictionaryFFI.load() == nil, "libdictionary.dylib is not available")
     }

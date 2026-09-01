@@ -139,6 +139,12 @@ private func fakeTokenizeNil(
 
 private func fakeFreeHandle(_ handle: UnsafeMutableRawPointer?) {}
 
+private func fakeLookupNil(
+    _ handle: UnsafeMutableRawPointer?, _ word: UnsafePointer<CChar>, _ maxResults: UInt32
+) -> UnsafeMutablePointer<CChar>? {
+    nil
+}
+
 private func fakeFreeString(_ string: UnsafeMutablePointer<CChar>?) {
     guard let string else { return }
     free(string)
@@ -154,6 +160,7 @@ private func makeFakeFFI(
         open: open,
         free: fakeFreeHandle,
         tokenizeJSON: tokenize,
+        lookupJSON: fakeLookupNil,
         freeString: fakeFreeString
     )
 }
