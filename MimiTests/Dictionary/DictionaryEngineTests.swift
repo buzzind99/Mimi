@@ -1,37 +1,36 @@
+import Darwin
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 // MARK: - Fixtures
 
 private let anyText = "任意の文"
 
-private let fakeDatabaseURL = URL(fileURLWithPath: "/tmp/fake-dictengine/jmdict.db")
+private let fakeDictionaryURL = URL(fileURLWithPath: "/tmp/fake-dictengine/ipadic.dic")
 
-private let phaseZeroPayload = #"""
-[{"text":"私","start":0,"end":1,
-  "dictionary_entry":{"entry_id":28684,"ent_seq":"1311110",
-    "kanji_readings":[{"text":"私","priority":"ichi1","info":null,
-                       "match_range":[0,1],"matched":true}],
-    "kana_readings":[{"text":"わたし","no_kanji":false,"priority":"ichi1",
-                      "info":null,"match_range":null,"matched":false},
-                     {"text":"ワタシ","no_kanji":false,"priority":null,
-                      "info":"search-only kana form","match_range":null,"matched":false}],
-    "senses":[{"index":0,"pos_tags":["pronoun"],
-               "glosses":[{"text":"I","lang":"eng","g_type":null}],
-               "info":null,"field":null,"misc":null,"dial":null}]},
-  "deinflection_reasons":null}]
+/// The runtime payload: one token with a hiragana surface reading, one
+/// unknown surface without.
+private let payloadMixed = #"""
+[{"text":"私","start":0,"end":1,"reading":"わたし"},
+ {"text":"𠮷","start":1,"end":2,"reading":null}]
 """#
 
-private let unmatchedPayload = #"""
-[{"text":"𠮷","start":0,"end":1,"dictionary_entry":null,"deinflection_reasons":null}]
-"""#
+private let payloadTokens = [
+    DictionaryToken(text: "私", start: 0, end: 1, reading: "わたし"),
+    DictionaryToken(text: "𠮷", start: 1, end: 2, reading: nil)
+]
+
+/// Serializes the process-env tests across suites: Swift Testing runs suites
+/// in parallel, but `setenv`/`unsetenv` of `MIMI_DICT` is process-global.
+let dictionaryEnvLock = NSLock()
 
 // MARK: - Fake FFI shims
 
 //
 // Top-level C-convention functions (no captures, so they convert to the FFI
 // function-pointer types) plus file-scope counters and a per-test payload
-// variable. Tests here run serially, so plain globals are safe.
+// variable. The suite below is serialized, so plain globals are safe.
 
 private let fakeHandle = UnsafeMutableRawPointer(bitPattern: 0xCAFE_FEED)
 
@@ -39,13 +38,12 @@ private var fakeOpenCalls = 0
 /// Number of initial open attempts that fail before the fake succeeds.
 private var fakeOpenFailuresBeforeSuccess = 0
 
-private var fakeTokenizeCalls = 0
 /// Raw JSON the tokenize fake returns; nil means "return a null pointer".
 private var fakeTokenizeJSONText: String?
 
 private var fakeFreeStringCalls = 0
 
-private func fakeOpenCounting(_ dbPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
+private func fakeOpenCounting(_ dicPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
     fakeOpenCalls += 1
     return fakeOpenCalls > fakeOpenFailuresBeforeSuccess ? fakeHandle : nil
 }
@@ -53,7 +51,6 @@ private func fakeOpenCounting(_ dbPath: UnsafePointer<CChar>) -> UnsafeMutableRa
 private func fakeTokenizeWithPayload(
     _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
-    fakeTokenizeCalls += 1
     guard let text = fakeTokenizeJSONText else { return nil }
     return strdup(text)
 }
@@ -63,7 +60,6 @@ private func fakeTokenizeWithPayload(
 private func fakeTokenizeInvalidUTF8(
     _ handle: UnsafeMutableRawPointer?, _ text: UnsafePointer<CChar>
 ) -> UnsafeMutablePointer<CChar>? {
-    fakeTokenizeCalls += 1
     guard let raw = malloc(2) else { return nil }
     let pointer = raw.assumingMemoryBound(to: CChar.self)
     pointer[0] = CChar(bitPattern: 0xFF)
@@ -94,13 +90,12 @@ private func makeFakeFFI(
 
 // MARK: - DictionaryEngine (fake runtime)
 
-final class DictionaryEngineTests: XCTestCase {
+@Suite("DictionaryEngine", .serialized)
+struct DictionaryEngineTests {
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    init() {
         fakeOpenCalls = 0
         fakeOpenFailuresBeforeSuccess = 0
-        fakeTokenizeCalls = 0
         fakeFreeStringCalls = 0
         fakeTokenizeJSONText = nil
     }
@@ -108,279 +103,345 @@ final class DictionaryEngineTests: XCTestCase {
     // MARK: Helpers
 
     private func makeEngine(
-        open: DictionaryFFI.FnOpen = fakeOpenCounting,
-        tokenize: DictionaryFFI.FnTokenizeJSON = fakeTokenizeWithPayload,
-        resolveDatabase: @escaping () -> URL? = { fakeDatabaseURL }
+        ffi: DictionaryFFI? = makeFakeFFI(),
+        resolveDictionary: @escaping () -> URL? = { fakeDictionaryURL }
     ) -> DictionaryEngine {
-        DictionaryEngine(
-            ffi: makeFakeFFI(open: open, tokenize: tokenize),
-            resolveDatabase: resolveDatabase
-        )
+        DictionaryEngine(ffi: ffi, resolveDictionary: resolveDictionary)
     }
 
     // MARK: fail-soft degradation
 
-    func test_tokenize_whenLibraryUnavailable_shouldReturnNil() {
-        let engine = DictionaryEngine(ffi: nil, resolveDatabase: { fakeDatabaseURL })
+    @Test("returns nil when the runtime library is unavailable")
+    func libraryUnavailable() {
+        let engine = makeEngine(ffi: nil)
 
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertNil(tokens)
+        #expect(engine.tokenize(anyText) == nil)
     }
 
-    func test_tokenize_whenDatabaseUnresolved_shouldReturnNil() {
-        let engine = makeEngine(resolveDatabase: { nil })
+    @Test("returns nil when no dictionary resolves")
+    func dictionaryUnresolved() {
+        let engine = makeEngine(resolveDictionary: { nil })
 
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertNil(tokens)
+        #expect(engine.tokenize(anyText) == nil)
     }
 
-    func test_tokenize_whenOpenFails_shouldReturnNil() {
-        let engine = makeEngine(open: { _ in nil })
+    @Test("returns nil when open fails")
+    func openFails() {
+        let engine = makeEngine(ffi: makeFakeFFI(open: { _ in nil }))
 
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertNil(tokens)
+        #expect(engine.tokenize(anyText) == nil)
     }
 
-    func test_tokenize_whenRuntimeReturnsNull_shouldReturnNil() {
+    @Test("returns nil when the runtime returns no payload")
+    func runtimeReturnsNull() {
         let engine = makeEngine()
 
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertNil(tokens)
+        #expect(engine.tokenize(anyText) == nil)
     }
 
-    func test_tokenize_whenPayloadIsMalformedJSON_shouldReturnNil() {
+    @Test("returns nil on malformed JSON")
+    func malformedJSON() {
         fakeTokenizeJSONText = "not json"
+
         let engine = makeEngine()
 
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertNil(tokens)
+        #expect(engine.tokenize(anyText) == nil)
     }
 
-    func test_tokenize_whenPayloadIsInvalidUTF8_shouldFreeTheStringAndReturnNil() {
-        let engine = makeEngine(tokenize: fakeTokenizeInvalidUTF8)
+    @Test("frees the payload even when it isn't valid UTF-8")
+    func invalidUTF8PayloadFreed() {
+        let engine = makeEngine(ffi: makeFakeFFI(tokenize: fakeTokenizeInvalidUTF8))
 
         let tokens = engine.tokenize(anyText)
 
-        XCTAssertNil(tokens)
-        XCTAssertEqual(fakeFreeStringCalls, 1, "the payload must be freed even when undecodable")
+        #expect(tokens == nil)
+        #expect(fakeFreeStringCalls == 1, "the payload must be freed even when undecodable")
     }
 
-    func test_tokenize_whenPayloadFreed_shouldPairFreeWithEveryPayload() {
-        fakeTokenizeJSONText = unmatchedPayload
+    @Test("frees every payload exactly once")
+    func payloadFreedOnce() {
+        fakeTokenizeJSONText = payloadMixed
         let engine = makeEngine()
 
         _ = engine.tokenize(anyText)
 
-        XCTAssertEqual(fakeFreeStringCalls, 1)
+        #expect(fakeFreeStringCalls == 1)
     }
 
     // MARK: lazy open & retry
 
-    /// Arrange = one tokenize while the database is still unresolved; the act
-    /// under test is the second call after the database appears (first-launch
-    /// ordering: build finishes, then the first annotation arrives).
-    func test_tokenize_whenDatabaseResolvedLater_shouldOpenOnRetry() {
-        var databaseURL: URL?
-        let engine = makeEngine(resolveDatabase: { databaseURL })
-        fakeTokenizeJSONText = unmatchedPayload
-        _ = engine.tokenize(anyText)
-        databaseURL = fakeDatabaseURL
+    /// The first tokenize runs while the dictionary is still unresolved (the
+    /// first-launch ordering: prepare finishes, then the first annotation
+    /// arrives); the act under test is the second call after it appears.
+    @Test("retries the open when the dictionary resolves later")
+    func dictionaryResolvedLater() {
+        var dictionaryURL: URL?
 
-        let tokens = engine.tokenize(anyText)
+        let engine = makeEngine(resolveDictionary: { dictionaryURL })
 
-        XCTAssertNotNil(tokens, "a failed open must be retried, not cached")
+        fakeTokenizeJSONText = payloadMixed
+        #expect(engine.tokenize(anyText) == nil)
+        dictionaryURL = fakeDictionaryURL
+        #expect(engine.tokenize(anyText) == payloadTokens)
     }
 
-    /// Arrange = one tokenize against an open that fails once; the act under
+    /// The first tokenize runs against an open that fails once; the act under
     /// test is the retry, which must succeed.
-    func test_tokenize_whenOpenFailsOnce_shouldSucceedOnRetry() {
+    @Test("succeeds on the retry after a failed open")
+    func openRetriesAfterFailure() {
         fakeOpenFailuresBeforeSuccess = 1
-        fakeTokenizeJSONText = unmatchedPayload
+        fakeTokenizeJSONText = payloadMixed
+
+        let engine = makeEngine()
+
+        #expect(engine.tokenize(anyText) == nil)
+        #expect(engine.tokenize(anyText) == payloadTokens)
+    }
+
+    /// The first tokenize opens the handle; the act under test is the second
+    /// call, which must reuse the warm handle.
+    @Test("keeps the handle warm across calls")
+    func handleStaysWarm() {
+        fakeTokenizeJSONText = payloadMixed
+
         let engine = makeEngine()
         _ = engine.tokenize(anyText)
-
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertNotNil(tokens)
-    }
-
-    /// Arrange = one successful tokenize (opens the handle); the act under
-    /// test is the second call, which must reuse the warm handle.
-    func test_tokenize_whenHandleAlreadyOpen_shouldNotReopen() {
-        fakeTokenizeJSONText = unmatchedPayload
-        let engine = makeEngine()
         _ = engine.tokenize(anyText)
 
-        _ = engine.tokenize(anyText)
-
-        XCTAssertEqual(fakeOpenCalls, 1, "the handle must stay warm across calls")
+        #expect(fakeOpenCalls == 1, "the handle must stay warm across calls")
     }
 
-    // MARK: decoding the PhaseZero JSON contract
+    // MARK: payload decoding
 
-    func test_tokenize_withPhaseZeroPayloadShape_shouldDecodeTokenFields() throws {
-        fakeTokenizeJSONText = phaseZeroPayload
+    @Test("decodes surfaces, scalar spans, and readings from the payload")
+    func decodesPayloadFields() throws {
+        fakeTokenizeJSONText = payloadMixed
         let engine = makeEngine()
 
-        let tokens = engine.tokenize(anyText)
-        let token = try XCTUnwrap(tokens?.first)
+        let tokens = try #require(engine.tokenize(anyText))
 
-        XCTAssertEqual(tokens?.count, 1)
-        XCTAssertEqual(token.text, "私")
-        XCTAssertEqual(token.start, 0)
-        XCTAssertEqual(token.end, 1)
+        #expect(tokens == payloadTokens)
     }
 
-    func test_tokenize_withPhaseZeroPayloadShape_shouldDecodeReadings() throws {
-        fakeTokenizeJSONText = phaseZeroPayload
-        let engine = makeEngine()
-
-        let tokens = engine.tokenize(anyText)
-        let entry = try XCTUnwrap(tokens?.first?.dictionaryEntry)
-
-        XCTAssertEqual(entry.kanjiReadings.map(\.text), ["私"])
-        XCTAssertEqual(entry.kanaReadings.count, 2)
-        XCTAssertEqual(entry.kanaReadings[0].text, "わたし")
-        XCTAssertEqual(entry.kanaReadings[0].priority, "ichi1")
-        XCTAssertNil(entry.kanaReadings[0].info)
-        XCTAssertEqual(entry.kanaReadings[0].matched, false)
-        XCTAssertEqual(entry.kanaReadings[1].text, "ワタシ")
-        XCTAssertNil(entry.kanaReadings[1].priority)
-        XCTAssertEqual(entry.kanaReadings[1].info, "search-only kana form")
-    }
-
-    func test_tokenize_whenTokenHasNoDictionaryEntry_shouldDecodeNilEntry() {
-        fakeTokenizeJSONText = unmatchedPayload
-        let engine = makeEngine()
-
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertEqual(
-            tokens,
-            [DictionaryToken(text: "𠮷", start: 0, end: 1, dictionaryEntry: nil)]
-        )
-    }
-
-    func test_tokenize_whenRuntimeReturnsEmptyArray_shouldDecodeEmptyTokens() {
+    @Test("decodes an empty payload to no tokens")
+    func emptyPayload() {
         fakeTokenizeJSONText = "[]"
+
         let engine = makeEngine()
 
-        let tokens = engine.tokenize(anyText)
-
-        XCTAssertEqual(tokens, [])
+        #expect(engine.tokenize(anyText) == [])
     }
 
     // MARK: default resolver wiring
 
-    /// Exercises the default `resolveDatabase` argument end-to-end: the DEBUG
-    /// `MIMI_DICT` env override hands `DictionaryStore.resolve()` an
-    /// existing file, the fake runtime opens it, and the payload decodes.
-    /// Mirrors the store tests' env-override pattern; serial execution makes
-    /// the process-global setenv safe.
-    func test_init_withDefaultResolver_whenEnvOverridePointsAtDictionary_shouldTokenize() throws {
-        let overrideURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mimi-dictengine-override-\(UUID().uuidString)")
-        try Data("db".utf8).write(to: overrideURL)
-        addTeardownBlock { try? FileManager.default.removeItem(at: overrideURL) }
-        setenv("MIMI_DICT", overrideURL.path, 1)
-        defer { unsetenv("MIMI_DICT") }
-        fakeTokenizeJSONText = unmatchedPayload
-        let engine = DictionaryEngine(ffi: makeFakeFFI())
+    // Exercises the default `resolveDictionary` argument end-to-end: the
+    // DEBUG `MIMI_DICT` env override hands `DictionaryStore.resolve()` an
+    // existing file, the fake runtime opens it, and the payload decodes.
+    // The env lock serializes against the store suite's own env test.
+    #if DEBUG
+        @Test("routes the MIMI_DICT override through the default resolver")
+        func envOverrideThroughDefaultResolver() throws {
+            let overrideURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mimi-dictengine-override-\(UUID().uuidString)")
+            try Data("dic".utf8).write(to: overrideURL)
+            defer { try? FileManager.default.removeItem(at: overrideURL) }
+            dictionaryEnvLock.lock()
+            defer { dictionaryEnvLock.unlock() }
+            setenv("MIMI_DICT", overrideURL.path, 1)
+            defer { unsetenv("MIMI_DICT") }
+            fakeTokenizeJSONText = payloadMixed
 
-        let tokens = engine.tokenize(anyText)
+            let engine = DictionaryEngine(ffi: makeFakeFFI())
 
-        XCTAssertEqual(
-            tokens,
-            [DictionaryToken(text: "𠮷", start: 0, end: 1, dictionaryEntry: nil)]
-        )
-    }
+            #expect(engine.tokenize(anyText) == payloadTokens)
+        }
+    #endif
 }
 
 // MARK: - DictionaryEngine (live runtime)
 
-/// Exercises the real `libdictionary.dylib` against the prepared dictionary
-/// (the resolved `DictionaryStore` location — first launch or `MIMI_DICT`).
-/// Skips visibly when the runtime or a prepared dictionary is absent. The
-/// full adversarial span-semantics suite (Gate B) is re-pinned here once the
-/// new payload lands in Phase 3.
-final class DictionaryEngineLiveTests: XCTestCase {
-
-    private let studentSentence = "私は学生です"
-    private let expectedStudentSurfaces = ["私", "は", "学生", "です"]
-
-    /// Heavy token payload for the 1000-iteration check.
-    private let heavySentence = "今日はいい天気ですね。動画を見ます。学校へ行く"
-
-    private let leakIterations = 1000
-
-    // MARK: Live fixtures
-
-    private func requireLiveEngine() throws -> DictionaryEngine {
-        try XCTSkipIf(DictionaryFFI.load() == nil, "libdictionary.dylib is not available")
-        try XCTSkipIf(
-            DictionaryStore.resolve() == nil,
-            "no prepared dictionary (launch the app once, or set MIMI_DICT)"
+/// The live runtime shared by the live suite: the store's prepared dictionary
+/// when one resolves (first launch or `MIMI_DICT`), else the script-fetched
+/// model decompressed once into a private temp file. nil when the dylib or a
+/// dictionary is unavailable — the suite disables itself.
+private enum LiveRuntime {
+    static let engine: DictionaryEngine? = {
+        guard let ffi = DictionaryFFI.load() else { return nil }
+        if let resolved = DictionaryStore.resolve() {
+            return DictionaryEngine(ffi: ffi, resolveDictionary: { resolved })
+        }
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let model = repoRoot.appendingPathComponent(
+            "local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst"
         )
-        return DictionaryEngine(
-            ffi: DictionaryFFI.load(),
-            resolveDatabase: { DictionaryStore.resolve() }
-        )
+        guard FileManager.default.fileExists(atPath: model.path) else { return nil }
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimi-dictengine-live.ipadic.dic")
+        guard ffi.prepare(model.path, destination.path) == 0 else { return nil }
+        return DictionaryEngine(ffi: ffi, resolveDictionary: { destination })
+    }()
+
+    static var isAvailable: Bool {
+        engine != nil
     }
+}
 
-    /// Slices `input` by the token's scalar span — the only correct way to
-    /// map `start`/`end` back to text.
-    private func scalarSlice(_ token: DictionaryToken, of input: String) -> String {
-        let scalars = Array(input.unicodeScalars)
-        let start = scalars.index(scalars.startIndex, offsetBy: token.start)
-        let end = scalars.index(scalars.startIndex, offsetBy: token.end)
-        return String(String.UnicodeScalarView(scalars[start ..< end]))
+/// Exercises the real `libdictionary.dylib` against the real IPADIC model.
+/// Gate B lives here: vibrato performs no normalization, so every span must
+/// index the original input's Unicode scalars by construction — the
+/// adversarial tests pin it.
+@Suite("DictionaryEngine live runtime", .enabled(if: LiveRuntime.isAvailable))
+struct DictionaryEngineLiveTests {
+
+    // MARK: Helpers
+
+    /// Slices the token's scalar span — the only correct way to map
+    /// `start`/`end` back to text.
+    private func scalarSlice(
+        _ token: DictionaryToken, of scalars: [Unicode.Scalar]
+    ) -> String {
+        String(String.UnicodeScalarView(scalars[token.start ..< token.end]))
     }
 
     // MARK: smoke
 
-    func test_tokenize_withLiveRuntime_whenStudentSentence_shouldReturnExpectedSurfaces() throws {
-        let engine = try requireLiveEngine()
+    @Test("tokenizes the student sentence into four surfaces")
+    func studentSentenceSurfaces() throws {
+        let engine = try #require(LiveRuntime.engine)
 
-        let tokens = try XCTUnwrap(engine.tokenize(studentSentence))
+        let tokens = try #require(engine.tokenize("私は学生です"))
 
-        XCTAssertEqual(tokens.map(\.text), expectedStudentSurfaces)
+        #expect(tokens.map(\.text) == ["私", "は", "学生", "です"])
     }
 
-    func test_tokenize_withLiveRuntime_whenStudentSentence_shouldSpanOriginalScalars() throws {
-        let engine = try requireLiveEngine()
+    @Test("carries hiragana readings per surface")
+    func studentSentenceReadings() throws {
+        let engine = try #require(LiveRuntime.engine)
 
-        let tokens = try XCTUnwrap(engine.tokenize(studentSentence))
+        let tokens = try #require(engine.tokenize("私は学生です"))
 
-        XCTAssertEqual(tokens.map { scalarSlice($0, of: studentSentence) }, tokens.map(\.text))
+        #expect(tokens.map(\.reading) == ["わたし", "は", "がくせい", "です"])
     }
 
-    func test_tokenize_withLiveRuntime_whenRareIdeographUnmatched_shouldIndexOriginalScalars() throws {
-        let input = "𠮷"
-        let engine = try requireLiveEngine()
+    @Test("carries surface readings for conjugated tokens (食べました)")
+    func conjugatedSurfaceReadings() throws {
+        let engine = try #require(LiveRuntime.engine)
 
-        let tokens = try XCTUnwrap(engine.tokenize(input))
+        let tokens = try #require(engine.tokenize("食べました"))
 
-        XCTAssertEqual(tokens.count, 1)
-        XCTAssertEqual(tokens[0].start, 0)
-        XCTAssertEqual(tokens[0].end, 1, "𠮷 is one Unicode scalar")
-        XCTAssertEqual(tokens[0].text, input)
+        #expect(
+            tokens.map { [$0.text, $0.reading] }
+                == [["食べ", "たべ"], ["まし", "まし"], ["た", "た"]]
+        )
+    }
+
+    @Test("emits counters as token pairs for the Swift fusion pass (一回)")
+    func counterTokenPair() throws {
+        let engine = try #require(LiveRuntime.engine)
+
+        let tokens = try #require(engine.tokenize("一回"))
+
+        #expect(tokens.map { [$0.text, $0.reading] } == [["一", "いち"], ["回", "かい"]])
+    }
+
+    @Test("spans the rare ideograph as one original-input scalar, unread")
+    func rareIdeographSpanAndNullReading() throws {
+        let engine = try #require(LiveRuntime.engine)
+
+        let tokens = try #require(engine.tokenize("𠮷"))
+
+        #expect(tokens == [DictionaryToken(text: "𠮷", start: 0, end: 1, reading: nil)])
+    }
+
+    @Test("leaves the space uncovered between tokens (A B)")
+    func whitespaceGapUncovered() throws {
+        let engine = try #require(LiveRuntime.engine)
+
+        let tokens = try #require(engine.tokenize("A B"))
+
+        #expect(
+            tokens == [
+                DictionaryToken(text: "A", start: 0, end: 1, reading: nil),
+                DictionaryToken(text: "B", start: 2, end: 3, reading: nil)
+            ]
+        )
+    }
+
+    // MARK: Gate B — span semantics
+
+    /// Multibyte hazards the span contract must survive: non-BMP ideographs,
+    /// emoji, NFC-composing sequences (か + combining dakuten), ZWNJ, and
+    /// halfwidth forms. No normalization may shift an index.
+    @Test("spans index original-input scalars across multibyte hazards", arguments: [
+        "私は学生です",
+        "😊いいね",
+        "𠮷野家",
+        "か\u{3099}",
+        "文\u{200C}字",
+        "ﾊﾛｰ",
+        "123",
+        "２０２６年",
+        "cafe\u{0301}"
+    ])
+    func spansIndexOriginalScalars(input: String) throws {
+        let engine = try #require(LiveRuntime.engine)
+
+        let tokens = try #require(engine.tokenize(input))
+        let scalars = Array(input.unicodeScalars)
+        var cursor = 0
+        for token in tokens {
+            #expect(token.start >= cursor, "tokens must be ordered and non-overlapping")
+            #expect(token.end <= scalars.count, "spans must stay inside the input")
+            #expect(
+                scalarSlice(token, of: scalars) == token.text,
+                "each span must slice back to the token's own surface"
+            )
+            cursor = token.end
+        }
     }
 
     // MARK: payload lifetime
 
     /// Repeated heavy tokenizations must not corrupt state or degrade: every
-    /// call must return tokens. Payload strings are proven freed on every call
-    /// by the fake-runtime pairing tests above.
-    func test_tokenize_withLiveRuntime_whenRepeatedThousandTimes_shouldSucceedEveryCall() throws {
-        let engine = try requireLiveEngine()
+    /// call must return tokens, and the process footprint must stay flat —
+    /// payload strings are freed on every call (proven per-path by the
+    /// fake-runtime pairing tests above).
+    @Test("keeps memory flat across a thousand heavy tokenizations")
+    func repeatedTokenizationKeepsMemoryFlat() throws {
+        let heavySentence = "今日はいい天気ですね。動画を見ます。学校へ行く"
+        let leakIterations = 1000
+        let engine = try #require(LiveRuntime.engine)
+
+        for _ in 0 ..< 100 {
+            _ = engine.tokenize(heavySentence)
+        }
+        let before = physFootprint()
 
         for _ in 0 ..< leakIterations {
-            XCTAssertNotNil(engine.tokenize(heavySentence))
+            #expect(engine.tokenize(heavySentence) != nil)
+        }
+
+        let growth = physFootprint() - before
+        #expect(
+            growth < 512 * 1024,
+            "footprint grew \(growth)B over \(leakIterations) calls; payloads must be freed"
+        )
+    }
+}
+
+/// The resident footprint the OS charges this process (what Memory reports).
+private func physFootprint() -> Int64 {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(
+        MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride
+    )
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
         }
     }
+    return result == KERN_SUCCESS ? Int64(info.phys_footprint) : 0
 }

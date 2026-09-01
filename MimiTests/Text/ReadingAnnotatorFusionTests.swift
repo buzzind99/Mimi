@@ -11,7 +11,7 @@ struct ReadingAnnotatorFusionTests {
     func digitCounterFusion() throws {
         let annotator = makeAnnotator(tokens(
             ["6", "0", "0", "回"],
-            readings: [[], [], [], [kana("かい", priority: "ichi1")]]
+            readings: [nil, nil, nil, "かい"]
         ))
 
         let segments = try #require(annotator.segments(for: "600回"))
@@ -23,7 +23,7 @@ struct ReadingAnnotatorFusionTests {
     func fullwidthDigitFusion() throws {
         let annotator = makeAnnotator(tokens(
             ["６", "０", "０", "回"],
-            readings: [[], [], [], [kana("かい", priority: "ichi1")]]
+            readings: [nil, nil, nil, "かい"]
         ))
 
         let segments = try #require(annotator.segments(for: "６００回"))
@@ -34,7 +34,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("fuses tens digits with a geminating counter (60回 → rokujukkai)")
     func tensDigitFusion() throws {
         let annotator = makeAnnotator(tokens(
-            ["6", "0", "回"], readings: [[], [], [kana("かい", priority: "ichi1")]]
+            ["6", "0", "回"], readings: [nil, nil, "かい"]
         ))
 
         let segments = try #require(annotator.segments(for: "60回"))
@@ -45,8 +45,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("fuses a kanji numeral with a geminating counter (八歳 → hassai)")
     func kanjiNumeralFusion() throws {
         let annotator = makeAnnotator(tokens(
-            ["八", "歳"],
-            readings: [[kana("はち", priority: "ichi1")], [kana("さい", priority: "ichi1")]]
+            ["八", "歳"], readings: ["はち", "さい"]
         ))
 
         let segments = try #require(annotator.segments(for: "八歳"))
@@ -57,7 +56,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("keeps the number as its own segment when the counter can't geminate (2日)")
     func geminateNilFlushesNumber() throws {
         let annotator = makeAnnotator(tokens(
-            ["2", "日"], readings: [[], [kana("にち", priority: "ichi1")]]
+            ["2", "日"], readings: [nil, "にち"]
         ))
 
         let segments = try #require(annotator.segments(for: "2日"))
@@ -68,8 +67,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("keeps 六 separate before 歳 (roku exception)")
     func rokuExceptionBeforeSai() throws {
         let annotator = makeAnnotator(tokens(
-            ["六", "歳"],
-            readings: [[kana("ろく", priority: "ichi1")], [kana("さい", priority: "ichi1")]]
+            ["六", "歳"], readings: ["ろく", "さい"]
         ))
 
         let segments = try #require(annotator.segments(for: "六歳"))
@@ -80,7 +78,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("keeps the digit 6 separate before 歳 (roku exception)")
     func rokuExceptionDigitBeforeSai() throws {
         let annotator = makeAnnotator(tokens(
-            ["6", "歳"], readings: [[], [kana("さい", priority: "ichi1")]]
+            ["6", "歳"], readings: [nil, "さい"]
         ))
 
         let segments = try #require(annotator.segments(for: "6歳"))
@@ -91,8 +89,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("accumulates consecutive kanji numerals into one run (千 is itself a numeral)")
     func senAccumulatesIntoTheNumberRun() throws {
         let annotator = makeAnnotator(tokens(
-            ["六", "千"],
-            readings: [[kana("ろく", priority: "ichi1")], [kana("せん", priority: "ichi1")]]
+            ["六", "千"], readings: ["ろく", "せん"]
         ))
 
         let segments = try #require(annotator.segments(for: "六千"))
@@ -103,8 +100,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("keeps 六 separate before the とう reading of 等 (roku exception)")
     func rokuExceptionBeforeTou() throws {
         let annotator = makeAnnotator(tokens(
-            ["六", "等"],
-            readings: [[kana("ろく", priority: "ichi1")], [kana("とう", priority: "ichi1")]]
+            ["六", "等"], readings: ["ろく", "とう"]
         ))
 
         let segments = try #require(annotator.segments(for: "六等"))
@@ -115,12 +111,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("voices 本 to bon after さん/まん, with furigana ほん (三万本)")
     func voicedHon() throws {
         let annotator = makeAnnotator(tokens(
-            ["三", "万", "本"],
-            readings: [
-                [kana("さん", priority: "ichi1")],
-                [kana("まん", priority: "ichi1")],
-                [kana("もと", priority: "ichi1")]
-            ]
+            ["三", "万", "本"], readings: ["さん", "まん", "もと"]
         ))
 
         let segments = try #require(annotator.segments(for: "三万本"))
@@ -131,8 +122,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("flushes the held-back number before a gap (三、四本)")
     func flushBeforeGap() throws {
         let annotator = makeAnnotator(tokens(
-            ["三", "、", "四本"],
-            readings: [[kana("さん", priority: "ichi1")], [], [kana("よんほん", priority: "news1")]]
+            ["三", "、", "四本"], readings: ["さん", nil, "よんほん"]
         ))
 
         let segments = try #require(annotator.segments(for: "三、四本"))
@@ -145,7 +135,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("reads 年 as the counter after resolved digits (2年 → ni nen)")
     func yearAfterDigits() throws {
         let annotator = makeAnnotator(tokens(
-            ["2", "年"], readings: [[], [kana("とし", priority: "ichi1")]]
+            ["2", "年"], readings: [nil, "とし"]
         ))
 
         let segments = try #require(annotator.segments(for: "2年"))
@@ -156,8 +146,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("reads 年 as the counter after a kanji numeral (八年 → hachi nen)")
     func yearAfterKanjiNumeral() throws {
         let annotator = makeAnnotator(tokens(
-            ["八", "年"],
-            readings: [[kana("はち", priority: "ichi1")], [kana("とし", priority: "ichi1")]]
+            ["八", "年"], readings: ["はち", "とし"]
         ))
 
         let segments = try #require(annotator.segments(for: "八年"))
@@ -168,8 +157,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("reads 年 as the counter after unresolved digits (2026年)")
     func yearAfterUnresolvedDigits() throws {
         let annotator = makeAnnotator(tokens(
-            ["2", "0", "2", "6", "年"],
-            readings: [[], [], [], [], [kana("とし", priority: "ichi1")]]
+            ["2", "0", "2", "6", "年"], readings: [nil, nil, nil, nil, "とし"]
         ))
 
         let segments = try #require(annotator.segments(for: "2026年"))
@@ -180,7 +168,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("leaves bare digit runs unannotated (123)")
     func bareDigitsUnannotated() throws {
         let annotator = makeAnnotator(tokens(
-            ["1", "2", "3"], readings: [[], [], []]
+            ["1", "2", "3"], readings: [nil, nil, nil]
         ))
 
         let segments = try #require(annotator.segments(for: "123"))
@@ -191,7 +179,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("accumulates digits with a following kanji numeral (3万 → sanman)")
     func mixedAccumulation() throws {
         let annotator = makeAnnotator(tokens(
-            ["3", "万"], readings: [[], [kana("まん", priority: "ichi1")]]
+            ["3", "万"], readings: [nil, "まん"]
         ))
 
         let segments = try #require(annotator.segments(for: "3万"))
@@ -202,7 +190,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("resolves a digit run before a kanji numeral (3千 → sansen)")
     func digitRunBeforeKanjiNumeral() throws {
         let annotator = makeAnnotator(tokens(
-            ["3", "千"], readings: [[], [kana("せん", priority: "ichi1")]]
+            ["3", "千"], readings: [nil, "せん"]
         ))
 
         let segments = try #require(annotator.segments(for: "3千"))
@@ -213,7 +201,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("stays unannotated when a numeral after digits has no reading (1千)")
     func unreadableKanjiNumeralAfterDigits() throws {
         let annotator = makeAnnotator(tokens(
-            ["1", "千"], readings: [[], []]
+            ["1", "千"], readings: [nil, nil]
         ))
 
         let segments = try #require(annotator.segments(for: "1千"))
@@ -224,7 +212,7 @@ struct ReadingAnnotatorFusionTests {
     @Test("flushes a trailing held-back number as its own segment (六)")
     func trailingNumberFlushes() throws {
         let annotator = makeAnnotator(tokens(
-            ["六"], readings: [[kana("ろく", priority: "ichi1")]]
+            ["六"], readings: ["ろく"]
         ))
 
         let segments = try #require(annotator.segments(for: "六"))

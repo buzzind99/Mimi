@@ -13,7 +13,7 @@ enum LiveDictionary {
     static let engine: DictionaryEngine? = {
         guard let ffi = DictionaryFFI.load() else { return nil }
         guard let resolved = DictionaryStore.resolve() else { return nil }
-        return DictionaryEngine(ffi: ffi, resolveDatabase: { resolved })
+        return DictionaryEngine(ffi: ffi, resolveDictionary: { resolved })
     }()
 
     static var isAvailable: Bool {

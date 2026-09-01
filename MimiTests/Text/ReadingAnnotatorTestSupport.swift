@@ -4,36 +4,27 @@ import Testing
 
 // MARK: - Fixtures (shared by the ReadingAnnotator suites)
 
-/// A kana reading with the JMdict flags the selection rule consumes.
-func kana(
-    _ text: String, priority: String? = nil, info: String? = nil
-) -> DictionaryToken.KanaReading {
-    DictionaryToken.KanaReading(text: text, priority: priority, info: info, matched: false)
-}
-
 /// A token spanning `text` at the scalar offset `start`, carrying the given
-/// readings (an empty list means no dictionary entry).
+/// surface reading (nil means unknown/unreadable).
 func token(
-    _ text: String, start: Int, readings: [DictionaryToken.KanaReading] = []
+    _ text: String, start: Int, reading: String? = nil
 ) -> DictionaryToken {
     DictionaryToken(
         text: text,
         start: start,
         end: start + text.unicodeScalars.count,
-        dictionaryEntry: readings.isEmpty
-            ? nil
-            : DictionaryToken.Entry(kanjiReadings: [], kanaReadings: readings)
+        reading: reading
     )
 }
 
 /// Contiguous tokens laid out left-to-right across the concatenated surfaces.
 func tokens(
-    _ surfaces: [String], readings: [[DictionaryToken.KanaReading]]
+    _ surfaces: [String], readings: [String?]
 ) -> [DictionaryToken] {
     var start = 0
-    return zip(surfaces, readings).map { surface, entryReadings in
+    return zip(surfaces, readings).map { surface, reading in
         defer { start += surface.unicodeScalars.count }
-        return token(surface, start: start, readings: entryReadings)
+        return token(surface, start: start, reading: reading)
     }
 }
 

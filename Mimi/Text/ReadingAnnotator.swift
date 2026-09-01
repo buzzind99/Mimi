@@ -19,10 +19,10 @@ final class ReadingSegment {
 }
 
 /// Produces romaji (wapuro long vowels, Hepburn consonants) and kana
-/// furigana for Japanese text from the dictionary tokenizer's JMdict-backed
+/// furigana for Japanese text from the dictionary tokenizer's per-surface
 /// kana readings (`DictionaryEngine`), plus a numeral→counter fusion pass in
 /// kana space so Arabic-digit counters read correctly (`600回` →
-/// "roppyakkai"). The dictionary may still be building on first launch;
+/// "roppyakkai"). The dictionary may still be preparing on first launch;
 /// every failure degrades to plain text.
 final class ReadingAnnotator {
     /// The process-wide annotator backing the static entry point.
@@ -89,14 +89,15 @@ final class ReadingAnnotator {
         return segments
     }
 
-    /// Emits a non-numeral token: the selected dictionary reading converted
+    /// Emits a non-numeral token: the dictionary's surface reading converted
     /// to romaji (with particle and lexical overrides), furigana only for
-    /// kanji-bearing surfaces. Entry-less tokens (names, rare ideographs,
-    /// punctuation, bare Latin) stay self-transcribed and unannotated.
+    /// kanji-bearing surfaces. Tokens without a reading (names, rare
+    /// ideographs, punctuation, bare Latin) stay self-transcribed and
+    /// unannotated.
     private func appendToken(
         _ token: DictionaryToken, surface: String, into segments: inout [ReadingSegment]
     ) {
-        guard let reading = Self.selectReading(for: token) else {
+        guard let reading = token.reading else {
             segments.append(ReadingSegment(surface: surface, romaji: surface, furigana: nil))
             return
         }
@@ -192,7 +193,7 @@ final class ReadingAnnotator {
     }
 
     /// Extends a held-back numeral run: digit tokens accumulate their
-    /// normalized glyphs, kanji numerals contribute their entry kana
+    /// normalized glyphs, kanji numerals contribute their dictionary kana
     /// (三→さん, 万→まん). Any unreadable part marks the run unannotatable.
     private static func accumulate(
         _ token: DictionaryToken, surface: String, into pending: inout PendingNumber?
@@ -207,7 +208,7 @@ final class ReadingAnnotator {
             }
             return
         }
-        let kana = selectReading(for: token)
+        let kana = token.reading
         if pending != nil {
             pending?.surface += surface
             resolveDigits(into: &pending!)
@@ -233,7 +234,7 @@ final class ReadingAnnotator {
     ) -> Bool {
         guard var held = pending else { return false }
         Self.resolveDigits(into: &held)
-        let reading = Self.selectReading(for: token)
+        let reading = token.reading
 
         // 年 after a number is the counter year (２年 → "ni nen"), never the
         // standalone "toshi" reading, and it never geminates.
@@ -318,73 +319,6 @@ final class ReadingAnnotator {
         ) != nil
     }
 
-    // MARK: - Reading selection
-
-    /// Picks the kana reading to display for a token
-    /// (NOTES-dictionary-preflight.md §5): when the surface contains kana,
-    /// prefer the reading that agrees with it (こっち → こっち not こちら,
-    /// いい天気 → いいてんき not よいてんき); otherwise the highest-priority
-    /// reading that isn't a search-only form, else the first listed.
-    private static func selectReading(for token: DictionaryToken) -> String? {
-        guard let readings = token.dictionaryEntry?.kanaReadings, !readings.isEmpty else {
-            return nil
-        }
-        if token.text.unicodeScalars.contains(where: isKana) {
-            let agreeing = readings.filter { agreesWithSurface($0.text, surface: token.text) }
-            if !agreeing.isEmpty {
-                return best(of: agreeing).text
-            }
-        }
-        return best(of: readings).text
-    }
-
-    /// Readings whose text agrees with the surface's own kana: every kana in
-    /// the surface must appear literally, in order, in the reading; all
-    /// other characters (kanji, okurigana gaps) match freely.
-    private static func agreesWithSurface(_ reading: String, surface: String) -> Bool {
-        var pattern = "^"
-        for scalar in surface.unicodeScalars {
-            pattern += isKana(scalar) ? NSRegularExpression.escapedPattern(for: String(scalar)) : ".*"
-        }
-        pattern += "$"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
-        let range = NSRange(reading.startIndex..., in: reading)
-        return regex.firstMatch(in: reading, range: range) != nil
-    }
-
-    /// The best reading of a list: the first of the highest JMdict priority
-    /// among readings that aren't search-only forms; if all are search-only,
-    /// the first reading.
-    private static func best(
-        of readings: [DictionaryToken.KanaReading]
-    ) -> DictionaryToken.KanaReading {
-        let eligible = readings.filter { $0.info?.contains("search-only") != true }
-        let pool = eligible.isEmpty ? readings : eligible
-        var winner = pool[0]
-        for candidate in pool.dropFirst() where priorityScore(candidate) > priorityScore(winner) {
-            winner = candidate
-        }
-        return winner
-    }
-
-    /// JMdict priority ranking: ichi1 > spec1 > gai1 > news1/nfXX > none.
-    private static func priorityScore(_ reading: DictionaryToken.KanaReading) -> Int {
-        guard let tags = reading.priority?.split(separator: ",") else { return 0 }
-        return tags.map { tag in
-            switch tag.trimmingCharacters(in: .whitespaces) {
-            case "ichi1": return 4
-            case "spec1": return 3
-            case "gai1": return 2
-            case "news1": return 1
-            default:
-                if tag.hasPrefix("nf"), Int(tag.dropFirst(2)) != nil {
-                    return 1
-                }
-                return 0
-            }
-        }.max() ?? 0
-    }
-
     // MARK: - Overrides
 
     /// Topic/directional/object particles read by function, not by their
@@ -409,11 +343,6 @@ final class ReadingAnnotator {
         let low = max(0, min(token.start, scalars.count))
         let high = max(low, min(token.end, scalars.count))
         return String(String.UnicodeScalarView(scalars[low ..< high]))
-    }
-
-    private static func isKana(_ scalar: Unicode.Scalar) -> Bool {
-        (0x3041 ... 0x309F).contains(scalar.value)
-            || (0x30A1 ... 0x30FF).contains(scalar.value)
     }
 
     private static func containsKanji(_ text: String) -> Bool {

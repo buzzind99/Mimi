@@ -12,11 +12,7 @@ struct ReadingAnnotatorSurfaceTests {
         let text = "600回、桜ですA B𠮷"
         let annotator = makeAnnotator(tokens(
             ["6", "0", "0", "回", "、", "桜", "です", "A", " ", "B", "𠮷"],
-            readings: [
-                [], [], [], [kana("かい", priority: "ichi1")], [],
-                [kana("さくら", priority: "ichi1")], [kana("です", priority: "spec1")],
-                [], [], [], []
-            ]
+            readings: [nil, nil, nil, "かい", nil, "さくら", "です", nil, nil, nil, nil]
         ))
 
         let segments = try #require(annotator.segments(for: text))
@@ -28,8 +24,8 @@ struct ReadingAnnotatorSurfaceTests {
     func gapBecomesPlainRun() throws {
         let text = "あXい"
         let annotator = makeAnnotator([
-            token("あ", start: 0, readings: [kana("あ")]),
-            token("い", start: 2, readings: [kana("い")])
+            token("あ", start: 0, reading: "あ"),
+            token("い", start: 2, reading: "い")
         ])
 
         let segments = try #require(annotator.segments(for: text))

@@ -247,6 +247,8 @@ final class DictionaryStoreTests {
         func processEnvOverride() throws {
             let overrideURL = tempRoot.appendingPathComponent("override.dic")
             try Data(overrideDicContents.utf8).write(to: overrideURL)
+            dictionaryEnvLock.lock()
+            defer { dictionaryEnvLock.unlock() }
             setenv("MIMI_DICT", overrideURL.path, 1)
             defer { unsetenv("MIMI_DICT") }
 
