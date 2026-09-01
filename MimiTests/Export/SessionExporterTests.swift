@@ -1,10 +1,12 @@
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests the export formats through the public `SessionExporter` API:
 /// plain text, SRT (comma ms), VTT (dot ms + header), and the JSON session
 /// document (verified by decoding back).
-final class SessionExporterTests: XCTestCase {
+@Suite("SessionExporter")
+struct SessionExporterTests {
 
     // MARK: - Fixtures
 
@@ -48,76 +50,80 @@ final class SessionExporterTests: XCTestCase {
 
     // MARK: - Plain text
 
-    func test_plainText_whenInterleavedWithTranslation_shouldPrefixTimestampsOnBothLines() {
+    @Test("interleaved output prefixes timestamps on both lines")
+    func plainTextInterleavedPrefixesTimestamps() {
         let entry = makeTranslatedEntry()
 
         let output = SessionExporter.plainText(entries: [entry])
 
-        XCTAssertEqual(
-            output, "\(expectedStartStamp)  \(japaneseSentence)\n\(expectedStartStamp)  \(englishTranslation)\n"
+        #expect(
+            output == "\(expectedStartStamp)  \(japaneseSentence)\n\(expectedStartStamp)  \(englishTranslation)\n"
         )
     }
 
-    func test_plainText_whenUntranslated_shouldOmitTranslationLines() {
+    @Test("untranslated output omits translation lines")
+    func plainTextUntranslatedOmitsTranslations() {
         let entry = makeUntranslatedEntry()
 
         let output = SessionExporter.plainText(entries: [entry])
 
-        XCTAssertEqual(output, "\(expectedStartStamp)  \(japaneseSentence)\n")
+        #expect(output == "\(expectedStartStamp)  \(japaneseSentence)\n")
     }
 
     // MARK: - SRT
 
-    func test_subtitles_whenSrt_shouldUseCommaMilliseconds() {
+    @Test("SRT cues use comma milliseconds")
+    func srtUsesCommaMilliseconds() {
         let entry = makeTranslatedEntry()
         let expectedCue = "1\n\(expectedSrtTiming)\n\(englishTranslation)\n\n"
 
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
-        XCTAssertEqual(output, expectedCue)
+        #expect(output == expectedCue)
     }
 
-    func test_subtitles_whenEntryUntranslated_shouldSkipCue() {
+    @Test("SRT skips cues for untranslated entries")
+    func srtSkipsUntranslatedCue() {
         let entry = makeUntranslatedEntry()
 
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
-        XCTAssertEqual(output, "")
+        #expect(output == "")
     }
 
-    func test_subtitles_whenVttAndEntryUntranslated_shouldSkipCue() {
+    @Test("VTT keeps only the header for untranslated entries")
+    func vttSkipsUntranslatedCue() {
         let entry = makeUntranslatedEntry()
 
         let output = SessionExporter.subtitles(entries: [entry], format: .vtt)
 
-        XCTAssertEqual(output, expectedVttHeader + "\n\n")
+        #expect(output == expectedVttHeader + "\n\n")
     }
 
-    func test_subtitles_whenTimestampsRollOverMillisecondsMinutesAndHours() {
+    @Test("subtitle timings roll over milliseconds, minutes and hours")
+    func subtitlesRollOverTimeUnits() {
         var entry = makeEntry(start: 3661.9999, end: 3722.5, index: 0)
         entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
 
         let srt = SessionExporter.subtitles(entries: [entry], format: .srt)
-        XCTAssertEqual(
-            srt, "1\n01:01:01,999 --> 01:02:02,500\n\(englishTranslation)\n\n"
-        )
+        #expect(srt == "1\n01:01:01,999 --> 01:02:02,500\n\(englishTranslation)\n\n")
 
         let vtt = SessionExporter.subtitles(entries: [entry], format: .vtt)
-        XCTAssertEqual(
-            vtt, "\(expectedVttHeader)\n\n1\n01:01:01.999 --> 01:02:02.500\n\(englishTranslation)\n\n"
-        )
+        #expect(vtt == "\(expectedVttHeader)\n\n1\n01:01:01.999 --> 01:02:02.500\n\(englishTranslation)\n\n")
     }
 
-    func test_subtitles_whenTimestampNegative_shouldClampToZero() {
+    @Test("negative timestamps clamp to zero")
+    func negativeTimestampClampsToZero() {
         var entry = makeEntry(start: -3.5, end: 0, index: 0)
         entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
 
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
-        XCTAssertEqual(output, "1\n00:00:00,000 --> 00:00:00,000\n\(englishTranslation)\n\n")
+        #expect(output == "1\n00:00:00,000 --> 00:00:00,000\n\(englishTranslation)\n\n")
     }
 
-    func test_subtitles_whenUntranslatedEntryBetweenTranslatedOnes_shouldKeepCueNumbersContiguous() {
+    @Test("cue numbers stay contiguous across untranslated entries")
+    func cueNumbersStayContiguous() {
         var first = makeEntry(start: sentenceStart, end: sentenceEnd, index: 0)
         first.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
         let untranslated = makeEntry(start: 2, end: 3, index: 1)
@@ -128,67 +134,73 @@ final class SessionExporterTests: XCTestCase {
             entries: [first, untranslated, third], format: .srt
         )
 
-        XCTAssertTrue(output.contains("1\n00:00:00,000 --> 00:00:01,500"))
-        XCTAssertFalse(output.contains("\n3\n"))
-        XCTAssertTrue(output.contains("2\n00:00:04,000 --> 00:00:05,000"))
+        #expect(output.contains("1\n00:00:00,000 --> 00:00:01,500"))
+        #expect(!output.contains("\n3\n"))
+        #expect(output.contains("2\n00:00:04,000 --> 00:00:05,000"))
     }
 
     // MARK: - VTT
 
-    func test_subtitles_whenVtt_shouldUseHeaderAndDotMilliseconds() {
+    @Test("VTT cues use a header and dot milliseconds")
+    func vttUsesHeaderAndDotMilliseconds() {
         let entry = makeTranslatedEntry()
         let expectedCue = "\(expectedVttHeader)\n\n1\n\(expectedVttTiming)\n\(englishTranslation)\n\n"
 
         let output = SessionExporter.subtitles(entries: [entry], format: .vtt)
 
-        XCTAssertEqual(output, expectedCue)
+        #expect(output == expectedCue)
     }
 
     // MARK: - JSON session
 
-    func test_json_whenEncoded_shouldDeclareSchemaVersion() throws {
+    @Test("JSON output declares the schema version")
+    func jsonDeclaresSchemaVersion() throws {
         let entry = makeTranslatedEntry()
 
         let data = try SessionExporter.json(entries: [entry], metadata: nil, results: [:])
         let document = try decodeDocument(from: data)
 
-        XCTAssertEqual(document.schemaVersion, schemaVersion)
+        #expect(document.schemaVersion == schemaVersion)
     }
 
-    func test_json_whenEncoded_shouldCarrySentenceTranscript() throws {
+    @Test("JSON output carries the sentence transcript")
+    func jsonCarriesTranscript() throws {
         let entry = makeTranslatedEntry()
 
         let data = try SessionExporter.json(entries: [entry], metadata: nil, results: [:])
         let document = try decodeDocument(from: data)
 
-        XCTAssertEqual(document.sentences.first?.transcript, japaneseSentence)
+        #expect(document.sentences.first?.transcript == japaneseSentence)
     }
 
-    func test_json_whenPendingResultProvided_shouldIncludeTranslation() throws {
+    @Test("JSON output includes a pending result as a translation")
+    func jsonIncludesPendingResult() throws {
         let entry = makeUntranslatedEntry()
         let pending = SentenceTranslation(lang: "en", text: englishTranslation)
 
         let data = try SessionExporter.json(entries: [entry], metadata: nil, results: [0: pending])
         let document = try decodeDocument(from: data)
 
-        XCTAssertEqual(document.sentences.first?.translations, [pending])
+        #expect(document.sentences.first?.translations == [pending])
     }
 
-    func test_json_whenMetadataNil_shouldFallBackToDefaults() throws {
+    @Test("nil metadata falls back to session defaults")
+    func jsonNilMetadataFallsBackToDefaults() throws {
         let before = Date()
 
         let data = try SessionExporter.json(entries: [], metadata: nil, results: [:])
         let document = try decodeDocument(from: data)
 
-        XCTAssertEqual(document.session.sourceLang, "ja")
-        XCTAssertEqual(document.session.targetLang, "en")
-        XCTAssertNil(document.session.model)
-        XCTAssertEqual(document.session.chunkMS, 160)
-        XCTAssertGreaterThanOrEqual(document.session.startedAt, before.addingTimeInterval(-1))
-        XCTAssertLessThanOrEqual(document.session.startedAt, Date().addingTimeInterval(1))
+        #expect(document.session.sourceLang == "ja")
+        #expect(document.session.targetLang == "en")
+        #expect(document.session.model == nil)
+        #expect(document.session.chunkMS == 160)
+        #expect(document.session.startedAt >= before.addingTimeInterval(-1))
+        #expect(document.session.startedAt <= Date().addingTimeInterval(1))
     }
 
-    func test_json_whenMetadataPartiallyPopulated_shouldMergeWithFallbacks() throws {
+    @Test("partially populated metadata merges with fallbacks")
+    func jsonPartialMetadataMergesWithFallbacks() throws {
         let metadata = SessionMetadata(
             startedAt: Date(timeIntervalSince1970: 1_700_000_000),
             sourceLang: nil,
@@ -200,18 +212,18 @@ final class SessionExporterTests: XCTestCase {
         let data = try SessionExporter.json(entries: [], metadata: metadata, results: [:])
         let document = try decodeDocument(from: data)
 
-        XCTAssertEqual(
-            document.session.startedAt.timeIntervalSince1970,
-            metadata.startedAt.timeIntervalSince1970,
-            accuracy: 1
+        #expect(
+            abs(document.session.startedAt.timeIntervalSince1970
+                - metadata.startedAt.timeIntervalSince1970) < 1
         )
-        XCTAssertEqual(document.session.sourceLang, "ja", "nil sourceLang should fall back")
-        XCTAssertEqual(document.session.targetLang, "en", "nil targetLang should fall back")
-        XCTAssertEqual(document.session.model, "test-model")
-        XCTAssertEqual(document.session.chunkMS, 250)
+        #expect(document.session.sourceLang == "ja", "nil sourceLang should fall back")
+        #expect(document.session.targetLang == "en", "nil targetLang should fall back")
+        #expect(document.session.model == "test-model")
+        #expect(document.session.chunkMS == 250)
     }
 
-    func test_json_whenMetadataFullyPopulated_shouldCarryAllValues() throws {
+    @Test("fully populated metadata carries all values")
+    func jsonFullMetadataCarriesAllValues() throws {
         let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let metadata = SessionMetadata(
             startedAt: startedAt,
@@ -224,29 +236,30 @@ final class SessionExporterTests: XCTestCase {
         let data = try SessionExporter.json(entries: [], metadata: metadata, results: [:])
         let document = try decodeDocument(from: data)
 
-        XCTAssertEqual(
-            document.session.startedAt.timeIntervalSince1970,
-            startedAt.timeIntervalSince1970,
-            accuracy: 1
+        #expect(
+            abs(document.session.startedAt.timeIntervalSince1970
+                - startedAt.timeIntervalSince1970) < 1
         )
-        XCTAssertEqual(document.session.sourceLang, "ja")
-        XCTAssertEqual(document.session.targetLang, "en")
-        XCTAssertEqual(document.session.model, "mock")
-        XCTAssertEqual(document.session.chunkMS, 160)
+        #expect(document.session.sourceLang == "ja")
+        #expect(document.session.targetLang == "en")
+        #expect(document.session.model == "mock")
+        #expect(document.session.chunkMS == 160)
     }
 
     // MARK: - Format metadata
 
-    func test_format_fileExtension_shouldMatchCase() {
-        XCTAssertEqual(SessionExporter.Format.txt.fileExtension, "txt")
-        XCTAssertEqual(SessionExporter.Format.srt.fileExtension, "srt")
-        XCTAssertEqual(SessionExporter.Format.vtt.fileExtension, "vtt")
-        XCTAssertEqual(SessionExporter.Format.json.fileExtension, "json")
+    @Test("format file extensions match their case")
+    func formatFileExtensions() {
+        #expect(SessionExporter.Format.txt.fileExtension == "txt")
+        #expect(SessionExporter.Format.srt.fileExtension == "srt")
+        #expect(SessionExporter.Format.vtt.fileExtension == "vtt")
+        #expect(SessionExporter.Format.json.fileExtension == "json")
     }
 
-    func test_format_id_shouldEqualRawValue() {
+    @Test("every format's id equals its raw value")
+    func formatIDMatchesRawValue() {
         for format in SessionExporter.Format.allCases {
-            XCTAssertEqual(format.id, format.rawValue)
+            #expect(format.id == format.rawValue)
         }
     }
 }
