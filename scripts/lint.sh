@@ -4,8 +4,8 @@
 #
 # Compact output: one line per tool when clean; on violations, violations
 # grouped by rule as rule: file:line-ranges. Raw tool output: build/lint.log.
-# SwiftLint warnings are display-only; SwiftFormat violations and SwiftLint
-# errors fail the script.
+# Runs in strict mode: SwiftLint warnings fail the script, as do SwiftFormat
+# violations and SwiftLint errors.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -24,7 +24,7 @@ fi
 sf_status=0
 sf_out=$(swiftformat --lint . 2>&1) || sf_status=$?
 sl_status=0
-sl_out=$(swiftlint --quiet 2>&1) || sl_status=$?
+sl_out=$(swiftlint --strict --quiet 2>&1) || sl_status=$?
 printf '=== swiftformat --lint (exit %d) ===\n%s\n' "$sf_status" "$sf_out" >> build/lint.log
 printf '=== swiftlint (exit %d) ===\n%s\n' "$sl_status" "$sl_out" >> build/lint.log
 
