@@ -7,7 +7,10 @@ import SwiftUI
 ///
 /// The pin is decided by scroll direction: only movement of the offset
 /// *away* from the bottom (the user dragging up) can drop it, and scrolling
-/// back down into the bottom re-engages it. Growth of the content under a
+/// back down into the bottom re-engages it. That decision only reads the
+/// distance on ticks where the content and viewport span held still, so a
+/// translation landing in the same tick as a drag or a bounce can't
+/// masquerade as either. Growth of the content under a
 /// stationary offset — a translation landing on any row, a new entry, a
 /// viewport resize — re-anchors to the bottom marker while pinned instead,
 /// because measuring distance from freshly grown content would read the
@@ -83,10 +86,17 @@ struct TranscriptView: View {
                 } else if new.offsetY < old.offsetY {
                     // The offset moved away from the bottom: the user
                     // dragged up (or an overscroll bounce settled back).
-                    // Their gesture decides the pin; content growth never
-                    // moves the offset, so it can never masquerade as
-                    // this branch.
-                    pinnedToBottom = new.distanceToBottom <= Self.pinTolerance
+                    // Content growth never moves the offset, but it
+                    // inflates the distance, so only trust that distance
+                    // on ticks where the content and viewport span held
+                    // still. On a mixed tick (a translation landing mid-
+                    // drag, a bounce settling under lazy relayout) the
+                    // decision is deferred: the chase re-anchors a bounce,
+                    // and the next still tick re-evaluates from the
+                    // accumulated distance.
+                    if abs(new.span - old.span) <= Self.settleEpsilon {
+                        pinnedToBottom = new.distanceToBottom <= Self.pinTolerance
+                    }
                 } else if pinnedToBottom {
                     // The offset didn't move but the content or viewport
                     // changed size (row grew, entry appended, window or
@@ -135,6 +145,14 @@ struct TranscriptView: View {
 
         var distanceToBottom: CGFloat {
             contentHeight + insetBottom - (offsetY + containerHeight)
+        }
+
+        /// Everything that changes `distanceToBottom` except the offset:
+        /// content height, content insets, viewport size. A tick where the
+        /// span moved is growth or relayout, and its distance is not a
+        /// trustworthy pin signal.
+        var span: CGFloat {
+            contentHeight + insetBottom - containerHeight
         }
     }
 
