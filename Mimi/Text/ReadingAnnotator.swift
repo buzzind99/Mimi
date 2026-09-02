@@ -28,7 +28,12 @@ final class ReadingAnnotator {
     /// The process-wide annotator backing the static entry point.
     static let shared = ReadingAnnotator()
 
-    private let cache = NSCache<NSString, NSArray>()
+    private let cache: NSCache<NSString, NSArray> = {
+        let cache = NSCache<NSString, NSArray>()
+        cache.countLimit = 500
+        return cache
+    }()
+
     /// The token source; injectable so tests drive the annotator without the
     /// dictionary runtime.
     private let tokenize: (String) -> [DictionaryToken]?
