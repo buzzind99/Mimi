@@ -47,10 +47,22 @@ final class AppModel: ObservableObject {
     /// Internal (not private) so tests can drive the session callbacks.
     let sessionController: SessionController
 
-    init() {
-        sessionController = SessionController(
-            live: live, latency: latency, translationQueue: translationQueue
-        )
+    /// `makeSessionController` is injectable so tests can drive the start/
+    /// stop flow over a scripted `SessionController` (no TCC prompt, no SCK,
+    /// no native runtime); nil (the default) builds the real one — no
+    /// behavior change.
+    init(
+        makeSessionController: (
+            (LivePartialState, LatencyState, TranslationQueue) -> SessionController
+        )? = nil
+    ) {
+        if let makeSessionController {
+            sessionController = makeSessionController(live, latency, translationQueue)
+        } else {
+            sessionController = SessionController(
+                live: live, latency: latency, translationQueue: translationQueue
+            )
+        }
         wireSessionController()
         translationQueue.setHandlers(
             result: { [weak self] index, translation in
