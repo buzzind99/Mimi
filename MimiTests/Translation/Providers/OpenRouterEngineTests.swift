@@ -117,6 +117,10 @@ struct OpenRouterEngineTests {
         #expect(decoded.model == "tencent/hy-mt2-30b-a3b")
         #expect(decoded.messages.count == 2)
         #expect(decoded.messages[0].role == "system")
+        // The system prompt must keep the ASR caveat — the queue only ever
+        // feeds speech-recognized text, and the model needs the leniency.
+        #expect(decoded.messages[0].content.contains("ASR"))
+        #expect(decoded.messages[1].role == "user")
         #expect(decoded.messages[1].content.contains("こんにちは"))
     }
 
@@ -149,6 +153,46 @@ struct OpenRouterEngineTests {
         let parsed = try OpenRouterEngine.parse("```json\n[\"hello\"]\n```", expectedCount: 1)
 
         #expect(parsed == ["hello"])
+    }
+
+    @Test("a fence with no newline reaches the parser and fails as badResponse")
+    func fenceWithoutNewlineFailsParse() {
+        #expect(throws: TranslationEngineError.badResponse("Model did not return a JSON array")) {
+            try OpenRouterEngine.parse("```not json", expectedCount: 1)
+        }
+    }
+
+    @Test("an empty translation surfaces as badResponse")
+    func emptyTranslationThrows() {
+        #expect(throws: TranslationEngineError.badResponse("Model returned an empty translation")) {
+            try OpenRouterEngine.parse("[\"hello\", \"  \"]", expectedCount: 2)
+        }
+    }
+
+    @Test("a 200 response with no choices surfaces as badResponse")
+    func noChoicesThrows() async {
+        let script = Script(handler: { _ in
+            try (JSONEncoder().encode(FakeResponse(choices: [])), Self.httpResponse(200))
+        })
+        let engine = makeEngine(script: script)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await engine.translate(["こんにちは"])
+        }
+
+        #expect(thrown == .badResponse("Response contained no choices"))
+    }
+
+    @Test("an unparseable 200 body surfaces as badResponse")
+    func unparseableBodyThrows() async {
+        let script = Script(handler: { _ in (Data("garbage".utf8), Self.httpResponse(200)) })
+        let engine = makeEngine(script: script)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await engine.translate(["こんにちは"])
+        }
+
+        #expect(thrown == .badResponse("Unparseable response body"))
     }
 
     @Test("malformed model output surfaces as badResponse", arguments: [

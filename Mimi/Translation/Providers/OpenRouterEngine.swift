@@ -2,12 +2,13 @@ import Foundation
 
 /// OpenRouter engine: chat-completions with an arbitrary user-supplied model.
 ///
-/// Prompt contract: a strict JSON array of exactly N translations. Model
-/// output is parsed defensively (code fences stripped, count + non-empty
-/// validated); malformed output surfaces as `badResponse` — no per-sentence
-/// fallback, since chat-completions providers are batch-native and splitting
-/// would multiply rate-limited requests. No `response_format` is sent:
-/// arbitrary user models may 400 on it.
+/// Prompt contract: a strict JSON array of exactly N translations. Input is
+/// ASR output, so the prompt tells the model to infer intent past recognition
+/// errors. Model output is parsed defensively (code fences stripped, count +
+/// non-empty validated); malformed output surfaces as `badResponse` — no
+/// per-sentence fallback, since chat-completions providers are batch-native
+/// and splitting would multiply rate-limited requests. No `response_format`
+/// is sent: arbitrary user models may 400 on it.
 struct OpenRouterEngine: TranslationEngine {
     /// Long numbered lists degrade JSON adherence and translation quality on
     /// small models — batches stay small.
@@ -52,10 +53,10 @@ struct OpenRouterEngine: TranslationEngine {
 
     static func messages(for texts: [String]) -> [ChatCompletionsClient.Message] {
         let system = """
-        You are a translation engine for Japanese to English. Translate every input sentence to \
-        natural English. Respond with a strict JSON array containing exactly one translated string \
-        per input sentence, in the same order. Output only the JSON array — no commentary, no \
-        markdown, no code fences.
+        You are a Japanese-to-English translation engine. Input is ASR output and may \
+        contain recognition errors or fragments — infer the intended meaning. Respond \
+        with a strict JSON array of exactly one translated string per input sentence, \
+        same order, nothing else.
         """
         let payload = (try? JSONEncoder().encode(texts))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
