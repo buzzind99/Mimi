@@ -64,25 +64,18 @@ struct HUDView: View {
     private var liveSection: some View {
         Group {
             if !live.partial.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    if readingAnnotation != .none {
-                        RubyTextView(
-                            text: live.partial,
-                            annotation: readingAnnotation,
-                            surfaceFont: .system(size: 15),
-                            annotationFont: .system(size: 11, design: .monospaced),
-                            annotationColor: .secondary,
-                            reservesAnnotationLine: true
-                        )
-                        .foregroundStyle(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text(live.partial)
-                            .font(.system(size: 15))
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                // RubyTextView renders .none as plain text, so one call
+                // covers every annotation mode.
+                RubyTextView(
+                    text: live.partial,
+                    annotation: readingAnnotation,
+                    surfaceFont: .system(size: 15),
+                    annotationFont: .system(size: 11, design: .monospaced),
+                    annotationColor: .secondary,
+                    reservesAnnotationLine: true
+                )
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Listening…")
                     .font(.system(size: 13))
@@ -132,23 +125,14 @@ struct HUDView: View {
                 Text(SessionClock.timestamp(entry.sentence.startS))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
-                RubyTextView(
-                    text: entry.sentence.text,
-                    annotation: readingAnnotation,
-                    surfaceFont: .system(size: 14),
-                    annotationFont: .system(size: 11, design: .monospaced),
-                    annotationColor: .secondary.opacity(0.8)
-                )
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
+                jpText(of: entry)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(SessionClock.timestamp(entry.sentence.startS))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
-                    Text(entry.sentence.text)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.white)
+                    jpText(of: entry)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
