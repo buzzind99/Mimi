@@ -17,6 +17,9 @@ protocol ASREngine: AnyObject, Sendable {
     func finish() -> [ASREvent]
     /// Samples actually processed by the decoder (latency readback).
     var processedSamples: Int { get }
+    /// Samples pushed into the stream but not necessarily processed yet.
+    /// Polled on the main actor (60 ms tick) instead of hopping per chunk.
+    var pushedSamples: Int { get }
     var isMock: Bool { get }
     /// Called on an arbitrary thread when the engine hits a recoverable
     /// runtime failure (throttled); the app surfaces it as a session warning.

@@ -188,12 +188,6 @@ final class SessionController {
         #if DEBUG
             logIngressEnergy(chunk)
         #endif
-        let pushed = chunk.startSample + chunk.samples.count
-        Task { @MainActor in
-            self.latency.update(
-                max(0, Double(pushed - engine.processedSamples) / SessionClock.sampleRate)
-            )
-        }
     }
 
     #if DEBUG
@@ -237,6 +231,11 @@ final class SessionController {
         while let event = engine.poll() {
             handleASREvent(event)
         }
+        // Latency rides the existing 60 ms tick (no per-chunk Task hop): the
+        // 0.1 s rounding gate in `LatencyState` keeps publishes visible-only.
+        latency.update(
+            max(0, Double(engine.pushedSamples - engine.processedSamples) / SessionClock.sampleRate)
+        )
     }
 
     // MARK: - Event handling (main actor)

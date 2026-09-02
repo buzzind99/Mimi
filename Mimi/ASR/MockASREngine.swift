@@ -32,6 +32,10 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
         totalSamples
     }
 
+    var pushedSamples: Int {
+        totalSamples
+    }
+
     func prepare() throws {}
     func openStream() throws {}
 
@@ -62,6 +66,9 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
     }
 
     func finish() -> [ASREvent] {
-        []
+        // Parity with the real engine: an undelivered pending final is
+        // flushed (same span construction as `poll`) and then cleared.
+        guard let event = poll() else { return [] }
+        return [event]
     }
 }

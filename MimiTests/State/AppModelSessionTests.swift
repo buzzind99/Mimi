@@ -50,6 +50,7 @@ struct AppModelSessionTests {
         let isMock = true
         var onEngineError: ((String) -> Void)?
         var processedSamples = 0
+        var pushedSamples = 0
 
         private let log: FlowLog
         private let pollScript: [ASREvent]

@@ -3,7 +3,7 @@ import Testing
 
 /// Tests `MockASREngine`'s pure-Swift pipeline: the RMS speech threshold,
 /// the randomized sentence cadence (`nextSentenceAt`), the single-slot poll
-/// FIFO, sample accounting, and the always-empty finish drain.
+/// FIFO, sample accounting, and the finish-time flush of a pending final.
 @Suite("MockASREngine")
 struct MockASREngineTests {
 
@@ -211,8 +211,8 @@ struct MockASREngineTests {
         #expect(engine.finish().isEmpty)
     }
 
-    @Test("finish never flushes a pending final")
-    func finishDropsPendingFinal() {
+    @Test("finish flushes a pending final with the same span construction as poll")
+    func finishFlushesPendingFinal() {
         for _ in 0 ..< 6 {
             pushSpeech()
         }
@@ -221,9 +221,29 @@ struct MockASREngineTests {
         for _ in 0 ..< 18 {
             pushSpeech()
         }
+        let endBeforeFinish = engine.processedSamples
 
-        // The mock never flushes its pending final on finish — the drain is
-        // always empty (session teardown drops the tail).
-        #expect(engine.finish().isEmpty)
+        let events = engine.finish()
+
+        #expect(events.count == 1)
+        guard case let .final(text, start, end, lang)? = events.first else {
+            Issue.record("expected a .final event, got \(String(describing: events.first))")
+            return
+        }
+        #expect(text == "これから配信を始めます、よろしくお願いします。")
+        #expect(lang == "ja")
+        #expect(start == 6000) // first final's endSample (6 chunks × 1000)
+        #expect(end == endBeforeFinish)
+    }
+
+    @Test("finish clears the pending final: a second finish and later polls are empty")
+    func finishClearsPendingFinal() {
+        for _ in 0 ..< 6 {
+            pushSpeech()
+        }
+        _ = engine.finish()
+
+        #expect(engine.finish().isEmpty, "the pending final is delivered exactly once")
+        #expect(engine.poll() == nil, "poll must not redeliver the flushed final")
     }
 }

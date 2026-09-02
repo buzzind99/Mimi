@@ -4,8 +4,8 @@ import Testing
 
 /// Tests `SessionController` over the injected `makeEngine` / `makeCapture` /
 /// `ensurePermission` seams: `begin()` wiring and its failure arms, the
-/// capture-chunk → engine-push path with the latency readback, the poll
-/// timer's event loop (partial → live state, final → sentence pipeline), the
+/// capture-chunk → engine-push path, the poll timer's event loop (latency
+/// readback, partial → live state, final → sentence pipeline), the
 /// engine/capture error callbacks, warm-up scheduling, and stop() teardown
 /// ordering.
 ///
@@ -241,13 +241,14 @@ struct SessionControllerTests {
         #expect(sut.engine.allPushedChunks == [[0.1, -0.2, 0.3]])
     }
 
-    @Test("capture chunks update the latency readback")
+    @Test("capture chunks update the latency readback on the poll tick")
     func captureChunksUpdateLatency() async throws {
         let sut = makeSUT()
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.capture.onChunk?(AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: 0))
-        try await settle()
+        sut.controller.startTimers()
+        await pumpTimers()
 
         #expect(sut.latency.seconds == 0.2)
     }
@@ -265,7 +266,8 @@ struct SessionControllerTests {
                 AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: index * 2560)
             )
         }
-        try await settle()
+        sut.controller.startTimers()
+        await pumpTimers()
 
         #expect(sut.engine.allPushedChunks.count == 50)
         #expect(sut.controller.sessionMetadata != nil)
@@ -400,6 +402,7 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
     private var pollQueue: [ASREvent]
     private let finishQueue: [ASREvent]
     private var pushedChunks: [[Float]] = []
+    private var pushedTotal = 0
 
     init(log: CallLog, poll: [ASREvent] = [], finish: [ASREvent] = []) {
         self.log = log
@@ -416,7 +419,14 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
     }
 
     func push(_ samples: [Float]) {
-        lock.withLock { pushedChunks.append(samples) }
+        lock.withLock {
+            pushedChunks.append(samples)
+            pushedTotal += samples.count
+        }
+    }
+
+    var pushedSamples: Int {
+        lock.withLock { pushedTotal }
     }
 
     func poll() -> ASREvent? {

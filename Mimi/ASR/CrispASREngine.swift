@@ -164,6 +164,10 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         return processedCount
     }
 
+    var pushedSamples: Int {
+        lock.withLock { totalSamples }
+    }
+
     // MARK: - ASREngine
 
     func prepare() throws {
