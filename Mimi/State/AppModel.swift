@@ -53,6 +53,14 @@ final class AppModel: ObservableObject {
     let live = LivePartialState()
     let latency = LatencyState()
     let translationQueue = TranslationQueue()
+    /// Non-secret translation provider settings (selected provider, hasKey
+    /// flags, OpenRouter model, test results). Keys stay in `SecureKeyStoring`
+    /// and are read only when an engine is constructed.
+    let translationSettings: TranslationSettings
+
+    /// True once this session has latched onto Apple on-device after an
+    /// external engine failed (the Settings "Currently using" row surfaces it).
+    @Published var translationFallbackActive = false
 
     /// Internal (not private) so tests can drive the session callbacks.
     let sessionController: SessionController
@@ -64,8 +72,10 @@ final class AppModel: ObservableObject {
     init(
         makeSessionController: (
             (LivePartialState, LatencyState, TranslationQueue) -> SessionController
-        )? = nil
+        )? = nil,
+        translationSettings: TranslationSettings? = nil
     ) {
+        self.translationSettings = translationSettings ?? TranslationSettings()
         if let makeSessionController {
             sessionController = makeSessionController(live, latency, translationQueue)
         } else {
