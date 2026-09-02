@@ -49,6 +49,15 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     private var resumeData: Data?
     private var expectedBytes: Int64?
 
+    /// Progress-publish throttle (main-actor confined): republish only on a
+    /// ≥0.5% progress delta or ≥100 ms since the last publish — the delegate
+    /// fires many times per second for a 200 MB download. Terminal states
+    /// (`setState`) always publish.
+    private static let progressDeltaThreshold = 0.005
+    private static let progressIntervalThreshold: TimeInterval = 0.1
+    private var lastPublishedProgress: Double = -1
+    private var lastPublishDate: Date?
+
     func start() {
         Task { @MainActor in
             if case .done = self.state {
@@ -73,6 +82,8 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
 
         guard session == nil else { return } // already downloading
+        lastPublishedProgress = -1
+        lastPublishDate = nil
         setState(.downloading(progress: 0, bytes: 0, total: expectedBytes))
         let session = makeSession(self)
         self.session = session
@@ -118,6 +129,14 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
             let progress = totalBytesExpectedToWrite > 0
                 ? Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
                 : 0
+            let now = Date()
+            let enoughDelta = progress - lastPublishedProgress >= Self.progressDeltaThreshold
+            let enoughTime =
+                lastPublishDate.map { now.timeIntervalSince($0) >= Self.progressIntervalThreshold }
+                    ?? true
+            guard enoughDelta || enoughTime else { return }
+            lastPublishedProgress = progress
+            lastPublishDate = now
             self.state = .downloading(
                 progress: progress, bytes: totalBytesWritten,
                 total: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : nil

@@ -212,6 +212,26 @@ struct ModelDownloaderTests {
         #expect(downloader.state == .downloading(progress: 0, bytes: 300, total: nil))
     }
 
+    @Test("didWriteData throttles a sub-0.5% progress delta within the publish interval")
+    func didWriteDataThrottlesSmallDeltas() async throws {
+        let downloader = ModelDownloader()
+        let task = try makeDownloadTask()
+
+        // First callback always publishes (0.25 ≥ the delta threshold from
+        // the -1 seed); the second (0.251, +0.1%) is throttled.
+        downloader.urlSession(
+            .shared, downloadTask: task,
+            didWriteData: 250, totalBytesWritten: 250, totalBytesExpectedToWrite: 1000
+        )
+        downloader.urlSession(
+            .shared, downloadTask: task,
+            didWriteData: 1, totalBytesWritten: 251, totalBytesExpectedToWrite: 1000
+        )
+        await settle()
+
+        #expect(downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000))
+    }
+
     // MARK: - didFinishDownloadingTo
 
     @Test("didFinishDownloadingTo fails on a digest mismatch and removes the temp file")
