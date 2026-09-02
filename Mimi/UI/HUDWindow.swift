@@ -73,16 +73,9 @@ final class HUDWindowController {
 final class HUDPanel: NSPanel, ObservableObject {
     @Published var locked = true {
         didSet {
-            guard oldValue != locked, let content = contentView else { return }
+            guard oldValue != locked, let content = contentView as? HUDHostingView else { return }
             content.needsLayout = true
-            content.superview?.layoutSubtreeIfNeeded()
-            var frame = self.frame
-            frame.size.height += 1
-            frame.origin.y -= 1
-            setFrame(frame, display: false, animate: false)
-            frame.size.height -= 1
-            frame.origin.y += 1
-            setFrame(frame, display: false, animate: false)
+            content.refitHeight()
         }
     }
 }
@@ -118,6 +111,13 @@ final class HUDHostingView: NSHostingView<HUDView> {
 
     override func layout() {
         super.layout()
+        fitWindowHeight()
+    }
+
+    /// Re-fits the window height to the content; exposed for
+    /// `HUDPanel.locked` didSet, where unlocking changes the border and may
+    /// change the wrapped ideal height.
+    func refitHeight() {
         fitWindowHeight()
     }
 
