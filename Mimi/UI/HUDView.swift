@@ -118,12 +118,12 @@ struct HUDView: View {
     /// The pinned entry while browsing history; otherwise (nil pin, or a pin
     /// that no longer resolves) the latest translated entry.
     private func displayedEntry(in entries: [SessionEntry]) -> SessionEntry {
-        if let pinned = model.hudPinnedIndex,
-           let at = entries.firstIndex(where: { $0.sentence.index == pinned })
+        guard let index = HUDHistory.displayedIndex(in: entries, pinned: model.hudPinnedIndex),
+              let entry = entries.first(where: { $0.sentence.index == index }) else
         {
-            return entries[at]
+            return entries[entries.count - 1]
         }
-        return entries[entries.count - 1]
+        return entry
     }
 
     private func entryView(_ entry: SessionEntry) -> some View {
@@ -162,27 +162,34 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
+    /// Shared JP text call (RubyTextView renders .none as plain text).
+    private func jpText(of entry: SessionEntry) -> some View {
+        RubyTextView(
+            text: entry.sentence.text,
+            annotation: readingAnnotation,
+            surfaceFont: .system(size: 14),
+            annotationFont: .system(size: 11, design: .monospaced),
+            annotationColor: .secondary.opacity(0.8)
+        )
+        .foregroundStyle(.white)
+    }
+
     /// Right-side history cycling. Up = newer (disabled at latest, so the
     /// cursor follows new translations); down = older (pins to that exact
     /// sentence, so new translations never move the view).
     private func historyButtons(entries: [SessionEntry]) -> some View {
-        let newest = entries[entries.count - 1].sentence.index
-        let oldest = entries[0].sentence.index
-        let pinned = model.hudPinnedIndex
-        let atLatest = pinned == nil || pinned == newest
-        let atOldest = entries.count < 2 || pinned == oldest
-        return VStack(spacing: 2) {
+        VStack(spacing: 2) {
             historyButton(
                 icon: "chevron.up",
                 help: "Newer translation",
-                disabled: atLatest
+                disabled: !HUDHistory.canStepNewer(entries: entries, pinned: model.hudPinnedIndex)
             ) {
                 cycleHistory(entries: entries, step: 1)
             }
             historyButton(
                 icon: "chevron.down",
                 help: "Older translation",
-                disabled: atOldest
+                disabled: !HUDHistory.canStepOlder(entries: entries, pinned: model.hudPinnedIndex)
             ) {
                 cycleHistory(entries: entries, step: -1)
             }
@@ -193,13 +200,9 @@ struct HUDView: View {
     /// Steps the pin one translated entry up/down. Stepping onto the newest
     /// entry clears the pin (re-follows latest, re-disabling up).
     private func cycleHistory(entries: [SessionEntry], step: Int) {
-        let current = model.hudPinnedIndex ?? entries[entries.count - 1].sentence.index
-        guard let at = entries.firstIndex(where: { $0.sentence.index == current }) else {
-            return
-        }
-        let next = at + step
-        guard entries.indices.contains(next) else { return }
-        model.hudPinnedIndex = next == entries.count - 1 ? nil : entries[next].sentence.index
+        model.hudPinnedIndex = HUDHistory.cycle(
+            entries: entries, pinned: model.hudPinnedIndex, step: step
+        )
     }
 
     private func historyButton(
