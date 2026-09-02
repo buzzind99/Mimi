@@ -18,7 +18,7 @@ struct OnboardingView: View {
                 Text("Welcome to Mimi")
                     .font(.title.bold())
                 Text("Real-time Japanese audio transcription & translation")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -64,7 +64,7 @@ struct OnboardingView: View {
                 if case let .failed(message) = downloader.state {
                     Text(message)
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                         .frame(maxWidth: 480)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(
@@ -72,23 +72,26 @@ struct OnboardingView: View {
                             + "~/Library/Application Support/Mimi/models/ — Mimi picks it up automatically."
                     )
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: 480)
-                } else if ModelLocator.resolve() == nil {
+                } else if model.modelURL == nil {
                     Text("Or drop the GGUF into ~/Library/Application Support/Mimi/models/")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         case let .downloading(_, bytes, total):
             VStack(spacing: 6) {
                 if let total, total > 0 {
                     ProgressView(value: Double(bytes), total: Double(total))
-                    Text(String(format: "Downloading model… %.1f / %.1f MB", Double(bytes) / 1_048_576, Double(total) / 1_048_576))
-                        .font(.caption.monospacedDigit())
+                    Text(
+                        "Downloading model… \(bytes.formatted(.byteCount(style: .memory))) / "
+                            + total.formatted(.byteCount(style: .memory))
+                    )
+                    .font(.caption.monospacedDigit())
                 } else {
                     ProgressView()
-                    Text("Downloading model… \(bytes / 1_048_576) MB")
+                    Text("Downloading model… \(bytes.formatted(.byteCount(style: .memory)))")
                         .font(.caption.monospacedDigit())
                 }
                 Button("Cancel") { downloader.cancel() }
@@ -101,7 +104,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.green)
         }
 
-        if let resolved = ModelLocator.resolve() {
+        if let resolved = model.modelURL {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 Text(resolved.path)
