@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import Translation
@@ -287,6 +288,13 @@ final class AppModel: ObservableObject {
 
     func exportText() -> String {
         SessionExporter.plainText(entries: entries)
+    }
+
+    /// Copies the plain-text transcript to the pasteboard; shared by the
+    /// ⌘⇧C command and the export menu.
+    func copyTranscript() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(exportText(), forType: .string)
     }
 
     func export(format: SessionExporter.Format) throws -> Data {

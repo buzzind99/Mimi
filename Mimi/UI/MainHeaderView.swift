@@ -1,10 +1,15 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Header row of the main window: session controls, reading-annotation
 /// picker, mock-ASR badge, and the export menu.
 struct MainHeaderView: View {
     @ObservedObject var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
+
+    @State private var exportPresented = false
+    @State private var exportFormat: SessionExporter.Format = .txt
+    @State private var exportData: Data?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -33,7 +38,7 @@ struct MainHeaderView: View {
                 Text("MOCK ASR")
                     .font(.caption).bold()
                     .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Capsule().fill(Color.orange.opacity(0.25)))
+                    .background(Capsule().fill(.orange.opacity(0.25)))
                     .help(
                         "Native ASR runtime not found — running the built-in mock so you can "
                             + "exercise the pipeline. Build it with scripts/build_runtime.sh."
@@ -44,6 +49,16 @@ struct MainHeaderView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .fileExporter(
+            isPresented: $exportPresented,
+            document: exportData.map { ExportDocument(data: $0) },
+            contentTypes: [exportFormat.contentType],
+            defaultFilename: "mimi-session.\(exportFormat.fileExtension)"
+        ) { result in
+            if case let .failure(error) = result {
+                model.errorMessage = "Export failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     private var sessionButton: some View {
@@ -68,8 +83,7 @@ struct MainHeaderView: View {
     private var exportMenu: some View {
         Menu {
             Button("Copy transcript") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(model.exportText(), forType: .string)
+                model.copyTranscript()
             }
             .disabled(!model.isExportable)
 
@@ -88,15 +102,34 @@ struct MainHeaderView: View {
     }
 
     private func runExport(_ format: SessionExporter.Format) {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [format.fileExtension == "json" ? .json : .plainText]
-        panel.nameFieldStringValue = "mimi-session.\(format.fileExtension)"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let data = try model.export(format: format)
-            try data.write(to: url)
+            exportFormat = format
+            exportData = try model.export(format: format)
+            exportPresented = true
         } catch {
             model.errorMessage = "Export failed: \(error.localizedDescription)"
         }
+    }
+}
+
+/// Minimal `FileDocument` wrapper that hands the prepared export payload to
+/// SwiftUI's `fileExporter` (the panel only ever writes it; nothing reads).
+private struct ExportDocument: FileDocument {
+    let data: Data
+
+    static var readableContentTypes: [UTType] {
+        []
+    }
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }

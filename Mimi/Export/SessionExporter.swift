@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 /// Formats session transcripts: plain text, SRT, VTT, and the authoritative
 /// JSON session file. Reads languages from fields; never assumes ja/en.
@@ -20,6 +21,10 @@ enum SessionExporter {
             case .vtt: return "vtt"
             case .json: return "json"
             }
+        }
+
+        var contentType: UTType {
+            self == .json ? .json : .plainText
         }
     }
 

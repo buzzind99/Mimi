@@ -23,8 +23,7 @@ struct MimiApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Copy Transcript") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(model.exportText(), forType: .string)
+                    model.copyTranscript()
                 }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(!model.isExportable)
