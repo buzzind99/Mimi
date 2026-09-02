@@ -9,6 +9,27 @@ struct CrispASRVADParameters {
     let padMS: Int
 }
 
+/// The library surface `CrispASREngine` drives. Exposed as a protocol so
+/// tests can inject a scripted fake without dlopen — the real class keeps
+/// the process-global dlopen cache behind `open()`, which stays the engine
+/// init's default (`library: nil`).
+protocol CrispASRLibraryAPI: AnyObject {
+    /// Absolute path of the bundled FireRedVAD model, or nil.
+    var vadModelPath: String? { get }
+    func setGpuBackend(_ name: String)
+    func openSession(modelPath: String, backend: String) -> OpaquePointer?
+    func closeSession(_ session: OpaquePointer?)
+    func transcribeText(session: OpaquePointer?, pcm: [Float], languageCode: String) -> String?
+    func vadSlices(
+        modelPath: String,
+        pcm: [Float],
+        parameters: CrispASRVADParameters
+    ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)?
+    func vadFree(_ spans: UnsafeMutablePointer<Float>?)
+}
+
+extension CrispASRLibrary: CrispASRLibraryAPI {}
+
 /// Process-wide dlopen/dlsym binding of `libcrispasr.dylib` (stable C session
 /// ABI). The dylib is optional at build time: the app builds and launches
 /// before the native runtime is installed, and `ASREngineError.runtimeNotFound`

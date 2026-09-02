@@ -39,7 +39,7 @@ final class CrispASREngine: ASREngine {
 
     private let modelPath: String
     let languageCode: String
-    let lib: CrispASRLibrary
+    let lib: any CrispASRLibraryAPI
 
     // Window/endpointing knobs (mirrors the CLI defaults where sensible).
     static let sampleRate = 16000
@@ -79,10 +79,16 @@ final class CrispASREngine: ASREngine {
     /// least this long before trusting a zero-span verdict.
     static let vadMinDiscardSamples = 2 * sampleRate
 
-    init(modelPath: URL, languageCode: String = "ja") throws {
+    /// `library` is injectable so tests can drive the full state machine over
+    /// a scripted fake without dlopen; nil (the default) binds the real dylib.
+    init(
+        modelPath: URL,
+        languageCode: String = "ja",
+        library: (any CrispASRLibraryAPI)? = nil
+    ) throws {
         self.modelPath = modelPath.path
         self.languageCode = languageCode
-        lib = try CrispASRLibrary.open()
+        lib = try library ?? CrispASRLibrary.open()
         if let vad = lib.vadModelPath {
             vadModelPath = vad
         } else {
