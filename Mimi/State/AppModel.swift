@@ -172,23 +172,15 @@ final class AppModel: ObservableObject {
     /// build on the store's queue and only blocks when none is running.
     /// A failed build throws so the start fails visibly in the status bar
     /// (pressing Start again retries). `resolve`/`prepare` are injectable
-    /// for tests; the defaults drive the real store.
+    /// for tests; the defaults drive the real store's async surface.
     func ensureDictionaryReady(
         resolve: () -> URL? = { DictionaryStore.resolve() },
-        prepare: (@escaping (Result<URL, Error>) -> Void) -> Void = {
-            DictionaryStore.shared.prepare(completion: $0)
-        }
+        prepare: (() async throws -> URL)? = nil
     ) async throws {
         guard resolve() == nil else { return }
         isPreparingDictionary = true
         defer { isPreparingDictionary = false }
-        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, any Error>) in
-            prepare { result in
-                // The store completes on the main queue; resuming here hops
-                // us back onto the main actor.
-                continuation.resume(with: result)
-            }
-        }
+        _ = try await(prepare ?? DictionaryStore.shared.prepare)()
     }
 
     // MARK: - Session control

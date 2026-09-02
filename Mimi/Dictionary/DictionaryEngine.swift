@@ -24,6 +24,8 @@ struct DictionaryToken: Codable, Equatable {
 final class DictionaryEngine {
     static let shared = DictionaryEngine()
 
+    private static let decoder = JSONDecoder()
+
     private let lock = NSLock()
     private let ffi: DictionaryFFI?
     private let resolveDictionary: () -> URL?
@@ -56,7 +58,7 @@ final class DictionaryEngine {
             }
         }
         guard let payload else { return nil }
-        return try? JSONDecoder().decode([DictionaryToken].self, from: payload)
+        return try? Self.decoder.decode([DictionaryToken].self, from: payload)
     }
 
     /// Lock-held. Resolves the dictionary URL and opens the handle on first

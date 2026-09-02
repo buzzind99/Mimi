@@ -63,7 +63,10 @@ struct AppModelDictionaryTests {
 
         try await model.ensureDictionaryReady(
             resolve: { resolved },
-            prepare: { _ in prepareCalls += 1 }
+            prepare: {
+                prepareCalls += 1
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
+            }
         )
 
         #expect(prepareCalls == 0)
@@ -78,10 +81,10 @@ struct AppModelDictionaryTests {
 
         try await model.ensureDictionaryReady(
             resolve: { nil },
-            prepare: { completion in
+            prepare: { () async throws -> URL in
                 prepareCalls += 1
                 preparingDuringPreparation = model.isPreparingDictionary
-                completion(.success(URL(fileURLWithPath: "/tmp/ipadic.dic")))
+                return URL(fileURLWithPath: "/tmp/ipadic.dic")
             }
         )
 
@@ -98,7 +101,7 @@ struct AppModelDictionaryTests {
         await #expect(throws: (any Error).self) {
             try await model.ensureDictionaryReady(
                 resolve: { nil },
-                prepare: { completion in completion(.failure(failure)) }
+                prepare: { throw failure }
             )
         }
 

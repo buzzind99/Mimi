@@ -137,10 +137,10 @@ final class DictionaryStoreTests {
         )
     }
 
+    /// Drives the store's async `prepare()` surface (the completion API
+    /// underneath is exercised by every test going through this helper).
     private func prepare(_ store: DictionaryStore) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            store.prepare { continuation.resume(with: $0) }
-        }
+        try await store.prepare()
     }
 
     /// Repo root (MimiTests/Dictionary/ → repo), for the script-fetched real

@@ -149,6 +149,20 @@ final class DictionaryStore {
         }
     }
 
+    /// Async surface over the completion-based `prepare(completion:)` above,
+    /// which stays the primitive. Coalescing semantics are unchanged — the
+    /// continuation lines up behind an in-flight decompression on the store's
+    /// queue exactly like a completion caller would.
+    func prepare() async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            prepare { result in
+                // The completion runs on the main queue; resuming here hops
+                // the value back to the awaiting context.
+                continuation.resume(with: result)
+            }
+        }
+    }
+
     private func complete(
         _ completion: @escaping (Result<URL, Error>) -> Void, _ result: Result<URL, Error>
     ) {
