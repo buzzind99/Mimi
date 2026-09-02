@@ -44,7 +44,9 @@ final class SentenceBuffer {
     private var text = ""
     private var startSample: Int = 0
     private var lastEndSample: Int = 0
-    private var lastAppendAt: Date = .distantPast
+    /// Monotonic instant of the last append (wall-clock `Date` would skew on
+    /// NTP/timezone/manual clock changes).
+    private var lastAppendAt = ContinuousClock.Instant.now
     private var isEmpty = true
 
     var onSentence: ((Sentence) -> Void)?
@@ -65,7 +67,7 @@ final class SentenceBuffer {
         }
         text += trimmed
         lastEndSample = endSample
-        lastAppendAt = Date()
+        lastAppendAt = ContinuousClock.now
 
         if tier1ShouldClose() {
             close()
@@ -75,9 +77,9 @@ final class SentenceBuffer {
     }
 
     /// Tier 2: called on a timer; closes the buffer after the silence timeout.
-    func tick(now: Date = Date()) {
+    func tick(now: ContinuousClock.Instant = .now) {
         guard !isEmpty else { return }
-        if now.timeIntervalSince(lastAppendAt) >= config.silenceTimeout {
+        if lastAppendAt.duration(to: now) >= .seconds(config.silenceTimeout) {
             close()
         }
     }

@@ -156,14 +156,16 @@ final class TranslationQueue {
     /// bounded by `timeout`. Returns `true` when everything drained in time.
     /// Used on stop so the final sentences finish translating before teardown.
     /// `pending` is plain main-actor state, so this check observes reality.
+    /// The deadline is monotonic (`ContinuousClock`) — wall-clock `Date`
+    /// would skew on NTP/timezone/manual clock changes.
     func drain(timeout: TimeInterval) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = ContinuousClock.now + Duration.seconds(timeout)
         while !pending.isEmpty || inFlight {
             // A failed translator will never drain — don't make stop hang.
             if case .unavailable = status {
                 return false
             }
-            guard Date() < deadline else { return false }
+            guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return true

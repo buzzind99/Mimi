@@ -142,7 +142,7 @@ struct SentenceBufferTests {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
-        buffer.tick(now: Date().addingTimeInterval(2))
+        buffer.tick(now: .now.advanced(by: .seconds(2)))
 
         #expect(sink.sentences.first?.text == unpunctuatedSentence)
     }
@@ -152,7 +152,7 @@ struct SentenceBufferTests {
         let (buffer, sink) = makeSUT()
         buffer.append(finalText: unpunctuatedSentence, startSample: 0, endSample: oneSecondInSamples)
 
-        buffer.tick(now: Date())
+        buffer.tick(now: .now)
 
         #expect(sink.sentences.count == 0)
     }
@@ -161,7 +161,7 @@ struct SentenceBufferTests {
     func tickWithEmptyBufferNotEmitted() {
         let (buffer, sink) = makeSUT()
 
-        buffer.tick(now: Date().addingTimeInterval(60))
+        buffer.tick(now: .now.advanced(by: .seconds(60)))
 
         #expect(sink.sentences.count == 0)
     }
