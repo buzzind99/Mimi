@@ -285,8 +285,11 @@ struct CrispASREngineLibraryTests {
         engine.push(loudSecond) // VAD #1 dispatched, held inside the fake
         await waitUntil { library.vadCalls.count == 1 && library.vadEntered }
 
-        engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // cap final, held
-        await waitUntil { library.transcribeCalls.count == 1 && library.transcribeEntered }
+        engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // cap final decode
+        // The fake blocks before recording the call, so only entry is
+        // observable while held — waiting on the count here would always
+        // burn the full timeout.
+        await waitUntil { library.transcribeEntered }
 
         library.transcribeHoldSemaphore?.signal() // the decode closes generation 1
         await waitUntil { self.state(engine) { engine.utteranceGeneration } == 2 }

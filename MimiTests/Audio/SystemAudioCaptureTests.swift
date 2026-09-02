@@ -379,8 +379,9 @@ struct SystemAudioCaptureTests {
         let capture = makeCapture(running: true)
         // A payload whose downmix is still running when stop() fires below:
         // the callback passes the cheap entry check, then gets fenced by the
-        // locked re-check and must deliver nothing.
-        let buffer = try SampleBufferSynthesis.make(frames: 16_000_000)
+        // locked re-check and must deliver nothing. The payload is sized so
+        // the downmix outlasts the 10 ms stop delay without costing seconds.
+        let buffer = try SampleBufferSynthesis.make(frames: 2_000_000)
 
         let callbackFinished = DispatchSemaphore(value: 0)
         let callbackThread = Thread {
@@ -388,7 +389,7 @@ struct SystemAudioCaptureTests {
             callbackFinished.signal()
         }
         callbackThread.start()
-        Thread.sleep(forTimeInterval: 0.05)
+        Thread.sleep(forTimeInterval: 0.01)
         capture.stop()
 
         #expect(callbackFinished.wait(timeout: .now() + 10) == .success)
