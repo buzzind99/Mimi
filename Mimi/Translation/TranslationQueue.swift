@@ -11,8 +11,8 @@ enum TranslationStatus: Equatable {
 
 /// Translates finalized sentences ja→en, strictly in order.
 ///
-/// `TranslationSession.translate(_:)` throws when called concurrently, so all
-/// work is funneled through this single worker loop. Untranslated sentences
+/// `translate` throws when called concurrently, so all work is funneled
+/// through this single worker loop. Untranslated sentences
 /// live in the plain `pending` array — always observable on the main actor —
 /// and the worker consumes them FIFO, so output order can never diverge from
 /// input order. Sentences are keyed by index; timestamps travel with the
@@ -22,11 +22,12 @@ enum TranslationStatus: Equatable {
 /// The class is `@MainActor` so that `enqueue` is a synchronous call from the
 /// sentence pipeline (also on the main actor): by the time `stop` calls
 /// `drain`, every enqueued sentence is visible in `pending`. The worker loop
-/// suspends on `session.translate` without blocking the main actor.
+/// suspends on the engine's `translate` without blocking the main actor.
 ///
-/// The `TranslationSession` itself is provided by SwiftUI's
-/// `.translationTask` (see `TranslationSessionHost`), which also drives the
-/// one-time OS language-pack download prompt.
+/// The engine is injected at `run(with:)`: the on-device session arrives via
+/// `AppleSessionEngine` (see `TranslationSessionHost`, which also drives the
+/// one-time OS language-pack download prompt); cloud engines enter through
+/// the same seam.
 @MainActor
 final class TranslationQueue {
     private(set) var status: TranslationStatus = .idle
@@ -68,10 +69,15 @@ final class TranslationQueue {
         onStatus = status
     }
 
-    /// SwiftUI hands us a session whenever `.translationTask` (re)fires.
-    func run(with session: TranslationSession) async {
+    /// The engine is injected at run start; a new run swaps it wholesale.
+    private var engine: (any TranslationEngine)?
+
+    /// SwiftUI hands us a session whenever `.translationTask` (re)fires;
+    /// external engines enter through the same seam from `AppModel`.
+    func run(with engine: any TranslationEngine) async {
         generation += 1
         let token = generation
+        self.engine = engine
         setStatus(.ready)
         let (wakeStream, continuation) = AsyncStream<Void>.makeStream()
         wake = continuation
@@ -82,6 +88,7 @@ final class TranslationQueue {
             if token == generation {
                 wake = nil
                 inFlight = false
+                self.engine = nil
             }
         }
 
@@ -91,15 +98,15 @@ final class TranslationQueue {
         /// round-trips instead of one call per sentence.
         func pump() async -> Bool {
             while !pending.isEmpty {
-                guard token == generation else { return false }
+                guard token == generation, let engine = self.engine else { return false }
                 // Take a bounded slice: visible progress and a bounded
-                // round-trip, while bursts still amortize the session call.
-                let batch = Array(pending.prefix(16))
+                // round-trip, while bursts still amortize the engine call.
+                let batch = Array(pending.prefix(engine.preferredBatchSize))
                 pending.removeFirst(batch.count)
                 setStatus(.translating)
                 inFlight = true
                 do {
-                    for (sentence, pair) in try await translateBatch(batch, using: session) {
+                    for (sentence, pair) in try await translateBatch(batch, using: engine) {
                         deliver(sentence, pair)
                     }
                     setStatus(.ready)
@@ -171,26 +178,15 @@ final class TranslationQueue {
         return true
     }
 
-    /// Translates one batch in a single session round-trip (batches amortize
-    /// the call during bursts). Returns sentences paired with translations.
+    /// Translates one batch in a single engine round-trip (batches amortize
+    /// the call during bursts). Returns sentences paired with translations;
+    /// the fixed ja→en pair makes the response language constant.
     private func translateBatch(
-        _ batch: [Sentence], using session: TranslationSession
+        _ batch: [Sentence], using engine: any TranslationEngine
     ) async throws -> [(Sentence, SentenceTranslation)] {
-        if batch.count == 1 {
-            let response = try await session.translate(batch[0].text)
-            return [(batch[0], SentenceTranslation(
-                lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                text: response.targetText
-            ))]
-        }
-        let responses = try await session.translations(
-            from: batch.map { TranslationSession.Request(sourceText: $0.text) }
-        )
-        return zip(batch, responses).map { sentence, response in
-            (sentence, SentenceTranslation(
-                lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                text: response.targetText
-            ))
+        let translations = try await engine.translate(batch.map { $0.text })
+        return zip(batch, translations).map { sentence, text in
+            (sentence, SentenceTranslation(lang: "en", text: text))
         }
     }
 
@@ -205,8 +201,29 @@ final class TranslationQueue {
         onStatus?(newStatus)
     }
 
+    private static func describe(_ error: TranslationEngineError) -> String {
+        switch error {
+        case .invalidKey:
+            return "Invalid API key. Check the key in Settings, then retry."
+        case .quotaExceeded:
+            return "The provider's API quota is exhausted. Retry later or switch provider."
+        case .rateLimited:
+            return "The provider is rate limiting requests. Retry shortly."
+        case let .serverError(code):
+            return "Provider server error (\(code)). Retry shortly."
+        case let .badResponse(detail):
+            return "The provider returned an unexpected response: \(detail)"
+        case .network:
+            return "Network error reaching the provider. Check the connection, then retry."
+        case .cancelled:
+            return "Translation was cancelled."
+        }
+    }
+
     private static func describe(_ error: Error) -> String {
         switch error {
+        case let engineError as TranslationEngineError:
+            return describe(engineError)
         case let translationError as TranslationError:
             if #available(macOS 26.0, *) {
                 switch translationError {

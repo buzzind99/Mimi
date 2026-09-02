@@ -11,7 +11,7 @@ struct TranslationSessionHost: View {
         Color.clear
             .frame(width: 0, height: 0)
             .translationTask(model.translationConfig) { session in
-                await model.translationQueue.run(with: session)
+                await model.translationQueue.run(with: AppleSessionEngine(session))
             }
     }
 }

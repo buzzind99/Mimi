@@ -4,11 +4,9 @@ import Testing
 @preconcurrency import Translation
 
 /// Tests `TranslationQueue` handler wiring, cache-hit enqueue, retry reset,
-/// and drain bounds. The delivery paths run against the real OS ja→en pack
-/// via `TranslationSession(installedSource:)` (macOS 26+ with the pack
-/// installed; the session factories `try Test.cancel` otherwise over the
-/// shared `TestEnvironment` probes) so the enqueue cache can be seeded
-/// through the handler loop.
+/// drain bounds, and the worker loop against a hermetic closure-backed mock
+/// engine (no macOS-26 / pack gating). One smoke test runs the real OS ja→en
+/// pack through `AppleSessionEngine` to keep the adapter honest.
 ///
 /// Swift Testing confirmations have no timeout, so every wait inside a
 /// confirmation scope is bounded by `waitUntil(timeout:)` — on timeout the
@@ -22,8 +20,7 @@ struct TranslationQueueTests {
 
     private let sentenceText = "テスト"
     private let otherSentenceText = "こんにちは"
-    /// First translate loads the pack model; generous for slow machines.
-    private let resultTimeout: TimeInterval = 20
+    private let resultTimeout: TimeInterval = 5
 
     // MARK: - Helpers
 
@@ -47,34 +44,12 @@ struct TranslationQueueTests {
         }
     }
 
-    /// Real session for the installed ja→en pair. `translate` runs locally once
-    /// the pack is present (no prompts); cancelled otherwise so the suite stays
-    /// green on machines without the pack.
-    private func makeInstalledJAToENSession() async throws -> TranslationSession {
-        guard #available(macOS 26.0, *) else {
-            try Test.cancel("TranslationSession(installedSource:) requires macOS 26")
+    /// Deterministic mock: prefixes every input, recording each batch. Lock
+    /// guards the recording because `translate` runs off the main actor.
+    private func makeEchoEngine(batchSize: Int = 16) -> MockTranslationEngine {
+        MockTranslationEngine(preferredBatchSize: batchSize) { texts in
+            texts.map { "EN:\($0)" }
         }
-        guard await TestEnvironment.jaToENPackInstalled() else {
-            try Test.cancel("ja→en translation pack is not installed")
-        }
-        let source = Locale.Language(identifier: "ja")
-        let target = Locale.Language(identifier: "en")
-        return TranslationSession(installedSource: source, target: target)
-    }
-
-    /// Session whose `translate` deterministically throws: target "zz" is
-    /// unsupported, so the worker always lands in its error path. The
-    /// non-throwing `init(installedSource:)` requires the source pack to exist,
-    /// so the installed ja→en pair gates it as a proxy for "ja pack present".
-    private func makeUnsupportedTargetSession() async throws -> TranslationSession {
-        guard #available(macOS 26.0, *) else {
-            try Test.cancel("TranslationSession(installedSource:) requires macOS 26")
-        }
-        guard await TestEnvironment.jaToENPackInstalled() else {
-            try Test.cancel("ja translation pack is not installed")
-        }
-        let source = Locale.Language(identifier: "ja")
-        return TranslationSession(installedSource: source, target: Locale.Language(identifier: "zz"))
     }
 
     // MARK: - setHandlers
@@ -136,7 +111,7 @@ struct TranslationQueueTests {
 
     @Test("a single enqueue is delivered through the status cycle")
     func singleEnqueueDeliversThroughStatusCycle() async throws {
-        let session = try await makeInstalledJAToENSession()
+        let engine = makeEchoEngine()
         let (queue, sink) = makeSUT()
         await confirmation("translation delivered") { delivered in
             queue.setHandlers(
@@ -146,7 +121,7 @@ struct TranslationQueueTests {
                 },
                 status: { sink.receive(status: $0) }
             )
-            let worker = Task { await queue.run(with: session) }
+            let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
@@ -157,7 +132,7 @@ struct TranslationQueueTests {
         #expect(sink.results.count == 1)
         #expect(delivery.index == 0)
         #expect(delivery.translation.lang == "en")
-        #expect(!delivery.translation.text.isEmpty)
+        #expect(delivery.translation.text == "EN:\(sentenceText)")
         #expect(sink.statuses == [.ready, .translating, .ready])
 
         // Retry reset also clears a non-idle (.ready) status.
@@ -169,10 +144,10 @@ struct TranslationQueueTests {
     // MARK: - run(with:) wake loop
 
     /// Enqueues while the worker is already parked in the wake loop — the
-    /// incremental path that keeps one session alive for follow-up sentences.
+    /// incremental path that keeps one engine alive for follow-up sentences.
     @Test("an enqueue on an idle worker wakes the loop and delivers")
     func enqueueOnIdleWorkerWakesAndDelivers() async throws {
-        let session = try await makeInstalledJAToENSession()
+        let engine = makeEchoEngine()
         let (queue, sink) = makeSUT()
         await confirmation("both translations delivered", expectedCount: 2) { delivered in
             queue.setHandlers(
@@ -182,14 +157,14 @@ struct TranslationQueueTests {
                 },
                 status: { sink.receive(status: $0) }
             )
-            let worker = Task { await queue.run(with: session) }
+            let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
             await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
             // Wait for the worker to publish .ready again (batch done), so the
             // second enqueue lands on an idle worker and must wake it.
-            await waitUntil(timeout: 5) { queue.status == .ready }
+            await waitUntil(timeout: resultTimeout) { queue.status == .ready }
             #expect(queue.status == .ready)
 
             queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
@@ -200,7 +175,7 @@ struct TranslationQueueTests {
         #expect(sink.results.count == 2)
         #expect(second.index == 1)
         #expect(second.translation.lang == "en")
-        #expect(!second.translation.text.isEmpty)
+        #expect(second.translation.text == "EN:\(otherSentenceText)")
         #expect(sink.statuses == [.ready, .translating, .ready, .translating, .ready])
     }
 
@@ -211,7 +186,7 @@ struct TranslationQueueTests {
     /// at enqueue time and never enter `pending`.
     @Test("a repeat enqueue posts the cached result synchronously, bypassing pending")
     func cacheHitPostsSynchronouslyAndBypassesPending() async throws {
-        let session = try await makeInstalledJAToENSession()
+        let engine = makeEchoEngine()
         let (queue, sink) = makeSUT()
         try await confirmation("results delivered", expectedCount: 1...) { delivered in
             queue.setHandlers(
@@ -221,7 +196,7 @@ struct TranslationQueueTests {
                 },
                 status: { sink.receive(status: $0) }
             )
-            let worker = Task { await queue.run(with: session) }
+            let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
@@ -237,16 +212,47 @@ struct TranslationQueueTests {
             let drained = await queue.drain(timeout: 0.05)
             #expect(drained, "cache hit must bypass pending")
         }
+        #expect(engine.recordedBatches.count == 1, "cache hit must bypass the engine")
+    }
+
+    // MARK: - run(with:) batch sizing
+
+    /// The engine's `preferredBatchSize` bounds each round-trip: three
+    /// sentences against a size-2 engine must arrive as one batch of two
+    /// followed by a batch of one, FIFO order preserved.
+    @Test("the engine's preferredBatchSize bounds each round-trip")
+    func preferredBatchSizeBoundsRoundTrips() async {
+        let engine = makeEchoEngine(batchSize: 2)
+        let (queue, sink) = makeSUT()
+        await confirmation("batch delivered", expectedCount: 3) { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { sink.receive(status: $0) }
+            )
+            let worker = Task { await queue.run(with: engine) }
+            defer { worker.cancel() }
+
+            for index in 0 ..< 3 {
+                queue.enqueue(makeSentence(index: index, text: "\(sentenceText)\(index)"))
+            }
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 3 }
+        }
+
+        #expect(engine.recordedBatches.map { $0.count } == [2, 1])
+        #expect(sink.results.map { $0.index } == [0, 1, 2], "FIFO order preserved across batches")
     }
 
     // MARK: - run(with:) cancellation
 
-    /// Cancelling the worker before its body runs makes `session.translate`
-    /// throw `CancellationError` deterministically: the sentence must be
-    /// re-queued for the next run and the status returned to `.idle`.
-    @Test("a worker cancelled before starting re-queues the sentence and returns to idle")
-    func cancelledBeforeStartRequeuesAndReturnsToIdle() async throws {
-        let session = try await makeInstalledJAToENSession()
+    /// A `CancellationError` from the engine (task torn down / configuration
+    /// invalidated) must re-queue the sentence for the next run and return
+    /// the status to `.idle` — not surface as an error.
+    @Test("a CancellationError re-queues the sentence and returns to idle")
+    func cancellationErrorRequeuesAndReturnsToIdle() async {
+        let engine = MockTranslationEngine { _ in throw CancellationError() }
         let (queue, sink) = makeSUT()
         queue.setHandlers(
             result: { index, translation in
@@ -257,8 +263,7 @@ struct TranslationQueueTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
 
-        let worker = Task { await queue.run(with: session) }
-        worker.cancel()
+        let worker = Task { await queue.run(with: engine) }
         await worker.value
 
         #expect(sink.results.isEmpty)
@@ -267,43 +272,16 @@ struct TranslationQueueTests {
         #expect(!drained, "cancelled work must be re-queued, not lost")
     }
 
-    // MARK: - run(with:) batch delivery
-
-    /// Both enqueues happen before the (main-actor) worker resumes, so the
-    /// worker must translate them as one batched round-trip: one
-    /// translating→ready cycle for two results, FIFO order preserved.
-    @Test("a burst of enqueues is delivered as one batched round-trip, in order")
-    func burstEnqueueDeliversAsSingleBatchInOrder() async throws {
-        let session = try await makeInstalledJAToENSession()
-        let (queue, sink) = makeSUT()
-        await confirmation("batch delivered", expectedCount: 2) { delivered in
-            queue.setHandlers(
-                result: { index, translation in
-                    sink.receive(index: index, translation: translation)
-                    delivered()
-                },
-                status: { sink.receive(status: $0) }
-            )
-            let worker = Task { await queue.run(with: session) }
-            defer { worker.cancel() }
-
-            queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 2 }
-        }
-
-        #expect(sink.results.map { $0.index } == [0, 1])
-        #expect(sink.statuses == [.ready, .translating, .ready], "one batched round-trip")
-    }
-
     // MARK: - run(with:) failure path
 
-    /// An unsupported target makes `translate` throw deterministically; the
-    /// worker must re-queue the sentence, publish `.unavailable`, and exit —
-    /// after which `drain` fails fast instead of waiting out its timeout.
-    @Test("a translation failure publishes .unavailable and makes drain fail fast")
-    func translationFailurePublishesUnavailableAndFailsDrainFast() async throws {
-        let session = try await makeUnsupportedTargetSession()
+    /// An engine failure must re-queue the sentence, publish `.unavailable`,
+    /// and exit — after which `drain` fails fast instead of waiting out its
+    /// timeout.
+    @Test("an engine failure publishes .unavailable and makes drain fail fast")
+    func engineFailurePublishesUnavailableAndFailsDrainFast() async {
+        let engine = MockTranslationEngine { _ in
+            throw TranslationEngineError.badResponse("unparseable payload")
+        }
         let (queue, sink) = makeSUT()
         await confirmation("unavailable status") { failed in
             queue.setHandlers(
@@ -317,7 +295,7 @@ struct TranslationQueueTests {
                     }
                 }
             )
-            let worker = Task { await queue.run(with: session) }
+            let worker = Task { await queue.run(with: engine) }
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
@@ -344,6 +322,63 @@ struct TranslationQueueTests {
             Date().timeIntervalSince(start) < 0.8,
             "drain must early-return on .unavailable, not wait out the deadline"
         )
+    }
+
+    // MARK: - AppleSessionEngine smoke (real pack)
+
+    /// Keeps `AppleSessionEngine` exercised against the real OS ja→en pack:
+    /// a single sentence in, a non-empty English translation out. Cancelled
+    /// on machines without macOS 26 / the pack so the suite stays green.
+    @Test("AppleSessionEngine delivers a real on-device translation")
+    func appleSessionEngineDeliversRealTranslation() async throws {
+        guard #available(macOS 26.0, *) else {
+            try Test.cancel("TranslationSession(installedSource:) requires macOS 26")
+        }
+        guard await TestEnvironment.jaToENPackInstalled() else {
+            try Test.cancel("ja→en translation pack is not installed")
+        }
+        let session = TranslationSession(
+            installedSource: Locale.Language(identifier: "ja"),
+            target: Locale.Language(identifier: "en")
+        )
+        let engine = AppleSessionEngine(session)
+
+        let translations = try await engine.translate([sentenceText])
+
+        #expect(translations.count == 1)
+        #expect(!translations[0].isEmpty)
+    }
+}
+
+/// Closure-backed `TranslationEngine` so queue tests stay hermetic. Lock
+/// guards the batch recording because `translate` runs off the main actor.
+private final class MockTranslationEngine: TranslationEngine, @unchecked Sendable {
+    let preferredBatchSize: Int
+    var onRetry: (@Sendable (RetryProgress) -> Void)?
+
+    private let handler: @Sendable ([String]) async throws -> [String]
+    private let lock = NSLock()
+    private var batches: [[String]] = []
+
+    init(
+        preferredBatchSize: Int = 16,
+        handler: @escaping @Sendable ([String]) async throws -> [String]
+    ) {
+        self.preferredBatchSize = preferredBatchSize
+        self.handler = handler
+    }
+
+    var recordedBatches: [[String]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return batches
+    }
+
+    func translate(_ texts: [String]) async throws -> [String] {
+        lock.lock()
+        batches.append(texts)
+        lock.unlock()
+        return try await handler(texts)
     }
 }
 

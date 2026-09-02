@@ -52,7 +52,7 @@ struct AppModelTranslationTests {
     func sentenceFlowsThroughQueueIntoEntries() async throws {
         let session = try await makeInstalledJAToENSession()
         let model = AppModel()
-        let worker = Task { await model.translationQueue.run(with: session) }
+        let worker = Task { await model.translationQueue.run(with: AppleSessionEngine(session)) }
         defer { worker.cancel() }
 
         model.sessionController.onSentence?(makeSentence(index: 0, text: sentenceText))
@@ -75,7 +75,7 @@ struct AppModelTranslationTests {
     func repeatSentenceHitsCacheSynchronously() async throws {
         let session = try await makeInstalledJAToENSession()
         let model = AppModel()
-        let worker = Task { await model.translationQueue.run(with: session) }
+        let worker = Task { await model.translationQueue.run(with: AppleSessionEngine(session)) }
         defer { worker.cancel() }
 
         model.sessionController.onSentence?(makeSentence(index: 0, text: sentenceText))
