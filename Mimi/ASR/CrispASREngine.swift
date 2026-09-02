@@ -174,9 +174,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         defer { prepareLock.unlock() }
         // Warm restart: the C session from a previous run is still open —
         // reuse it and skip the multi-second GGUF load + Metal compile.
-        lock.lock()
-        let alreadyOpen = session != nil
-        lock.unlock()
+        let alreadyOpen = lock.withLock { session != nil }
         if alreadyOpen {
             #if DEBUG
                 print("[asr] prepare: reusing warm session (model already loaded)")
@@ -194,9 +192,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         }
         // Publish the handle under the state lock: `close()` nils it there,
         // and finish/runDecode snapshot it there.
-        lock.lock()
-        session = handle
-        lock.unlock()
+        lock.withLock { session = handle }
         if let reason = vadUnavailableReason, !vadUnavailableReported {
             vadUnavailableReported = true
             #if DEBUG
@@ -207,60 +203,58 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     }
 
     func openStream() throws {
-        lock.lock(); defer { lock.unlock() }
-        totalSamples = 0
-        window = []
-        utterance = []
-        utteranceStartSample = 0
-        utteranceGeneration += 1
-        lastDecodeDispatchSample = 0
-        lastPartialSpeechEndSample = 0
-        processedCount = 0
-        decodeInFlight = false
-        vadInFlight = false
-        finishing = false
-        inbox = []
-        lastVADDispatchSample = 0
-        utteranceHasSpeech = false
-        utteranceHasLoudAudio = false
-        vadLastSpeechEndSample = nil
-        vadAnalyzedThroughSample = 0
-        vadFirstSpeechStartSample = nil
-        consecutiveDecodeFailures = 0
-        consecutiveVADFailures = 0
-        vadEnabled = true
+        lock.withLock {
+            totalSamples = 0
+            window = []
+            utterance = []
+            utteranceStartSample = 0
+            utteranceGeneration += 1
+            lastDecodeDispatchSample = 0
+            lastPartialSpeechEndSample = 0
+            processedCount = 0
+            decodeInFlight = false
+            vadInFlight = false
+            finishing = false
+            inbox = []
+            lastVADDispatchSample = 0
+            utteranceHasSpeech = false
+            utteranceHasLoudAudio = false
+            vadLastSpeechEndSample = nil
+            vadAnalyzedThroughSample = 0
+            vadFirstSpeechStartSample = nil
+            consecutiveDecodeFailures = 0
+            consecutiveVADFailures = 0
+            vadEnabled = true
+        }
     }
 
     func push(_ samples: [Float]) {
-        lock.lock()
-        guard session != nil, !finishing else {
-            lock.unlock()
-            return
-        }
-        window.append(contentsOf: samples)
-        if window.count > Self.lengthSamples {
-            window.removeFirst(window.count - Self.lengthSamples)
-        }
-        totalSamples += samples.count
+        lock.withLock {
+            guard session != nil, !finishing else { return }
+            window.append(contentsOf: samples)
+            if window.count > Self.lengthSamples {
+                window.removeFirst(window.count - Self.lengthSamples)
+            }
+            totalSamples += samples.count
 
-        // Every chunk feeds the utterance (bounded by the forced-final cap);
-        // speech vs. silence is the VAD's call, not an energy threshold's.
-        if utterance.isEmpty {
-            utteranceStartSample = totalSamples - samples.count
-        }
-        utterance.append(contentsOf: samples)
+            // Every chunk feeds the utterance (bounded by the forced-final cap);
+            // speech vs. silence is the VAD's call, not an energy threshold's.
+            if utterance.isEmpty {
+                utteranceStartSample = totalSamples - samples.count
+            }
+            utterance.append(contentsOf: samples)
 
-        // RMS backstop: track whether this buffer is not truly silent.
-        var energy: Float = 0
-        for s in samples {
-            energy += s * s
-        }
-        let rms = (energy / Float(max(1, samples.count))).squareRoot()
-        if rms > Self.speechRMS {
-            utteranceHasLoudAudio = true
-        }
+            // RMS backstop: track whether this buffer is not truly silent.
+            var energy: Float = 0
+            for s in samples {
+                energy += s * s
+            }
+            let rms = (energy / Float(max(1, samples.count))).squareRoot()
+            if rms > Self.speechRMS {
+                utteranceHasLoudAudio = true
+            }
 
-        maybeScheduleWorkLocked()
-        lock.unlock()
+            maybeScheduleWorkLocked()
+        }
     }
 }

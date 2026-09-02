@@ -31,10 +31,7 @@ enum ModelVerifier {
               let size = attrs[.size] as? Int64
         else { return false }
         let key = CacheKey(path: file.path, size: size)
-        lock.lock()
-        let cached = verified.contains(key)
-        lock.unlock()
-        if cached {
+        if lock.withLock({ verified.contains(key) }) {
             return true
         }
         do {
@@ -42,9 +39,7 @@ enum ModelVerifier {
         } catch {
             return false
         }
-        lock.lock()
-        verified.insert(key)
-        lock.unlock()
+        lock.withLock { verified.insert(key) }
         return true
     }
 

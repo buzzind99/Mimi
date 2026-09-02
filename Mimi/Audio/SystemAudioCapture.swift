@@ -146,15 +146,14 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
     }
 
     func stop() {
-        stateLock.lock()
-        guard isRunning else {
-            stateLock.unlock()
-            return
+        let wasRunning = stateLock.withLock { () -> Bool in
+            guard isRunning else { return false }
+            isRunning = false
+            accumulated.removeAll(keepingCapacity: true)
+            accumulatedStart = 0
+            return true
         }
-        isRunning = false
-        accumulated.removeAll(keepingCapacity: true)
-        accumulatedStart = 0
-        stateLock.unlock()
+        guard wasRunning else { return }
 
         let stream = self.stream
         self.stream = nil
@@ -183,13 +182,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
 
     /// `SCStreamDelegate` seam: teardown of a dead stream.
     func handleStreamStopped(_ error: Error) {
-        stateLock.lock()
-        guard isRunning else {
-            stateLock.unlock()
-            return
+        let wasRunning = stateLock.withLock { () -> Bool in
+            guard isRunning else { return false }
+            isRunning = false
+            return true
         }
-        isRunning = false
-        stateLock.unlock()
+        guard wasRunning else { return }
         stream = nil
         onIOError?(.streamSetupFailed(error.localizedDescription))
     }
