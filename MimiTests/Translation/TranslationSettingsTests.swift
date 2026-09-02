@@ -212,4 +212,43 @@ struct TranslationSettingsTests {
 
         #expect(settings.activeEngineDescription(fallbackActive: true) == "Google Translate — fallback active")
     }
+
+    // MARK: - Provider metadata
+
+    /// Raw values are Keychain account names and UserDefaults keys — this
+    /// locks them (and the picker labels) against accidental renames.
+    @Test("provider raw values and display names stay stable")
+    func providerIdentityAndDisplayNames() {
+        #expect(TranslationProvider.allCases.map(\.id) == ["apple", "google", "deepl", "openrouter"])
+        #expect(TranslationProvider.apple.displayName == "Apple (on-device)")
+        #expect(TranslationProvider.google.displayName == "Google Translate")
+        #expect(TranslationProvider.deepl.displayName == "DeepL")
+        #expect(TranslationProvider.openrouter.displayName == "OpenRouter")
+    }
+
+    // MARK: - Short keys
+
+    @Test("a key too short for a hint clears any stale hint")
+    func shortKeyClearsStaleHint() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-google-9999", for: .google)
+        #expect(settings.keyHint(for: .google) == "9999")
+
+        try settings.saveKey("", for: .google)
+
+        #expect(settings.keyHint(for: .google) == nil)
+    }
+
+    // MARK: - Garbage persistence
+
+    @Test("a garbage persisted test result degrades to nil")
+    func garbageTestResultDegrades() throws {
+        let suiteName = "test.TranslationSettings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.set("garbage", forKey: "translation.testResult.google")
+
+        let (settings, _) = makeSUT(defaults: defaults)
+
+        #expect(settings.testResult(for: .google) == nil)
+    }
 }

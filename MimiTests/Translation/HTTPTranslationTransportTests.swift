@@ -23,6 +23,16 @@ struct HTTPTranslationTransportTests {
         HTTPURLResponse(url: URL(string: "https://provider.test/translate")!, statusCode: status, httpVersion: nil, headerFields: headers)!
     }
 
+    // MARK: - Default session construction
+
+    /// The production path (no injected `perform`) must configure a real
+    /// `URLSession` without crashing; the round-trip itself needs a network
+    /// and is left to integration.
+    @Test("the default transport builds a real URLSession-backed sender")
+    func defaultConstructionBuildsRealSession() {
+        _ = HTTPTranslationTransport(timeout: 1)
+    }
+
     // MARK: - HTTPS enforcement
 
     @Test("plain-HTTP requests are rejected as network errors")
@@ -112,6 +122,18 @@ struct HTTPTranslationTransportTests {
     func cancellationStaysCancellation() async throws {
         let transport = makeTransport { _ in
             throw URLError(.cancelled)
+        }
+        let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
+
+        await #expect(throws: CancellationError.self) {
+            try await transport.send(request) { _, _ in nil }
+        }
+    }
+
+    @Test("a thrown CancellationError passes through unchanged")
+    func thrownCancellationErrorPassesThrough() async throws {
+        let transport = makeTransport { _ in
+            throw CancellationError()
         }
         let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
 

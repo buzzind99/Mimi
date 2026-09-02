@@ -108,6 +108,18 @@ struct GoogleTranslateEngineTests {
         #expect(thrown == .badResponse("Expected 1 translations, got 0"))
     }
 
+    @Test("an unparseable body surfaces as badResponse")
+    func unparseableBodyThrows() async {
+        let script = Script(response: Self.ok("not json"))
+        let engine = makeEngine(script: script)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await engine.translate(["こんにちは"])
+        }
+
+        #expect(thrown == .badResponse("Unparseable response body"))
+    }
+
     // MARK: - Error mapping
 
     @Test("HTTP errors map into the engine taxonomy", arguments: [

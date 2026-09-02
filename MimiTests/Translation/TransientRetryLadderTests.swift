@@ -129,4 +129,20 @@ struct TransientRetryLadderTests {
             try await ladder.run { throw CancellationError() }
         }
     }
+
+    // MARK: - Status copy
+
+    @Test("status copy renders every engine error")
+    func statusMessageRendersEveryError() {
+        #expect(TranslationEngineError.invalidKey.statusMessage == "Invalid API key")
+        #expect(TranslationEngineError.quotaExceeded.statusMessage == "API quota exceeded")
+        #expect(TranslationEngineError.rateLimited.statusMessage == "Rate limited by the provider")
+        #expect(TranslationEngineError.serverError(503).statusMessage == "Provider server error (503)")
+        #expect(
+            TranslationEngineError.badResponse("boom").statusMessage
+                == "Unexpected provider response: boom"
+        )
+        #expect(TranslationEngineError.network.statusMessage == "Network error")
+        #expect(TranslationEngineError.cancelled.statusMessage == "Cancelled")
+    }
 }

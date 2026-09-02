@@ -90,6 +90,18 @@ struct TranslationConnectionTesterTests {
         #expect(Self.requireFailure(result) == .invalidKey)
     }
 
+    @Test("a DeepL probe with an empty translation fails as badResponse")
+    func deeplEmptyTranslation() async {
+        let deeplURL = DeepLEngine.proEndpoint
+        let transport = HTTPTranslationTransport(timeout: 1) { _ in
+            (Data(#"{"translations":[{"text":""}]}"#.utf8), Self.httpResponse(deeplURL, 200))
+        }
+
+        let result = await TranslationConnectionTester.test(provider: .deepl, key: "k", transport: transport)
+
+        #expect(Self.requireFailure(result) == .badResponse("Provider returned an empty translation"))
+    }
+
     @Test("OpenRouter probes GET /api/v1/key with the bearer key")
     func openRouterKeyProbe() async throws {
         let keyURL = try #require(URL(string: "https://openrouter.ai/api/v1/key"))
