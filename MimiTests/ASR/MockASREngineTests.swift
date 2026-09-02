@@ -1,19 +1,15 @@
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests `MockASREngine`'s pure-Swift pipeline: the RMS speech threshold,
 /// the randomized sentence cadence (`nextSentenceAt`), the single-slot poll
 /// FIFO, sample accounting, and the always-empty finish drain.
-final class MockASREngineTests: XCTestCase {
+@Suite("MockASREngine")
+struct MockASREngineTests {
 
     // MARK: - Fixtures
 
-    private var engine: MockASREngine!
-
-    override func setUp() {
-        super.setUp()
-        engine = MockASREngine()
-    }
+    private let engine = MockASREngine()
 
     /// Constant-amplitude chunk: its RMS equals the amplitude, so 0.01 is
     /// speech (≫ 1e-3 threshold) and 0.0005 is silence (< 1e-3).
@@ -36,79 +32,86 @@ final class MockASREngineTests: XCTestCase {
 
     /// Drains one `.final` out of the engine, asserting its shape.
     private func pollFinal() throws -> EmittedFinal {
-        guard case let .final(text, start, end, lang)? = engine.poll() else {
-            XCTFail("expected a final event")
+        let event = try #require(engine.poll(), "expected a final event")
+        guard case let .final(text, start, end, lang) = event else {
+            Issue.record("expected a .final event, got \(event)")
             throw MissingFinal()
         }
-        return EmittedFinal(
-            text: text, startSample: start, endSample: end, lang: lang
-        )
+        return EmittedFinal(text: text, startSample: start, endSample: end, lang: lang)
     }
 
     // MARK: - prepare / openStream
 
-    func test_prepare_andOpenStream_shouldBeNoThrowNoOps() {
-        XCTAssertNoThrow(try engine.prepare())
-        XCTAssertNoThrow(try engine.openStream())
+    @Test("prepare and openStream are no-throw no-ops")
+    func prepareAndOpenStream() throws {
+        try engine.prepare()
+        try engine.openStream()
 
-        XCTAssertEqual(engine.processedSamples, 0)
-        XCTAssertNil(engine.poll())
+        #expect(engine.processedSamples == 0)
+        #expect(engine.poll() == nil)
     }
 
     // MARK: - isMock / processedSamples
 
-    func test_isMock_shouldBeTrue() {
-        XCTAssertTrue(engine.isMock)
+    @Test("reports itself as the mock engine")
+    func isMockIsTrue() {
+        #expect(engine.isMock)
     }
 
-    func test_processedSamples_whenNothingPushed_shouldBeZero() {
-        XCTAssertEqual(engine.processedSamples, 0)
+    @Test("processedSamples is zero before anything is pushed")
+    func processedSamplesStartAtZero() {
+        #expect(engine.processedSamples == 0)
     }
 
-    func test_push_shouldAccumulateSilenceAndSpeechSamples() {
+    @Test("push accumulates silence and speech samples")
+    func pushAccumulatesSamples() {
         pushSilence(500)
         pushSilence(500)
         pushSpeech(200)
         engine.push([])
 
-        XCTAssertEqual(engine.processedSamples, 1200)
+        #expect(engine.processedSamples == 1200)
     }
 
     // MARK: - RMS speech threshold
 
-    func test_push_whenSilenceOnly_shouldNeverProduceSentences() {
+    @Test("silence-only audio never produces sentences")
+    func silenceNeverProducesSentences() {
         for _ in 0 ..< 100 {
             pushSilence()
-            XCTAssertNil(engine.poll())
+            #expect(engine.poll() == nil)
         }
 
-        XCTAssertNil(engine.poll())
-        XCTAssertEqual(engine.processedSamples, 100_000)
+        #expect(engine.poll() == nil)
+        #expect(engine.processedSamples == 100_000)
     }
 
-    func test_push_whenRMSBelowThreshold_shouldNotCountAsSpeech() {
+    @Test("chunks with an RMS below the speech threshold do not count as speech")
+    func rmsBelowThresholdIsNotSpeech() {
         // 0.0005 constant amplitude → RMS 0.0005 < 1e-3: even 100 chunks of
         // it never reach the initial cadence of 6 speech chunks.
         for _ in 0 ..< 100 {
             engine.push([Float](repeating: 0.0005, count: 1000))
         }
 
-        XCTAssertNil(engine.poll())
+        #expect(engine.poll() == nil)
     }
 
-    func test_push_whenRMSAboveThreshold_shouldCountAsSpeech() {
+    @Test("chunks with an RMS above the speech threshold count as speech")
+    func rmsAboveThresholdIsSpeech() {
         // 0.01 constant amplitude → RMS 0.01 > 1e-3: the 6th chunk crosses
         // the initial cadence and produces a sentence.
         for _ in 0 ..< 6 {
             pushSpeech()
         }
 
-        XCTAssertNotNil(engine.poll())
+        #expect(engine.poll() != nil)
     }
 
     // MARK: - Sentence cadence (nextSentenceAt)
 
-    func test_cadence_whenFewerSpeechChunksThanNextSentenceAt_shouldStaySilent() {
+    @Test("fewer speech chunks than the cadence stays silent")
+    func cadenceBelowThresholdStaysSilent() {
         // Initial cadence is 6 speech chunks; 5 stay silent (including a
         // mixed-in silent chunk that must not advance the counter).
         for _ in 0 ..< 4 {
@@ -117,24 +120,27 @@ final class MockASREngineTests: XCTestCase {
         pushSilence()
         pushSpeech()
 
-        XCTAssertNil(engine.poll())
+        #expect(engine.poll() == nil)
     }
 
-    func test_cadence_whenSpeechChunksReachNextSentenceAt_shouldEmitFinal() throws {
+    @Test("reaching the cadence emits a final with the canned text")
+    func cadenceReachedEmitsFinal() throws {
         for _ in 0 ..< 5 {
             pushSpeech()
-            XCTAssertNil(engine.poll(), "no final before the cadence is reached")
+            #expect(engine.poll() == nil, "no final before the cadence is reached")
         }
         pushSpeech()
 
         let final = try pollFinal()
-        XCTAssertEqual(final.text, "今日はいい天気ですね。")
-        XCTAssertEqual(final.lang, "ja")
-        XCTAssertEqual(final.startSample, 0)
-        XCTAssertEqual(final.endSample, engine.processedSamples)
+
+        #expect(final.text == "今日はいい天気ですね。")
+        #expect(final.lang == "ja")
+        #expect(final.startSample == 0)
+        #expect(final.endSample == engine.processedSamples)
     }
 
-    func test_cadence_afterFirstSentence_shouldEmitSecondWithinRandomWindow() throws {
+    @Test("the second sentence lands within the random cadence window")
+    func secondSentenceWithinRandomWindow() throws {
         // The next cadence lands 5–12 speech chunks after the first final;
         // 18 pushes guarantee it regardless of the draw.
         for _ in 0 ..< 6 {
@@ -147,29 +153,33 @@ final class MockASREngineTests: XCTestCase {
         }
         let second = try pollFinal()
 
-        XCTAssertEqual(second.text, "これから配信を始めます、よろしくお願いします。")
-        XCTAssertEqual(second.startSample, first.endSample)
-        XCTAssertEqual(second.endSample, engine.processedSamples)
+        #expect(second.text == "これから配信を始めます、よろしくお願いします。")
+        #expect(second.startSample == first.endSample)
+        #expect(second.endSample == engine.processedSamples)
     }
 
     // MARK: - poll FIFO + nil-when-empty
 
-    func test_poll_whenPending_shouldDrainExactlyOnce() {
+    @Test("a drained final is not redelivered")
+    func pollDrainsExactlyOnce() {
         for _ in 0 ..< 6 {
             pushSpeech()
         }
-        XCTAssertNotNil(engine.poll())
+        #expect(engine.poll() != nil)
 
-        XCTAssertNil(engine.poll(), "single slot: drained finals are not redelivered")
+        #expect(engine.poll() == nil, "single slot: drained finals are not redelivered")
     }
 
-    func test_poll_whenCalledRepeatedlyBeforeCadence_shouldReturnNilEachTime() {
+    @Test("repeated polls before the cadence return nil each time")
+    func pollBeforeCadenceReturnsNil() {
         pushSpeech()
-        XCTAssertNil(engine.poll())
-        XCTAssertNil(engine.poll())
+
+        #expect(engine.poll() == nil)
+        #expect(engine.poll() == nil)
     }
 
-    func test_poll_acrossSentences_shouldDeliverCannedTextsInOrder() {
+    @Test("sentences deliver the canned texts in rotation order")
+    func cannedTextsDeliverInRotation() {
         // 6 sentences wrap the canned list (index % count); each cadence
         // needs at most 12 speech chunks, so 200 pushes always suffice.
         let canned = [
@@ -189,22 +199,24 @@ final class MockASREngineTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(texts, canned + [canned[0]], "canned texts delivered in rotation order")
+        #expect(texts == canned + [canned[0]], "canned texts delivered in rotation order")
     }
 
     // MARK: - finish
 
-    func test_finish_whenNothingPending_shouldReturnNoEvents() {
+    @Test("finish with nothing pending returns no events")
+    func finishWithoutPendingReturnsNoEvents() {
         pushSilence()
 
-        XCTAssertTrue(engine.finish().isEmpty)
+        #expect(engine.finish().isEmpty)
     }
 
-    func test_finish_withAPendingFinal_shouldStillReturnNoEvents() {
+    @Test("finish never flushes a pending final")
+    func finishDropsPendingFinal() {
         for _ in 0 ..< 6 {
             pushSpeech()
         }
-        XCTAssertNotNil(engine.poll()) // first cadence drained
+        #expect(engine.poll() != nil) // first cadence drained
 
         for _ in 0 ..< 18 {
             pushSpeech()
@@ -212,6 +224,6 @@ final class MockASREngineTests: XCTestCase {
 
         // The mock never flushes its pending final on finish — the drain is
         // always empty (session teardown drops the tail).
-        XCTAssertTrue(engine.finish().isEmpty)
+        #expect(engine.finish().isEmpty)
     }
 }

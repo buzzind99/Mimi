@@ -1,5 +1,6 @@
+import Foundation
 @testable import Mimi
-import XCTest
+import Testing
 
 /// Tests the `CrispASREngine` paths reachable without a loaded GGUF model or
 /// a Metal pipeline: the init bind-failure throw (assertable only when the
@@ -7,93 +8,115 @@ import XCTest
 /// reset, `push`'s session guard, `poll` on an empty inbox, `close`
 /// idempotency, and `finish`'s sessionless drain (no in-flight jobs →
 /// immediate empty drain).
-final class CrispASREngineTests: XCTestCase {
+///
+/// Excluded (see the exclusions inventory): the decode/VAD/session internals
+/// — real transcription, endpointing, and the drain's in-flight waits need a
+/// bound native dylib + GGUF model + Metal pipeline. Tests that exercise the
+/// engine shell cancel (`try Test.cancel`) when the dylib can't bind; the
+/// bind-failure test cancels on the inverse condition.
+@Suite("CrispASREngine")
+struct CrispASREngineTests {
 
     // MARK: - Fixtures
 
     /// Exists only to prove the model-file guard fires before any C call.
     private static let missingModelURL = URL(fileURLWithPath: "/tmp/mimi-crisp-missing.gguf")
 
-    private var engine: CrispASREngine?
+    private let engine: CrispASREngine?
 
-    override func setUp() {
-        super.setUp()
+    init() {
         // Succeeds iff the dylib binds (init never touches the model file).
         engine = try? CrispASREngine(modelPath: Self.missingModelURL)
     }
 
     private func requireEngine() throws -> CrispASREngine {
         guard let engine else {
-            throw XCTSkip("native runtime is not available in this environment")
+            try Test.cancel("native runtime is not available in this environment")
         }
         return engine
     }
 
     // MARK: - init / binding
 
-    func test_init_whenDylibUnavailable_shouldThrowRuntimeNotFound() throws {
-        try XCTSkipIf(engine != nil, "native runtime is available in this environment")
-
-        XCTAssertThrowsError(try CrispASREngine(modelPath: Self.missingModelURL)) { error in
-            guard case let ASREngineError.runtimeNotFound(detail) = error else {
-                return XCTFail("expected .runtimeNotFound, got \(error)")
-            }
-            XCTAssertFalse(detail.isEmpty)
+    @Test("init throws .runtimeNotFound when the dylib is unavailable")
+    func initThrowsRuntimeNotFoundWhenDylibUnavailable() throws {
+        guard engine == nil else {
+            try Test.cancel("native runtime is available in this environment")
         }
+
+        let thrown = #expect(throws: ASREngineError.self) {
+            try CrispASREngine(modelPath: Self.missingModelURL)
+        }
+        let error = try #require(thrown)
+
+        guard case let .runtimeNotFound(detail) = error else {
+            Issue.record("expected .runtimeNotFound, got \(error)")
+            return
+        }
+        #expect(!detail.isEmpty)
     }
 
-    func test_isMock_shouldBeFalse() throws {
+    @Test("the native engine is not a mock")
+    func isMockIsFalse() throws {
         let engine = try requireEngine()
 
-        XCTAssertEqual(engine.isMock, false)
+        #expect(!engine.isMock)
     }
 
     // MARK: - prepare (missing model)
 
-    func test_prepare_whenModelMissing_shouldThrowModelNotFoundWithPath() throws {
+    @Test("prepare throws .modelNotFound with the missing model's path")
+    func prepareWhenModelMissingThrowsModelNotFound() throws {
         let engine = try requireEngine()
 
-        XCTAssertThrowsError(try engine.prepare()) { error in
-            guard case let ASREngineError.modelNotFound(path) = error else {
-                return XCTFail("expected .modelNotFound, got \(error)")
-            }
-            XCTAssertEqual(path, Self.missingModelURL.path)
-            XCTAssertEqual(
-                (error as? LocalizedError)?.errorDescription,
-                "ASR model not found at \(Self.missingModelURL.path)."
-            )
+        let thrown = #expect(throws: ASREngineError.self) {
+            try engine.prepare()
         }
+        let error = try #require(thrown)
+
+        guard case let .modelNotFound(path) = error else {
+            Issue.record("expected .modelNotFound, got \(error)")
+            return
+        }
+        #expect(path == Self.missingModelURL.path)
+        #expect(
+            error.errorDescription == "ASR model not found at \(Self.missingModelURL.path)."
+        )
     }
 
     // MARK: - Sessionless stream surface
 
-    func test_openStream_whenSessionNotPrepared_shouldResetWithoutSideEffects() throws {
+    @Test("openStream without a prepared session resets without side effects")
+    func openStreamWhenSessionNotPrepared() throws {
         let engine = try requireEngine()
 
-        XCTAssertNoThrow(try engine.openStream())
+        try engine.openStream()
 
-        XCTAssertEqual(engine.processedSamples, 0)
-        XCTAssertNil(engine.poll())
+        #expect(engine.processedSamples == 0)
+        #expect(engine.poll() == nil)
     }
 
-    func test_push_whenSessionNotOpen_shouldBeIgnored() throws {
+    @Test("push without an open session is ignored")
+    func pushWhenSessionNotOpenIsIgnored() throws {
         let engine = try requireEngine()
 
         engine.push([Float](repeating: 0.01, count: 2560))
 
-        XCTAssertEqual(engine.processedSamples, 0, "push without a session must not count samples")
-        XCTAssertNil(engine.poll())
+        #expect(engine.processedSamples == 0, "push without a session must not count samples")
+        #expect(engine.poll() == nil)
     }
 
-    func test_poll_whenInboxEmpty_shouldReturnNil() throws {
+    @Test("poll on an empty inbox returns nil")
+    func pollWhenInboxEmpty() throws {
         let engine = try requireEngine()
 
-        XCTAssertNil(engine.poll())
+        #expect(engine.poll() == nil)
     }
 
     // MARK: - finish (sessionless drain)
 
-    func test_finish_whenSessionless_shouldReturnImmediatelyWithNoEvents() throws {
+    @Test("finish without a session drains immediately with no events")
+    func finishWhenSessionless() throws {
         let engine = try requireEngine()
 
         // No session → no job can ever have been dispatched, so the drain
@@ -101,19 +124,20 @@ final class CrispASREngineTests: XCTestCase {
         // semaphore) and the empty inbox drains to nothing.
         let drained = engine.finish()
 
-        XCTAssertTrue(drained.isEmpty)
-        XCTAssertNil(engine.poll())
+        #expect(drained.isEmpty)
+        #expect(engine.poll() == nil)
     }
 
     // MARK: - close
 
-    func test_close_whenCalledTwice_shouldStaySafe() throws {
+    @Test("closing twice without a C session stays safe")
+    func closeTwiceStaysSafe() throws {
         let engine = try requireEngine()
 
         engine.close() // no C session open — must be a no-op
         engine.close()
 
-        XCTAssertNil(engine.poll())
-        XCTAssertEqual(engine.processedSamples, 0)
+        #expect(engine.poll() == nil)
+        #expect(engine.processedSamples == 0)
     }
 }
