@@ -259,8 +259,38 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
             return nil
         }
 
-        // Two-pass: query the exact required size first (it includes the PCM
-        // payload, not just the list struct), then fill the list.
+        guard let copy = audioBufferListCopy(from: sampleBuffer) else { return nil }
+        defer { copy.cleanup() }
+        return downmixToMono(
+            buffers: copy.buffers,
+            frames: copy.frames,
+            channels: copy.channels,
+            interleaved: copy.interleaved
+        )
+    }
+
+    /// Raw copy of a sample buffer's `AudioBufferList` plus its PCM layout.
+    /// `abl` points into memory owned by this struct; the caller must invoke
+    /// `cleanup()` once the buffer pointers are no longer needed (the
+    /// retained block buffer keeps the PCM payload alive until then).
+    private struct AudioBufferListCopy {
+        let abl: UnsafeMutablePointer<AudioBufferList>
+        let blockBuffer: CMBlockBuffer
+        let buffers: UnsafeMutableAudioBufferListPointer
+        let frames: Int
+        let channels: Int
+        let interleaved: Bool
+
+        func cleanup() {
+            abl.deallocate()
+        }
+    }
+
+    /// Copies the buffer list out of the sample buffer (two-pass: query the
+    /// exact required size first — it includes the PCM payload, not just the
+    /// list struct — then fill the list) and analyzes its layout. On failure
+    /// the copy is freed and `nil` returned.
+    private func audioBufferListCopy(from sampleBuffer: CMSampleBuffer) -> AudioBufferListCopy? {
         var listSize = 0
         var status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sampleBuffer, bufferListSizeNeededOut: &listSize,
@@ -277,8 +307,13 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
         let raw = UnsafeMutableRawPointer.allocate(
             byteCount: listSize, alignment: MemoryLayout<AudioBufferList>.alignment
         )
-        defer { raw.deallocate() }
         let abl = raw.assumingMemoryBound(to: AudioBufferList.self)
+        var copy: AudioBufferListCopy?
+        defer {
+            if copy == nil {
+                raw.deallocate()
+            }
+        }
         memset(abl, 0, listSize)
 
         var blockBuffer: CMBlockBuffer?
@@ -294,17 +329,17 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
             print("CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer: \(status)")
             return nil
         }
-        // The payload lives in the retained block buffer; keep it alive while
-        // the buffer list pointers are read below.
+        // The payload lives in the retained block buffer; it must outlive
+        // the reads of the buffer list pointers below.
         guard let blockBuffer, blockBuffer.dataLength > 0 else { return nil }
 
         let buffers = UnsafeMutableAudioBufferListPointer(abl)
         let nBuffers = Int(abl.pointee.mNumberBuffers)
-        guard nBuffers >= 1, let firstData = buffers[0].mData else { return nil }
+        guard nBuffers >= 1, buffers[0].mData != nil else { return nil }
 
-        var frames = 0
         var channels = 0
         var interleaved = false
+        var frames = 0
         if nBuffers == 1 {
             channels = max(1, Int(buffers[0].mNumberChannels))
             interleaved = channels > 1
@@ -315,6 +350,23 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
             frames = Int(buffers[0].mDataByteSize) / MemoryLayout<Float>.size
         }
         guard frames > 0, channels > 0 else { return nil }
+
+        copy = AudioBufferListCopy(
+            abl: abl, blockBuffer: blockBuffer, buffers: buffers,
+            frames: frames, channels: channels, interleaved: interleaved
+        )
+        return copy
+    }
+
+    /// Averages all channels to mono. `buffers` must stay valid (its backing
+    /// memory is freed by the caller after this returns).
+    private func downmixToMono(
+        buffers: UnsafeMutableAudioBufferListPointer,
+        frames: Int,
+        channels: Int,
+        interleaved: Bool
+    ) -> [Float] {
+        let firstData = buffers[0].mData!
 
         var mono = [Float](repeating: 0, count: frames)
         let scale = 1.0 / Float(channels)

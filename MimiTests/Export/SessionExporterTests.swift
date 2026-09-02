@@ -35,10 +35,10 @@ struct SessionExporterTests {
         return SessionEntry(sentence: sentence)
     }
 
-    private func decodeDocument(from data: Data) throws -> SessionExporter.JSONSessionDocument {
+    private func decodeDocument(from data: Data) throws -> JSONSessionDocument {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(SessionExporter.JSONSessionDocument.self, from: data)
+        return try decoder.decode(JSONSessionDocument.self, from: data)
     }
 
     private func makeEntry(start: Double, end: Double, index: Int) -> SessionEntry {

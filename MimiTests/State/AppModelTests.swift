@@ -292,7 +292,7 @@ struct AppModelTests {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let doc = try decoder.decode(SessionExporter.JSONSessionDocument.self, from: data)
+        let doc = try decoder.decode(JSONSessionDocument.self, from: data)
         #expect(doc.schemaVersion == 1)
         #expect(doc.session.sourceLang == "ja")
         #expect(doc.session.targetLang == "en")
@@ -316,7 +316,7 @@ struct AppModelTests {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let doc = try decoder.decode(SessionExporter.JSONSessionDocument.self, from: data)
+        let doc = try decoder.decode(JSONSessionDocument.self, from: data)
         #expect(doc.sentences[0].translations == [
             SentenceTranslation(lang: "en", text: translationText)
         ])

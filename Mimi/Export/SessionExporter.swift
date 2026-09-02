@@ -125,52 +125,52 @@ enum SessionExporter {
         let doc = JSONSessionDocument(schemaVersion: 1, session: session, sentences: sentences)
         return try encoder.encode(doc)
     }
+}
 
-    // MARK: - Document shape (forward-compatible; languages read from fields)
+// MARK: - Document shape (forward-compatible; languages read from fields)
 
-    struct JSONSessionDocument: Codable {
-        let schemaVersion: Int
-        let session: JSONSession
-        let sentences: [JSONSentence]
+struct JSONSessionDocument: Codable {
+    let schemaVersion: Int
+    let session: JSONSession
+    let sentences: [JSONSentence]
 
-        enum CodingKeys: String, CodingKey {
-            case schemaVersion = "schema_version"
-            case session
-            case sentences
-        }
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case session
+        case sentences
     }
+}
 
-    struct JSONSession: Codable {
-        let startedAt: Date
-        let sourceLang: String?
-        let targetLang: String?
-        let model: String?
-        let chunkMS: Int
+struct JSONSession: Codable {
+    let startedAt: Date
+    let sourceLang: String?
+    let targetLang: String?
+    let model: String?
+    let chunkMS: Int
 
-        enum CodingKeys: String, CodingKey {
-            case startedAt = "started_at"
-            case sourceLang = "source_lang"
-            case targetLang = "target_lang"
-            case model
-            case chunkMS = "chunk_ms"
-        }
+    enum CodingKeys: String, CodingKey {
+        case startedAt = "started_at"
+        case sourceLang = "source_lang"
+        case targetLang = "target_lang"
+        case model
+        case chunkMS = "chunk_ms"
     }
+}
 
-    struct JSONSentence: Codable {
-        let index: Int
-        let startS: Double
-        let endS: Double
-        let lang: String
-        let transcript: String
-        let translations: [SentenceTranslation]
+struct JSONSentence: Codable {
+    let index: Int
+    let startS: Double
+    let endS: Double
+    let lang: String
+    let transcript: String
+    let translations: [SentenceTranslation]
 
-        enum CodingKeys: String, CodingKey {
-            case index
-            case startS = "start_s"
-            case endS = "end_s"
-            case lang
-            case transcript
-            case translations
-        }
+    enum CodingKeys: String, CodingKey {
+        case index
+        case startS = "start_s"
+        case endS = "end_s"
+        case lang
+        case transcript
+        case translations
     }
 }

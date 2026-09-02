@@ -99,50 +99,28 @@ final class TranslationQueue {
                 setStatus(.translating)
                 inFlight = true
                 do {
-                    if batch.count == 1 {
-                        let response = try await session.translate(batch[0].text)
-                        deliver(batch[0], SentenceTranslation(
-                            lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                            text: response.targetText
-                        ))
-                    } else {
-                        let responses = try await session.translations(
-                            from: batch.map { TranslationSession.Request(sourceText: $0.text) }
-                        )
-                        for (sentence, response) in zip(batch, responses) {
-                            deliver(sentence, SentenceTranslation(
-                                lang: response.targetLanguage.languageCode?.identifier ?? "en",
-                                text: response.targetText
-                            ))
-                        }
+                    for (sentence, pair) in try await translateBatch(batch, using: session) {
+                        deliver(sentence, pair)
                     }
                     setStatus(.ready)
-                } catch is CancellationError {
-                    // Configuration invalidated / task torn down: re-queue
-                    // and exit; `pending` survives for the next run.
-                    pending.insert(contentsOf: batch, at: 0)
-                    if token == generation {
-                        inFlight = false
-                        setStatus(.idle)
-                    }
-                    return false
                 } catch {
+                    // Cancellation (configuration invalidated / task torn
+                    // down) re-queues and exits like any failure; `pending`
+                    // survives for the next run.
                     pending.insert(contentsOf: batch, at: 0)
                     if token == generation {
                         inFlight = false
-                        setStatus(.unavailable(Self.describe(error)))
+                        if error is CancellationError {
+                            setStatus(.idle)
+                        } else {
+                            setStatus(.unavailable(Self.describe(error)))
+                        }
                     }
                     return false
                 }
                 inFlight = false
             }
             return true
-        }
-
-        /// Posts a result and seeds the repeat-sentence cache.
-        func deliver(_ sentence: Sentence, _ pair: SentenceTranslation) {
-            cache.setObject(TranslationBox(pair), forKey: sentence.text as NSString)
-            onResult?(sentence.index, pair)
         }
 
         // Replay anything that arrived before a session existed.
@@ -189,6 +167,35 @@ final class TranslationQueue {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return true
+    }
+
+    /// Translates one batch in a single session round-trip (batches amortize
+    /// the call during bursts). Returns sentences paired with translations.
+    private func translateBatch(
+        _ batch: [Sentence], using session: TranslationSession
+    ) async throws -> [(Sentence, SentenceTranslation)] {
+        if batch.count == 1 {
+            let response = try await session.translate(batch[0].text)
+            return [(batch[0], SentenceTranslation(
+                lang: response.targetLanguage.languageCode?.identifier ?? "en",
+                text: response.targetText
+            ))]
+        }
+        let responses = try await session.translations(
+            from: batch.map { TranslationSession.Request(sourceText: $0.text) }
+        )
+        return zip(batch, responses).map { sentence, response in
+            (sentence, SentenceTranslation(
+                lang: response.targetLanguage.languageCode?.identifier ?? "en",
+                text: response.targetText
+            ))
+        }
+    }
+
+    /// Posts a result and seeds the repeat-sentence cache.
+    private func deliver(_ sentence: Sentence, _ pair: SentenceTranslation) {
+        cache.setObject(TranslationBox(pair), forKey: sentence.text as NSString)
+        onResult?(sentence.index, pair)
     }
 
     private func setStatus(_ newStatus: TranslationStatus) {
