@@ -58,6 +58,10 @@ final class CrispASRLibrary {
     ) -> Int32
     private typealias FnVadFree = @convention(c) (UnsafeMutablePointer<Float>?) -> Void
 
+    /// `n_threads` for `crispasr_session_open_explicit` — see the vendored
+    /// ABI header `Mimi/native/include/crispasr/crispasr_session.h`.
+    private static let sessionThreads: Int32 = 4
+
     private var fnSetGpuBackend: FnSetGpuBackend!
     private var fnOpenExplicit: FnOpenExplicit!
     private var fnSessionClose: FnSessionClose!
@@ -141,7 +145,7 @@ final class CrispASRLibrary {
         let backendStorage = backend.utf8CString
         return pathStorage.withUnsafeBufferPointer { path in
             backendStorage.withUnsafeBufferPointer { backend in
-                fnOpenExplicit(path.baseAddress, backend.baseAddress, 4)
+                fnOpenExplicit(path.baseAddress, backend.baseAddress, Self.sessionThreads)
             }
         }
     }
