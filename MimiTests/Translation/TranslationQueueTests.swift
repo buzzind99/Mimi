@@ -1,13 +1,22 @@
+import Foundation
 @testable import Mimi
+import Testing
 @preconcurrency import Translation
-import XCTest
 
-/// Tests `TranslationQueue` handler wiring, cache-hit enqueue, retry reset, and
-/// drain bounds. The delivery paths run against the real OS ja→en pack via
-/// `TranslationSession(installedSource:)` (macOS 26+; skipped when the pack is
-/// missing) so the enqueue cache can be seeded through the handler loop.
+/// Tests `TranslationQueue` handler wiring, cache-hit enqueue, retry reset,
+/// and drain bounds. The delivery paths run against the real OS ja→en pack
+/// via `TranslationSession(installedSource:)` (macOS 26+ with the pack
+/// installed; the session factories `try Test.cancel` otherwise over the
+/// shared `TestEnvironment` probes) so the enqueue cache can be seeded
+/// through the handler loop.
+///
+/// Swift Testing confirmations have no timeout, so every wait inside a
+/// confirmation scope is bounded by `waitUntil(timeout:)` — on timeout the
+/// scope exits un-confirmed and the confirmation records the issue instead
+/// of hanging.
 @MainActor
-final class TranslationQueueTests: XCTestCase {
+@Suite("TranslationQueue")
+struct TranslationQueueTests {
 
     // MARK: - Fixtures
 
@@ -28,19 +37,28 @@ final class TranslationQueueTests: XCTestCase {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
     }
 
+    /// Bounded poll for a condition. Confirmation scopes rely on this for
+    /// termination: it gives up after `timeout`, leaving the confirmation
+    /// un-fulfilled so the scope exit records the issue.
+    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     /// Real session for the installed ja→en pair. `translate` runs locally once
-    /// the pack is present (no prompts); skipped otherwise so the suite stays
+    /// the pack is present (no prompts); cancelled otherwise so the suite stays
     /// green on machines without the pack.
     private func makeInstalledJAToENSession() async throws -> TranslationSession {
         guard #available(macOS 26.0, *) else {
-            throw XCTSkip("TranslationSession(installedSource:) requires macOS 26")
+            try Test.cancel("TranslationSession(installedSource:) requires macOS 26")
+        }
+        guard await TestEnvironment.jaToENPackInstalled() else {
+            try Test.cancel("ja→en translation pack is not installed")
         }
         let source = Locale.Language(identifier: "ja")
         let target = Locale.Language(identifier: "en")
-        let availability = LanguageAvailability()
-        guard await availability.status(from: source, to: target) == .installed else {
-            throw XCTSkip("ja→en translation pack is not installed")
-        }
         return TranslationSession(installedSource: source, target: target)
     }
 
@@ -50,23 +68,21 @@ final class TranslationQueueTests: XCTestCase {
     /// so the installed ja→en pair gates it as a proxy for "ja pack present".
     private func makeUnsupportedTargetSession() async throws -> TranslationSession {
         guard #available(macOS 26.0, *) else {
-            throw XCTSkip("TranslationSession(installedSource:) requires macOS 26")
+            try Test.cancel("TranslationSession(installedSource:) requires macOS 26")
+        }
+        guard await TestEnvironment.jaToENPackInstalled() else {
+            try Test.cancel("ja translation pack is not installed")
         }
         let source = Locale.Language(identifier: "ja")
-        let availability = LanguageAvailability()
-        guard await availability.status(
-            from: source, to: Locale.Language(identifier: "en")
-        ) == .installed else {
-            throw XCTSkip("ja translation pack is not installed")
-        }
         return TranslationSession(installedSource: source, target: Locale.Language(identifier: "zz"))
     }
 
     // MARK: - setHandlers
 
-    func test_setHandlers_whenStatusChanges_shouldInvokeStatusHandler() {
+    @Test("the status handler observes status changes")
+    func statusHandlerObservesChanges() {
         let (queue, sink) = makeSUT()
-        // Result-handler wiring is exercised by the cache-hit tests below.
+        // Result-handler wiring is exercised by the delivery tests below.
         queue.setHandlers(
             result: { _, _ in },
             status: { sink.receive(status: $0) }
@@ -74,12 +90,13 @@ final class TranslationQueueTests: XCTestCase {
 
         queue.resetForRetry()
 
-        XCTAssertEqual(sink.statuses, [.idle])
+        #expect(sink.statuses == [.idle])
     }
 
     // MARK: - resetForRetry
 
-    func test_resetForRetry_whenIdle_shouldClearStatusToIdle() {
+    @Test("resetForRetry from idle republishes idle")
+    func resetForRetryFromIdleRepublishesIdle() {
         let (queue, sink) = makeSUT()
         queue.setHandlers(
             result: { _, _ in },
@@ -88,102 +105,103 @@ final class TranslationQueueTests: XCTestCase {
 
         queue.resetForRetry()
 
-        XCTAssertEqual(queue.status, .idle)
-        XCTAssertEqual(sink.statuses, [.idle])
+        #expect(queue.status == .idle)
+        #expect(sink.statuses == [.idle])
     }
 
     // MARK: - drain
 
-    func test_drain_whenNothingPending_shouldReturnTrue() async {
+    @Test("drain with nothing pending succeeds")
+    func drainWithNothingPendingSucceeds() async {
         let queue = TranslationQueue()
 
         let drained = await queue.drain(timeout: 0.05)
 
-        XCTAssertTrue(drained)
+        #expect(drained)
     }
 
     /// A sentence enqueued with no worker attached (no `run(with:)` yet) sits
     /// in `pending`, so a bounded drain must time out instead of completing.
-    func test_drain_whenPendingWithoutWorker_shouldTimeOut() async {
+    @Test("drain times out with pending work and no worker")
+    func drainWithoutWorkerTimesOut() async {
         let queue = TranslationQueue()
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
 
         let drained = await queue.drain(timeout: 0.05)
 
-        XCTAssertFalse(drained)
+        #expect(!drained)
     }
 
     // MARK: - run(with:) single delivery + resetForRetry from non-idle
 
-    func test_run_whenSingleSentenceEnqueued_shouldDeliverThroughStatusCycle() async throws {
+    @Test("a single enqueue is delivered through the status cycle")
+    func singleEnqueueDeliversThroughStatusCycle() async throws {
         let session = try await makeInstalledJAToENSession()
         let (queue, sink) = makeSUT()
-        let delivered = expectation(description: "translation delivered")
-        queue.setHandlers(
-            result: { index, translation in
-                sink.receive(index: index, translation: translation)
-                delivered.fulfill()
-            },
-            status: { sink.receive(status: $0) }
-        )
-        let worker = Task { await queue.run(with: session) }
-        defer { worker.cancel() }
+        await confirmation("translation delivered") { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { sink.receive(status: $0) }
+            )
+            let worker = Task { await queue.run(with: session) }
+            defer { worker.cancel() }
 
-        queue.enqueue(makeSentence(index: 0, text: sentenceText))
-        await fulfillment(of: [delivered], timeout: resultTimeout)
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
+        }
 
-        XCTAssertEqual(sink.results.count, 1)
-        XCTAssertEqual(sink.results[0].index, 0)
-        XCTAssertEqual(sink.results[0].translation.lang, "en")
-        XCTAssertFalse(sink.results[0].translation.text.isEmpty)
-        XCTAssertEqual(sink.statuses, [.ready, .translating, .ready])
+        let delivery = try #require(sink.results.first)
+        #expect(sink.results.count == 1)
+        #expect(delivery.index == 0)
+        #expect(delivery.translation.lang == "en")
+        #expect(!delivery.translation.text.isEmpty)
+        #expect(sink.statuses == [.ready, .translating, .ready])
 
         // Retry reset also clears a non-idle (.ready) status.
         queue.resetForRetry()
-        XCTAssertEqual(queue.status, .idle)
-        XCTAssertEqual(sink.statuses, [.ready, .translating, .ready, .idle])
+        #expect(queue.status == .idle)
+        #expect(sink.statuses == [.ready, .translating, .ready, .idle])
     }
 
     // MARK: - run(with:) wake loop
 
     /// Enqueues while the worker is already parked in the wake loop — the
     /// incremental path that keeps one session alive for follow-up sentences.
-    func test_run_whenEnqueuedWhileWorkerIdle_shouldWakeAndDeliver() async throws {
+    @Test("an enqueue on an idle worker wakes the loop and delivers")
+    func enqueueOnIdleWorkerWakesAndDelivers() async throws {
         let session = try await makeInstalledJAToENSession()
         let (queue, sink) = makeSUT()
-        let first = expectation(description: "first translation delivered")
-        let second = expectation(description: "second translation delivered")
-        queue.setHandlers(
-            result: { index, translation in
-                sink.receive(index: index, translation: translation)
-                if index == 0 {
-                    first.fulfill()
-                } else {
-                    second.fulfill()
-                }
-            },
-            status: { sink.receive(status: $0) }
-        )
-        let worker = Task { await queue.run(with: session) }
-        defer { worker.cancel() }
+        await confirmation("both translations delivered", expectedCount: 2) { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { sink.receive(status: $0) }
+            )
+            let worker = Task { await queue.run(with: session) }
+            defer { worker.cancel() }
 
-        queue.enqueue(makeSentence(index: 0, text: sentenceText))
-        await fulfillment(of: [first], timeout: resultTimeout)
-        // Wait for the worker to publish .ready again (batch done), so the
-        // second enqueue lands on an idle worker and must wake it.
-        for _ in 0 ..< 500 where queue.status != .ready {
-            try await Task.sleep(nanoseconds: 10_000_000)
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            // Wait for the worker to publish .ready again (batch done), so the
+            // second enqueue lands on an idle worker and must wake it.
+            await waitUntil(timeout: 5) { queue.status == .ready }
+            #expect(queue.status == .ready)
+
+            queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 2 }
         }
-        XCTAssertEqual(queue.status, .ready)
 
-        queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
-        await fulfillment(of: [second], timeout: resultTimeout)
-
-        XCTAssertEqual(sink.results.count, 2)
-        XCTAssertEqual(sink.results[1].index, 1)
-        XCTAssertEqual(sink.results[1].translation.lang, "en")
-        XCTAssertFalse(sink.results[1].translation.text.isEmpty)
-        XCTAssertEqual(sink.statuses, [.ready, .translating, .ready, .translating, .ready])
+        let second = try #require(sink.results.last)
+        #expect(sink.results.count == 2)
+        #expect(second.index == 1)
+        #expect(second.translation.lang == "en")
+        #expect(!second.translation.text.isEmpty)
+        #expect(sink.statuses == [.ready, .translating, .ready, .translating, .ready])
     }
 
     // MARK: - enqueue cache hit
@@ -191,32 +209,34 @@ final class TranslationQueueTests: XCTestCase {
     /// Seeds the cache through the worker's delivery path, then re-enqueues the
     /// same text under a new index: the cached result must post synchronously
     /// at enqueue time and never enter `pending`.
-    func test_enqueue_whenCacheHit_shouldPostSynchronouslyAndBypassPending() async throws {
+    @Test("a repeat enqueue posts the cached result synchronously, bypassing pending")
+    func cacheHitPostsSynchronouslyAndBypassesPending() async throws {
         let session = try await makeInstalledJAToENSession()
         let (queue, sink) = makeSUT()
-        let seeded = expectation(description: "seed result delivered")
-        seeded.assertForOverFulfill = false
-        queue.setHandlers(
-            result: { index, translation in
-                sink.receive(index: index, translation: translation)
-                seeded.fulfill()
-            },
-            status: { sink.receive(status: $0) }
-        )
-        let worker = Task { await queue.run(with: session) }
-        defer { worker.cancel() }
+        try await confirmation("results delivered", expectedCount: 1...) { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { sink.receive(status: $0) }
+            )
+            let worker = Task { await queue.run(with: session) }
+            defer { worker.cancel() }
 
-        queue.enqueue(makeSentence(index: 0, text: sentenceText))
-        await fulfillment(of: [seeded], timeout: resultTimeout)
-        let seed = sink.results[0].translation
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            let seed = try #require(sink.results.first).translation
 
-        queue.enqueue(makeSentence(index: 5, text: sentenceText))
+            queue.enqueue(makeSentence(index: 5, text: sentenceText))
 
-        XCTAssertEqual(sink.results.count, 2, "cache hit must post without awaiting")
-        XCTAssertEqual(sink.results[1].index, 5)
-        XCTAssertEqual(sink.results[1].translation, seed)
-        let drained = await queue.drain(timeout: 0.05)
-        XCTAssertTrue(drained, "cache hit must bypass pending")
+            #expect(sink.results.count == 2, "cache hit must post without awaiting")
+            let cached = try #require(sink.results.last)
+            #expect(cached.index == 5)
+            #expect(cached.translation == seed)
+            let drained = await queue.drain(timeout: 0.05)
+            #expect(drained, "cache hit must bypass pending")
+        }
     }
 
     // MARK: - run(with:) cancellation
@@ -224,7 +244,8 @@ final class TranslationQueueTests: XCTestCase {
     /// Cancelling the worker before its body runs makes `session.translate`
     /// throw `CancellationError` deterministically: the sentence must be
     /// re-queued for the next run and the status returned to `.idle`.
-    func test_run_whenCancelledBeforeStart_shouldRequeueAndReturnToIdle() async throws {
+    @Test("a worker cancelled before starting re-queues the sentence and returns to idle")
+    func cancelledBeforeStartRequeuesAndReturnsToIdle() async throws {
         let session = try await makeInstalledJAToENSession()
         let (queue, sink) = makeSUT()
         queue.setHandlers(
@@ -240,10 +261,10 @@ final class TranslationQueueTests: XCTestCase {
         worker.cancel()
         await worker.value
 
-        XCTAssertTrue(sink.results.isEmpty)
-        XCTAssertEqual(sink.statuses, [.ready, .translating, .idle])
+        #expect(sink.results.isEmpty)
+        #expect(sink.statuses == [.ready, .translating, .idle])
         let drained = await queue.drain(timeout: 0.05)
-        XCTAssertFalse(drained, "cancelled work must be re-queued, not lost")
+        #expect(!drained, "cancelled work must be re-queued, not lost")
     }
 
     // MARK: - run(with:) batch delivery
@@ -251,27 +272,28 @@ final class TranslationQueueTests: XCTestCase {
     /// Both enqueues happen before the (main-actor) worker resumes, so the
     /// worker must translate them as one batched round-trip: one
     /// translating→ready cycle for two results, FIFO order preserved.
-    func test_run_whenBurstEnqueued_shouldDeliverAsSingleBatchInOrder() async throws {
+    @Test("a burst of enqueues is delivered as one batched round-trip, in order")
+    func burstEnqueueDeliversAsSingleBatchInOrder() async throws {
         let session = try await makeInstalledJAToENSession()
         let (queue, sink) = makeSUT()
-        let delivered = expectation(description: "batch delivered")
-        delivered.expectedFulfillmentCount = 2
-        queue.setHandlers(
-            result: { index, translation in
-                sink.receive(index: index, translation: translation)
-                delivered.fulfill()
-            },
-            status: { sink.receive(status: $0) }
-        )
-        let worker = Task { await queue.run(with: session) }
-        defer { worker.cancel() }
+        await confirmation("batch delivered", expectedCount: 2) { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { sink.receive(status: $0) }
+            )
+            let worker = Task { await queue.run(with: session) }
+            defer { worker.cancel() }
 
-        queue.enqueue(makeSentence(index: 0, text: sentenceText))
-        queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
-        await fulfillment(of: [delivered], timeout: resultTimeout)
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 2 }
+        }
 
-        XCTAssertEqual(sink.results.map { $0.index }, [0, 1])
-        XCTAssertEqual(sink.statuses, [.ready, .translating, .ready], "one batched round-trip")
+        #expect(sink.results.map { $0.index } == [0, 1])
+        #expect(sink.statuses == [.ready, .translating, .ready], "one batched round-trip")
     }
 
     // MARK: - run(with:) failure path
@@ -279,39 +301,47 @@ final class TranslationQueueTests: XCTestCase {
     /// An unsupported target makes `translate` throw deterministically; the
     /// worker must re-queue the sentence, publish `.unavailable`, and exit —
     /// after which `drain` fails fast instead of waiting out its timeout.
-    func test_run_whenTranslationFails_shouldPublishUnavailableAndFailDrainFast() async throws {
+    @Test("a translation failure publishes .unavailable and makes drain fail fast")
+    func translationFailurePublishesUnavailableAndFailsDrainFast() async throws {
         let session = try await makeUnsupportedTargetSession()
         let (queue, sink) = makeSUT()
-        let failed = expectation(description: "unavailable status")
-        queue.setHandlers(
-            result: { index, translation in
-                sink.receive(index: index, translation: translation)
-            },
-            status: { status in
-                sink.receive(status: status)
-                if case .unavailable = status {
-                    failed.fulfill()
+        await confirmation("unavailable status") { failed in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                },
+                status: { status in
+                    sink.receive(status: status)
+                    if case .unavailable = status {
+                        failed()
+                    }
                 }
+            )
+            let worker = Task { await queue.run(with: session) }
+            defer { worker.cancel() }
+
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            await waitUntil(timeout: resultTimeout) {
+                if case .unavailable = queue.status {
+                    return true
+                }
+                return false
             }
-        )
-        let worker = Task { await queue.run(with: session) }
-        defer { worker.cancel() }
-
-        queue.enqueue(makeSentence(index: 0, text: sentenceText))
-        await fulfillment(of: [failed], timeout: resultTimeout)
-
-        XCTAssertEqual(sink.statuses.count, 3)
-        XCTAssertEqual(Array(sink.statuses.prefix(2)), [.ready, .translating])
-        guard case let .unavailable(message) = queue.status else {
-            return XCTFail("expected .unavailable, got \(queue.status)")
         }
-        XCTAssertFalse(message.isEmpty)
+
+        #expect(sink.statuses.count == 3)
+        #expect(Array(sink.statuses.prefix(2)) == [.ready, .translating])
+        guard case let .unavailable(message) = queue.status else {
+            Issue.record("expected .unavailable, got \(queue.status)")
+            return
+        }
+        #expect(!message.isEmpty)
 
         let start = Date()
         let drained = await queue.drain(timeout: 1.0)
-        XCTAssertFalse(drained)
-        XCTAssertLessThan(
-            Date().timeIntervalSince(start), 0.8,
+        #expect(!drained)
+        #expect(
+            Date().timeIntervalSince(start) < 0.8,
             "drain must early-return on .unavailable, not wait out the deadline"
         )
     }

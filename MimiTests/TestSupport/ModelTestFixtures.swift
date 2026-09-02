@@ -5,8 +5,9 @@ import Foundation
 /// matching its pinned SHA-256, and no arbitrary file can be made to match —
 /// but the dev checkout's `models/qwen3-asr-0.6b-q8_0.gguf` digest *is* the
 /// pin. Suites that need a digest-matching input clone it (APFS copy-on-write,
-/// so cloning 1 GB is free) into a private temp directory and XCTSkip when the
-/// fixture is absent. Everything else runs on tiny arbitrary files.
+/// so cloning 1 GB is free) into a private temp directory and cancel
+/// (`Test.cancel` / `.enabled(if:)`) when the fixture is absent. Everything
+/// else runs on tiny arbitrary files.
 enum ModelTestFixtures {
 
     /// The repo checkout's dev GGUF, whose SHA-256 equals
@@ -21,7 +22,7 @@ enum ModelTestFixtures {
     }()
 
     /// Clones the repo model into a fresh temp directory. Returns `nil` when
-    /// the fixture is missing (callers `throw XCTSkip`).
+    /// the fixture is missing (callers `Test.cancel` / `.enabled(if:)`).
     static func cloneRepoModel() throws -> URL? {
         guard let source = repoModelURL else { return nil }
         let directory = FileManager.default.temporaryDirectory
