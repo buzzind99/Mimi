@@ -3,8 +3,9 @@ import Foundation
 import Testing
 
 /// Tests `AppModel` session-control guards, translation wiring, and export
-/// delegation on the main actor. `start()`/`begin()` are excluded: they
-/// trigger the TCC Screen Recording prompt in the test host.
+/// delegation on the main actor. The `start()`/`begin()` flow itself is
+/// covered over injected factories in `AppModelSessionTests`; the default
+/// factories (real TCC preflight + SCK) stay production-only here.
 @MainActor
 @Suite("AppModel session control")
 struct AppModelTests {
