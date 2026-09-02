@@ -7,9 +7,6 @@ struct RetryProgress: Equatable, Sendable {
     enum Stage: Equatable, Sendable {
         /// The whole batch is being retried after a transient failure.
         case batchRetry
-        /// The batch failed permanently; individual sentences are being
-        /// retried one request each (OpenRouter only).
-        case perSentenceSplit
     }
 
     let stage: Stage
