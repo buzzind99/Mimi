@@ -46,4 +46,15 @@ enum TestEnvironment {
     static var repoDevModelInstalled: Bool {
         ModelTestFixtures.repoModelURL != nil
     }
+
+    /// True when the full live-ASR runtime is usable: the native dylib binds
+    /// AND the repo dev model is installed. Compound probe for the live-ASR
+    /// suite (mirrors `LiveDictionaryRuntime.isAvailable`) so the gate is
+    /// written once; the fake-library suite runs everywhere and needs only
+    /// `nativeASRDylibAvailable`'s absence. The VAD model is deliberately not
+    /// part of the gate: when it is missing the engine degrades to the
+    /// forced-final cap, which is itself an arm to cover.
+    static var crispRuntimeAvailable: Bool {
+        nativeASRDylibAvailable && repoDevModelInstalled
+    }
 }
