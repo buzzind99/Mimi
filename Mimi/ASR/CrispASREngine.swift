@@ -30,7 +30,11 @@ import Foundation
 /// the partial gate and silence detection). The two job types interlock
 /// only through the state lock; the C library serializes VAD access to the
 /// cached model internally.
-final class CrispASREngine: ASREngine {
+///
+/// Sendability: all shared state is `lock`/`prepareLock`-guarded, so the
+/// engine is safe to hand across concurrency domains (e.g. `finish()` runs
+/// detached from the main actor on session stop).
+final class CrispASREngine: ASREngine, @unchecked Sendable {
     let isMock = false
 
     /// Called on an arbitrary thread when a decode fails. Throttled by the
@@ -188,7 +192,11 @@ final class CrispASREngine: ASREngine {
         guard let handle = lib.openSession(modelPath: modelPath, backend: "qwen3") else {
             throw ASREngineError.createFailed("crispasr_session_open_explicit failed (backend qwen3)")
         }
+        // Publish the handle under the state lock: `close()` nils it there,
+        // and finish/runDecode snapshot it there.
+        lock.lock()
         session = handle
+        lock.unlock()
         if let reason = vadUnavailableReason, !vadUnavailableReported {
             vadUnavailableReported = true
             #if DEBUG

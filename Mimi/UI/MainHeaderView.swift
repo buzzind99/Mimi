@@ -77,7 +77,12 @@ struct MainHeaderView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(model.phase == .running ? .red : .accentColor)
-        .disabled(model.phase == .starting || model.phase == .stopping)
+        // While model discovery is in flight Start is gated (`isCheckingModel`);
+        // Stop must stay reachable from a live session.
+        .disabled(
+            model.phase == .starting || model.phase == .stopping
+                || (model.isCheckingModel && model.phase != .running && model.phase != .sourceLost)
+        )
     }
 
     private var exportMenu: some View {

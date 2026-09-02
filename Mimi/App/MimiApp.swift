@@ -75,7 +75,9 @@ struct SettingsView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Button("Re-check model") { model.refreshModelAvailability() }
+                Button("Re-check model") {
+                    Task { await model.refreshModelAvailability() }
+                }
             }
             Section("Session") {
                 LabeledContent("Entries") { Text("\(model.entries.count)") }

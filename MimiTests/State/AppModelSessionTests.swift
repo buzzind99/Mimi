@@ -46,7 +46,7 @@ struct AppModelSessionTests {
         }
     }
 
-    private final class ScriptedASREngine: ASREngine {
+    private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         let isMock = true
         var onEngineError: ((String) -> Void)?
         var processedSamples = 0
@@ -149,7 +149,7 @@ struct AppModelSessionTests {
         poll: [ASREvent] = [],
         captureStartError: (any Error)? = nil,
         startGate: StartGate? = nil
-    ) -> SUT {
+    ) async -> SUT {
         let log = FlowLog()
         let engine = ScriptedASREngine(log: log, poll: poll)
         let capture = ScriptedCapture(log: log, startError: captureStartError, startGate: startGate)
@@ -164,9 +164,10 @@ struct AppModelSessionTests {
                 ensurePermission: { true }
             )
         }
-        // `AppModel.init` lands in `.needsModel` when no model resolves on
-        // this machine; the flow tests need an idle start.
-        model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
+        // Quiesce the launch-time model check, then force an idle start with
+        // a synthetic model URL (model discovery is async now).
+        await model.initialModelCheck?.value
+        await model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
         return SUT(
             model: model, controller: model.sessionController,
             engine: engine, capture: capture, log: log
@@ -192,7 +193,7 @@ struct AppModelSessionTests {
 
     @Test("start brings the session up to running, surfaces partials, and wires translation")
     func startRunsHappyPath() async {
-        let sut = makeSUT(poll: [.partial(text: "ライブ")])
+        let sut = await makeSUT(poll: [.partial(text: "ライブ")])
 
         sut.model.start()
 
@@ -225,7 +226,7 @@ struct AppModelSessionTests {
 
     @Test("start lands in needsModel when no engine resolves")
     func startWithNoEngineMarksNeedsModel() async {
-        let sut = makeSUT(resolveEngine: false)
+        let sut = await makeSUT(resolveEngine: false)
 
         sut.model.start()
 
@@ -238,7 +239,7 @@ struct AppModelSessionTests {
 
     @Test("a capture-start failure fails the start visibly")
     func captureStartFailureFailsStart() async {
-        let sut = makeSUT(captureStartError: ScriptedStartError())
+        let sut = await makeSUT(captureStartError: ScriptedStartError())
 
         sut.model.start()
 
@@ -254,7 +255,7 @@ struct AppModelSessionTests {
     @Test("stop while starting tears down and winds down to idle")
     func stopWhileStartingTearsDown() async {
         let gate = StartGate()
-        let sut = makeSUT(startGate: gate)
+        let sut = await makeSUT(startGate: gate)
 
         sut.model.start()
         await pumpUntil { sut.log.names.contains("capture.start") }

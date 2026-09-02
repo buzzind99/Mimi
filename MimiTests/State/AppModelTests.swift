@@ -17,8 +17,12 @@ struct AppModelTests {
 
     // MARK: - Helpers
 
-    private func makeSUT() -> AppModel {
-        AppModel()
+    /// Awaits the launch-time model check so phase assertions are
+    /// deterministic (model discovery is async now).
+    private func makeSUT() async -> AppModel {
+        let model = AppModel()
+        await model.initialModelCheck?.value
+        return model
     }
 
     private func makeSentence(index: Int = 0) -> Sentence {
@@ -34,7 +38,7 @@ struct AppModelTests {
 
     @Test("stop is a no-op while idle")
     func stopWhenIdle() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .idle
 
         model.stop()
@@ -45,7 +49,7 @@ struct AppModelTests {
 
     @Test("stop is a no-op while needs-model")
     func stopWhenNeedsModel() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .needsModel
 
         model.stop()
@@ -56,7 +60,7 @@ struct AppModelTests {
 
     @Test("stop is a no-op after a failure")
     func stopWhenFailed() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .failed("boom")
 
         model.stop()
@@ -69,7 +73,7 @@ struct AppModelTests {
 
     @Test("stop from starting cancels and winds down to idle")
     func stopCancelsStarting() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .starting
 
         model.stop()
@@ -81,7 +85,7 @@ struct AppModelTests {
 
     @Test("stop from running winds down to idle and resets translation status")
     func stopWindsDownRunning() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .running
 
         model.stop()
@@ -94,7 +98,7 @@ struct AppModelTests {
 
     @Test("stop after losing the source winds down to idle")
     func stopWindsDownSourceLost() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .sourceLost
 
         model.stop()
@@ -107,8 +111,8 @@ struct AppModelTests {
     // MARK: - retryTranslation()
 
     @Test("retryTranslation creates a configuration when none exists")
-    func retryCreatesConfigWhenNil() {
-        let model = makeSUT()
+    func retryCreatesConfigWhenNil() async {
+        let model = await makeSUT()
         model.translationConfig = nil
 
         model.retryTranslation()
@@ -117,8 +121,8 @@ struct AppModelTests {
     }
 
     @Test("retryTranslation replaces the existing configuration")
-    func retryReassignsConfig() {
-        let model = makeSUT()
+    func retryReassignsConfig() async {
+        let model = await makeSUT()
         model.retryTranslation()
 
         model.retryTranslation()
@@ -130,7 +134,7 @@ struct AppModelTests {
 
     @Test("a sentence appends an entry and enqueues translation")
     func onSentenceAppendsAndEnqueues() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         let sentence = makeSentence()
 
         model.sessionController.onSentence?(sentence)
@@ -144,8 +148,8 @@ struct AppModelTests {
     }
 
     @Test("sentences append in arrival order")
-    func onSentenceKeepsOrder() {
-        let model = makeSUT()
+    func onSentenceKeepsOrder() async {
+        let model = await makeSUT()
 
         model.sessionController.onSentence?(makeSentence(index: 0))
         model.sessionController.onSentence?(makeSentence(index: 1))
@@ -156,8 +160,8 @@ struct AppModelTests {
     // MARK: - applyTranslation(index:translation:)
 
     @Test("a translation appends to the entry with the matching index")
-    func applyTranslationAppendsWhenKnown() {
-        let model = makeSUT()
+    func applyTranslationAppendsWhenKnown() async {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
         model.applyTranslation(
@@ -171,8 +175,8 @@ struct AppModelTests {
     }
 
     @Test("a translation for an unknown index is ignored")
-    func applyTranslationNoOpWhenUnknown() {
-        let model = makeSUT()
+    func applyTranslationNoOpWhenUnknown() async {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
         model.applyTranslation(
@@ -186,8 +190,8 @@ struct AppModelTests {
     // MARK: - Capture errors
 
     @Test("a capture error while running marks the source lost")
-    func onCaptureErrorMarksSourceLostWhenRunning() {
-        let model = makeSUT()
+    func onCaptureErrorMarksSourceLostWhenRunning() async {
+        let model = await makeSUT()
         model.phase = .running
 
         model.sessionController.onCaptureError?("stream died")
@@ -197,8 +201,8 @@ struct AppModelTests {
     }
 
     @Test("a capture error while starting marks the source lost")
-    func onCaptureErrorMarksSourceLostWhenStarting() {
-        let model = makeSUT()
+    func onCaptureErrorMarksSourceLostWhenStarting() async {
+        let model = await makeSUT()
         model.phase = .starting
 
         model.sessionController.onCaptureError?("stream died during start")
@@ -208,8 +212,8 @@ struct AppModelTests {
     }
 
     @Test("a capture error while idle is ignored")
-    func onCaptureErrorIgnoredWhenIdle() {
-        let model = makeSUT()
+    func onCaptureErrorIgnoredWhenIdle() async {
+        let model = await makeSUT()
         model.phase = .idle
 
         model.sessionController.onCaptureError?("stream died")
@@ -221,23 +225,23 @@ struct AppModelTests {
     // MARK: - Export
 
     @Test("nothing is exportable without entries")
-    func notExportableWhenEmpty() {
-        let model = makeSUT()
+    func notExportableWhenEmpty() async {
+        let model = await makeSUT()
 
         #expect(!model.isExportable)
     }
 
     @Test("entries make the session exportable")
-    func exportableWhenEntriesExist() {
-        let model = makeSUT()
+    func exportableWhenEntriesExist() async {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
 
         #expect(model.isExportable)
     }
 
     @Test("exportText delegates to the plain exporter")
-    func exportTextDelegatesToPlainExporter() {
-        let model = makeSUT()
+    func exportTextDelegatesToPlainExporter() async {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
@@ -249,8 +253,8 @@ struct AppModelTests {
     }
 
     @Test("txt export matches the plain exporter")
-    func exportTxtMatchesPlainExporter() throws {
-        let model = makeSUT()
+    func exportTxtMatchesPlainExporter() async throws {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
 
         let data = try model.export(format: .txt)
@@ -259,8 +263,8 @@ struct AppModelTests {
     }
 
     @Test("srt export matches the subtitle exporter")
-    func exportSrtMatchesSubtitleExporter() throws {
-        let model = makeSUT()
+    func exportSrtMatchesSubtitleExporter() async throws {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
@@ -272,8 +276,8 @@ struct AppModelTests {
     }
 
     @Test("vtt export matches the subtitle exporter")
-    func exportVttMatchesSubtitleExporter() throws {
-        let model = makeSUT()
+    func exportVttMatchesSubtitleExporter() async throws {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
@@ -285,8 +289,8 @@ struct AppModelTests {
     }
 
     @Test("json export falls back to defaults for nil session metadata")
-    func exportJsonFallsBackForNilMetadata() throws {
-        let model = makeSUT()
+    func exportJsonFallsBackForNilMetadata() async throws {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
 
         let data = try model.export(format: .json)
@@ -306,8 +310,8 @@ struct AppModelTests {
     }
 
     @Test("json export snapshots the latest translation")
-    func exportJsonSnapshotsLatestTranslation() throws {
-        let model = makeSUT()
+    func exportJsonSnapshotsLatestTranslation() async throws {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.applyTranslation(
             index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
@@ -326,8 +330,8 @@ struct AppModelTests {
     // MARK: - Session controller wiring
 
     @Test("session begin clears the transcript state")
-    func onSessionBeginClearsTranscriptState() {
-        let model = makeSUT()
+    func onSessionBeginClearsTranscriptState() async {
+        let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence())
         model.hudPinnedIndex = 3
 
@@ -338,8 +342,8 @@ struct AppModelTests {
     }
 
     @Test("engine chosen publishes the engine info")
-    func onEngineChosenPublishesEngineInfo() {
-        let model = makeSUT()
+    func onEngineChosenPublishesEngineInfo() async {
+        let model = await makeSUT()
         let url = URL(fileURLWithPath: "/tmp/model.gguf")
 
         model.sessionController.onEngineChosen?(true, url)
@@ -349,8 +353,8 @@ struct AppModelTests {
     }
 
     @Test("engine error publishes the error message")
-    func onEngineErrorPublishesErrorMessage() {
-        let model = makeSUT()
+    func onEngineErrorPublishesErrorMessage() async {
+        let model = await makeSUT()
 
         model.sessionController.onEngineError?("engine broke")
 
@@ -358,8 +362,8 @@ struct AppModelTests {
     }
 
     @Test("the translation queue status handler publishes the status")
-    func translationQueueStatusHandlerPublishesStatus() {
-        let model = makeSUT()
+    func translationQueueStatusHandlerPublishesStatus() async {
+        let model = await makeSUT()
         model.translationStatus = .translating
 
         model.translationQueue.resetForRetry()
@@ -370,28 +374,48 @@ struct AppModelTests {
     // MARK: - refreshModelAvailability / start() guards
 
     @Test("model discovery recovers a needs-model session when a model resolves")
-    func refreshModelAvailabilityRecoversFromNeedsModel() {
-        let model = makeSUT()
+    func refreshModelAvailabilityRecoversFromNeedsModel() async {
+        let model = await makeSUT()
         model.phase = .needsModel
 
-        model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
+        await model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
 
         #expect(model.phase == .idle)
+        #expect(!model.isCheckingModel)
     }
 
     @Test("model discovery marks needs-model when nothing resolves")
-    func refreshModelAvailabilityNeedsModelWhenNothingResolves() {
-        let model = makeSUT()
+    func refreshModelAvailabilityNeedsModelWhenNothingResolves() async {
+        let model = await makeSUT()
         model.phase = .idle
 
-        model.refreshModelAvailability(resolve: { nil })
+        await model.refreshModelAvailability(resolve: { nil })
 
         #expect(model.phase == .needsModel)
+        #expect(model.modelURL == nil)
+        #expect(!model.isCheckingModel)
+    }
+
+    @Test("start is a no-op while the model check is in flight")
+    func startWhileCheckingModelIsNoOp() async {
+        let model = await makeSUT()
+        model.phase = .idle
+        // Drive a check without awaiting it so `isCheckingModel` is live.
+        let check = Task { await model.refreshModelAvailability(resolve: { nil }) }
+        while !model.isCheckingModel {
+            await Task.yield()
+        }
+
+        model.start()
+
+        #expect(model.phase == .idle)
+        check.cancel()
+        await check.value
     }
 
     @Test("start is a no-op when not idle")
-    func startWhenNotIdleIsNoOp() {
-        let model = makeSUT()
+    func startWhenNotIdleIsNoOp() async {
+        let model = await makeSUT()
         model.phase = .running
 
         model.start()
@@ -403,7 +427,7 @@ struct AppModelTests {
 
     @Test("the app-terminate notification stops a running session")
     func terminateNotificationStopsRunningSession() async {
-        let model = makeSUT()
+        let model = await makeSUT()
         model.phase = .running
 
         NotificationCenter.default.post(name: Self.willTerminateNotification, object: nil)

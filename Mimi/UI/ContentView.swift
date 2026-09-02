@@ -33,7 +33,7 @@ struct ContentView: View {
         .background(TranslationSessionHost(model: model))
         .frame(minWidth: 860, minHeight: 600)
         .onAppear {
-            model.refreshModelAvailability()
+            Task { await model.refreshModelAvailability() }
         }
     }
 

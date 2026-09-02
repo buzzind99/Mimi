@@ -2,7 +2,7 @@ import Foundation
 
 /// Streaming transcriber abstraction. The native engine wraps the CrispASR
 /// C ABI; the mock keeps the whole pipeline testable without the runtime.
-protocol ASREngine: AnyObject {
+protocol ASREngine: AnyObject, Sendable {
     /// Prepare the recognizer (model load) before the stream opens.
     func prepare() throws
     /// Open a streaming recognition session.

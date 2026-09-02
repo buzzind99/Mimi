@@ -5,7 +5,11 @@ import Foundation
 /// threshold) so the
 /// full pipeline — buffering, translation, UI, export — stays exercisable.
 /// The UI labels mock sessions clearly.
-final class MockASREngine: ASREngine {
+///
+/// `@unchecked Sendable`: state is only ever touched from the single capture
+/// queue thread (`push`) or the main actor (`poll`/`finish`), which the
+/// compiler cannot see — the pipeline contract fences chunks before teardown.
+final class MockASREngine: ASREngine, @unchecked Sendable {
     let isMock = true
     var onEngineError: ((String) -> Void)?
 

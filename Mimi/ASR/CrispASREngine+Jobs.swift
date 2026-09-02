@@ -275,7 +275,12 @@ extension CrispASREngine {
             // Signal after the flag reset — see runVADJob.
             jobFinished.signal()
         }
-        guard let session else { return }
+        // Snapshot the session under the lock at job start: `close()` nils
+        // it there, and the decode must not race that read.
+        lock.lock()
+        let sessionHandle = session
+        lock.unlock()
+        guard let sessionHandle else { return }
 
         // Backends with convolutional encoders reject audio shorter than the
         // first conv kernel (~2 s at 16 kHz); zero-pad short spans.
@@ -285,7 +290,7 @@ extension CrispASREngine {
         }
 
         guard let raw = lib.transcribeText(
-            session: session, pcm: pcm, languageCode: languageCode
+            session: sessionHandle, pcm: pcm, languageCode: languageCode
         ) else {
             reportDecodeFailure()
             if isFinal {

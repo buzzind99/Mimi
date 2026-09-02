@@ -164,7 +164,7 @@ struct SessionControllerTests {
         sut.controller.onSessionBegin = { sessionBegan = true }
         sut.controller.onEngineChosen = { isMock, _ in chosenIsMock = isMock }
 
-        let started = try await sut.controller.begin()
+        let started = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         #expect(started)
         #expect(
@@ -181,7 +181,7 @@ struct SessionControllerTests {
     func beginCapturesMockMetadata() async throws {
         let sut = makeSUT()
 
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         let metadata = try #require(sut.controller.sessionMetadata)
         #expect(metadata.model == "mock")
@@ -194,7 +194,7 @@ struct SessionControllerTests {
     func beginWithoutEngineReturnsFalse() async throws {
         let sut = makeSUT(resolveEngine: false)
 
-        let started = try await sut.controller.begin()
+        let started = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         #expect(!started)
         #expect(sut.log.names == ["factory allowMock=true"])
@@ -206,7 +206,7 @@ struct SessionControllerTests {
         let sut = makeSUT(permissionGranted: false)
 
         let thrown = await #expect(throws: CaptureError.self) {
-            try await sut.controller.begin()
+            try await sut.controller.begin(modelURL: warmUpModelURL)
         }
 
         #expect(thrown?.errorDescription == CaptureError.permissionDenied.errorDescription)
@@ -219,7 +219,7 @@ struct SessionControllerTests {
         let sut = makeSUT(captureStartError: CaptureError.streamSetupFailed(captureFailureDetail))
 
         let thrown = await #expect(throws: CaptureError.self) {
-            try await sut.controller.begin()
+            try await sut.controller.begin(modelURL: warmUpModelURL)
         }
 
         #expect(
@@ -234,7 +234,7 @@ struct SessionControllerTests {
     @Test("capture chunks are pushed into the engine")
     func captureChunksPushIntoEngine() async throws {
         let sut = makeSUT()
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.capture.onChunk?(AudioChunk(samples: [0.1, -0.2, 0.3], startSample: 0))
 
@@ -244,7 +244,7 @@ struct SessionControllerTests {
     @Test("capture chunks update the latency readback")
     func captureChunksUpdateLatency() async throws {
         let sut = makeSUT()
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.capture.onChunk?(AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: 0))
         try await settle()
@@ -258,7 +258,7 @@ struct SessionControllerTests {
     @Test("fifty chunks drive the ingress-energy debug path and accumulate latency")
     func fiftyChunksDriveIngressEnergyPath() async throws {
         let sut = makeSUT()
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         for index in 0 ..< 50 {
             sut.capture.onChunk?(
@@ -277,7 +277,7 @@ struct SessionControllerTests {
         let sut = makeSUT()
         var messages: [String] = []
         sut.controller.onCaptureError = { messages.append($0) }
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.capture.onIOError?(.streamSetupFailed(captureFailureDetail))
         try await settle()
@@ -290,7 +290,7 @@ struct SessionControllerTests {
         let sut = makeSUT()
         var messages: [String] = []
         sut.controller.onEngineError = { messages.append($0) }
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.engine.onEngineError?(engineFailureMessage)
         try await settle()
@@ -303,7 +303,7 @@ struct SessionControllerTests {
     @Test("the poll timer surfaces a partial to the live state and stop clears it")
     func pollTimerSurfacesPartialAndStopClears() async throws {
         let sut = makeSUT(poll: [.partial(text: pendingPartial)])
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
         sut.controller.startTimers()
         await pumpTimers()
         let surfacedPartial = sut.live.partial
@@ -324,7 +324,7 @@ struct SessionControllerTests {
         ])
         var sentences: [Sentence] = []
         sut.controller.onSentence = { sentences.append($0) }
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
         sut.controller.startTimers()
         await pumpTimers()
         let emitted = sentences
@@ -349,7 +349,7 @@ struct SessionControllerTests {
         ])
         var sentences: [Sentence] = []
         sut.controller.onSentence = { sentences.append($0) }
-        _ = try await sut.controller.begin()
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         await sut.controller.stop()
 
@@ -390,7 +390,7 @@ private final class CallLog {
     }
 }
 
-private final class ScriptedASREngine: ASREngine {
+private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
     let isMock = true
     var onEngineError: ((String) -> Void)?
     var processedSamples = 0

@@ -37,9 +37,18 @@ final class AppModel: ObservableObject {
     /// build (see `ensureDictionaryReady`) so the status bar can show
     /// "Building dictionary…" instead of "Starting…".
     @Published private(set) var isPreparingDictionary = false
+    /// True while model discovery (resolve + SHA-256 verify) is in flight —
+    /// at launch and on a Settings re-check. Start is gated on it: the
+    /// verify hashes up to ~200 MB and must never run on the main thread.
+    @Published private(set) var isCheckingModel = true
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
     @Published var translationConfig: TranslationSession.Configuration?
+
+    /// Launch-time model discovery, spawned async in `init` (the verify is a
+    /// multi-hundred-MB hash and must not stall the first frame). Internal so
+    /// tests can await it before asserting on phase state.
+    private(set) var initialModelCheck: Task<Void, Never>?
 
     let live = LivePartialState()
     let latency = LatencyState()
@@ -73,7 +82,7 @@ final class AppModel: ObservableObject {
                 self?.translationStatus = status
             }
         )
-        refreshModelAvailability()
+        initialModelCheck = Task { await refreshModelAvailability() }
         prepareDictionaryIfNeeded()
 
         NotificationCenter.default.addObserver(
@@ -112,15 +121,23 @@ final class AppModel: ObservableObject {
     // MARK: - Model / app discovery
 
     /// Re-checks the model location and moves `idle`↔`needsModel` accordingly.
-    /// `resolve` is injectable for tests; the default drives the real locator.
-    func refreshModelAvailability(resolve: () -> URL? = { ModelLocator.resolve() }) {
-        modelURL = resolve()
-        if modelURL == nil, phase == .idle {
+    /// The resolve (existence + SHA-256 verify, hashing up to ~200 MB) runs
+    /// off-main and the result is hopped back here; `isCheckingModel` gates
+    /// Start while the check is in flight. `resolve` is injectable for tests;
+    /// the default drives the real locator.
+    func refreshModelAvailability(
+        resolve: @escaping @Sendable () -> URL? = { ModelLocator.resolve() }
+    ) async {
+        isCheckingModel = true
+        let url = await Task.detached(priority: .userInitiated) { resolve() }.value
+        modelURL = url
+        if url == nil, phase == .idle {
             phase = .needsModel
-        } else if modelURL != nil, phase == .needsModel {
+        } else if url != nil, phase == .needsModel {
             phase = .idle
         }
-        sessionController.warmUpIfNeeded(modelURL: modelURL)
+        sessionController.warmUpIfNeeded(modelURL: url)
+        isCheckingModel = false
     }
 
     // MARK: - Dictionary preparation
@@ -177,7 +194,7 @@ final class AppModel: ObservableObject {
     // MARK: - Session control
 
     func start() {
-        guard case .idle = phase else { return }
+        guard case .idle = phase, !isCheckingModel else { return }
         phase = .starting
         errorMessage = nil
 
@@ -192,7 +209,7 @@ final class AppModel: ObservableObject {
     }
 
     private func beginSession() async throws {
-        let started = try await sessionController.begin()
+        let started = try await sessionController.begin(modelURL: modelURL)
         // The session may have been cancelled (or its capture lost) while
         // `begin()` was in flight. Tear down whatever begin() brought up so
         // a stopped session cannot come up anyway.

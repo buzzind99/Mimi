@@ -88,14 +88,14 @@ final class SessionController {
 
     /// Brings up permission → engine → capture → buffer. Returns `false` when
     /// no model is available (caller maps that to `.needsModel`); throws when
-    /// permission or capture setup fails.
-    func begin() async throws -> Bool {
+    /// permission or capture setup fails. `modelURL` comes from the caller's
+    /// resolved state (single resolve, no second verify on the start path).
+    func begin(modelURL: URL?) async throws -> Bool {
         // Screen Recording permission (TCC) covers SCK system-audio capture.
         guard await ensurePermission() else {
             throw CaptureError.permissionDenied
         }
 
-        let modelURL = ModelLocator.resolve()
         guard let engine = makeEngine(modelURL, true) else {
             return false
         }
@@ -116,8 +116,11 @@ final class SessionController {
         sentenceBuffer = buffer
 
         let capture = makeCapture()
+        // The engine is captured strongly: a session owns exactly one engine,
+        // and chunks must not read main-actor state from the SCK output
+        // queue. `capture.stop()` fences chunks after teardown.
         capture.onChunk = { [weak self] chunk in
-            guard let self, let engine = self.engine else { return }
+            guard let self else { return }
             self.handleCaptureChunk(chunk, engine: engine)
         }
         capture.onIOError = { [weak self] error in
@@ -130,7 +133,10 @@ final class SessionController {
         #endif
         try await capture.start()
 
-        try engine.prepare()
+        // `prepare` may wait out a multi-second GGUF load + Metal compile
+        // (when the background warm-up hasn't finished) — keep it off the
+        // main actor. `prepareLock` still serializes it against the warm-up.
+        try await Task.detached(priority: .userInitiated) { try engine.prepare() }.value
         try engine.openStream()
 
         sessionMetadata = SessionMetadata(
@@ -152,11 +158,13 @@ final class SessionController {
     ///
     /// The engine stays warm: the loaded model is reused by the next session.
     func stop() async {
-        // Strictly ordered teardown: capture stops first, then the ASR
-        // finish → drain on the ASR queue.
+        // Strictly ordered teardown: capture stops first (synchronous fence),
+        // then the ASR finish → drain runs off-main — `finish` does a bounded
+        // drain wait plus a synchronous flush decode, a multi-second C call
+        // whenever speech is in flight at Stop.
         capture?.stop()
         if let engine {
-            let drained = engine.finish()
+            let drained = await Task.detached(priority: .userInitiated) { engine.finish() }.value
             for event in drained {
                 handleASREvent(event)
             }

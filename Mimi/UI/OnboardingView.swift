@@ -45,12 +45,12 @@ struct OnboardingView: View {
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            model.refreshModelAvailability()
+            Task { await model.refreshModelAvailability() }
         }
         .onChange(of: downloader.state) { _, _ in
             // Advance out of onboarding once the model lands (or a dropped-in
             // GGUF appears while this screen is up).
-            model.refreshModelAvailability()
+            Task { await model.refreshModelAvailability() }
         }
     }
 
