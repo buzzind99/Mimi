@@ -104,15 +104,15 @@ for target in report.get("targets", []):
                 break
 
 floors = {
-    "State/":       77.5,
+    "State/":       95.2,
     "Export/":     100.0,
     "Dictionary/":  98.0,
     "Text/":        98.0,
-    "Session/":     94.0,
+    "Session/":     96.9,
     "Translation/": 96.5,
     "Model/":       89.9,
-    "ASR/":         43.0,
-    "Audio/":       74.6,
+    "ASR/":         93.9,
+    "Audio/":       77.6,
 }
 failed_gates = []
 passed = 0
