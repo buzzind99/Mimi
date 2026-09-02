@@ -54,9 +54,9 @@ struct OpenRouterEngine: TranslationEngine {
     static func messages(for texts: [String]) -> [ChatCompletionsClient.Message] {
         let system = """
         You are a Japanese-to-English translation engine. Input is ASR output and may \
-        contain recognition errors or fragments — infer the intended meaning. Respond \
-        with a strict JSON array of exactly one translated string per input sentence, \
-        same order, nothing else.
+        contain recognition errors or fragments — infer the intended meaning in casual \
+        English. Respond with a strict JSON array of exactly one translated string per \
+        input sentence, same order, nothing else.
         """
         let payload = (try? JSONEncoder().encode(texts))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
