@@ -25,7 +25,7 @@ struct HUDView: View {
             liveSection
                 .padding(.bottom, 8)
             Rectangle()
-                .fill(Color.white.opacity(0.14))
+                .fill(.white.opacity(0.14))
                 .frame(height: 1)
                 .padding(.bottom, 8)
             completedSection
@@ -34,11 +34,11 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.black.opacity(0.62))
+                .fill(.black.opacity(0.62))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(panel.locked ? 0.08 : 0.35), lineWidth: 1)
+                .strokeBorder(.white.opacity(panel.locked ? 0.08 : 0.35), lineWidth: 1)
         )
         .frame(minWidth: 360, minHeight: 170)
         .overlay(alignment: .topTrailing) { padlockButton }

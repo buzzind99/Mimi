@@ -11,26 +11,25 @@ struct LiveSubtitleView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(Color.teal)
+                    .fill(.teal)
                     .frame(width: 7, height: 7)
-                    .opacity(pulsing && !live.partial.isEmpty ? 0.45 : 1)
                     .animation(
                         live.partial.isEmpty
                             ? nil
                             : .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
                         value: pulsing
                     )
-                    .opacity(live.partial.isEmpty ? 0.35 : 1)
+                    .opacity(live.partial.isEmpty ? 0.35 : (pulsing ? 0.45 : 1))
 
                 Text("live")
                     .font(.caption.monospaced().bold())
-                    .foregroundColor(.teal)
+                    .foregroundStyle(.teal)
                     .opacity(live.partial.isEmpty ? 0.5 : 1)
             }
             .onChange(of: live.partial.isEmpty) { _, isEmpty in
                 guard !isEmpty else { return }
                 pulsing = false
-                DispatchQueue.main.async { pulsing = true }
+                Task { @MainActor in pulsing = true }
             }
 
             if readingAnnotation != .none {
@@ -42,7 +41,7 @@ struct LiveSubtitleView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color.teal.opacity(0.12))
+        .background(.teal.opacity(0.12))
     }
 
     /// All annotation modes hold the same total slot height — surface 22 +
@@ -63,7 +62,7 @@ struct LiveSubtitleView: View {
                     surfaceItalic: true,
                     reservesAnnotationLine: true
                 )
-                .foregroundColor(.teal)
+                .foregroundStyle(.teal)
             }
         }
         .frame(minHeight: 40, alignment: .topLeading)
@@ -80,7 +79,7 @@ struct LiveSubtitleView: View {
             Text(live.partial)
                 .font(.system(size: 17, weight: .medium))
                 .italic()
-                .foregroundColor(.teal)
+                .foregroundStyle(.teal)
                 .lineLimit(1)
                 .truncationMode(.head)
                 .frame(height: 40, alignment: .topLeading)
@@ -91,6 +90,6 @@ struct LiveSubtitleView: View {
         Text("…")
             .font(.system(size: 17, weight: .medium))
             .italic()
-            .foregroundColor(.secondary.opacity(0.35))
+            .foregroundStyle(.secondary.opacity(0.35))
     }
 }

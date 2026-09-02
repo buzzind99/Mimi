@@ -160,10 +160,10 @@ struct TranscriptView: View {
         VStack(spacing: 8) {
             Text("No transcript yet")
                 .font(.title3)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text("Play any Japanese audio on your Mac (e.g. a livestream in your browser) and press Start.")
                 .font(.callout)
-                .foregroundColor(.secondary.opacity(0.7))
+                .foregroundStyle(.secondary.opacity(0.7))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 80)

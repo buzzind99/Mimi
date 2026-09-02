@@ -10,9 +10,9 @@ struct StatusBarView: View {
         HStack(spacing: 16) {
             statusBadge
             Spacer()
-            Text(String(format: "≈ %.1f s behind", latency.seconds))
+            Text("≈ \(latency.seconds.formatted(.number.precision(.fractionLength(1)))) s behind")
                 .font(.caption.monospacedDigit())
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
