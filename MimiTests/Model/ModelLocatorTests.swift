@@ -54,6 +54,16 @@ struct ModelLocatorTests {
         #expect(ModelLocator.resolve() == ModelLocator.downloadedURL)
     }
 
+    @Test("the default lookup over the real environment returns nil or a verified file")
+    func defaultResolveIsSelfConsistent() {
+        let resolved = ModelLocator.resolve()
+
+        if let resolved {
+            #expect(FileManager.default.fileExists(atPath: resolved.path))
+            #expect(ModelVerifier.isVerified(resolved))
+        }
+    }
+
     // MARK: - resolve (injected candidates)
 
     @Test("a verified bundled model wins over a verified download")

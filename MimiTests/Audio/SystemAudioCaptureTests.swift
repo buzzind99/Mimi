@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 @testable import Mimi
 import ScreenCaptureKit
@@ -7,8 +8,10 @@ import Testing
 /// seams (`handleSampleBuffer`/`handleStreamStopped`), driven by synthesized
 /// `CMSampleBuffer`s from `SampleBufferSynthesis` — no ScreenCaptureKit
 /// involved, and the stop fence is deterministic because the callbacks run
-/// synchronously on the calling thread. Excluded (needs a Screen Recording
-/// grant and a live display stream): `start()`, `ensurePermission()`, and
+/// synchronously on the calling thread. `ensurePermission()`'s preflight-
+/// granted arm is covered machine-gated (a Screen Recording grant on the
+/// host). Excluded (needs TCC interaction and a live display stream):
+/// `start()`'s SCK stream setup, `ensurePermission()`'s request arm, and
 /// `stop()`'s SCK teardown. The resample converter-failure branch is not
 /// fixture-reachable either: Core Media rejects non-positive sample rates
 /// before a converter is ever built, and any positive rate builds one.
@@ -88,6 +91,16 @@ struct SystemAudioCaptureTests {
         capture.stop()
 
         #expect(!capture.isRunning)
+    }
+
+    // MARK: - ensurePermission
+
+    @Test(
+        "ensurePermission returns true on the preflight-granted arm",
+        .enabled(if: CGPreflightScreenCaptureAccess())
+    )
+    func ensurePermissionGrantedArm() async {
+        #expect(await SystemAudioCapture.ensurePermission())
     }
 
     // MARK: - CaptureError descriptions

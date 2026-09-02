@@ -252,6 +252,26 @@ struct SessionControllerTests {
         #expect(sut.latency.seconds == 0.2)
     }
 
+    /// Coverage for the DEBUG `logIngressEnergy` body: driven to its 50-chunk
+    /// print boundary and beyond is unreachable without real audio; the log
+    /// line itself is not asserted.
+    @Test("fifty chunks drive the ingress-energy debug path and accumulate latency")
+    func fiftyChunksDriveIngressEnergyPath() async throws {
+        let sut = makeSUT()
+        _ = try await sut.controller.begin()
+
+        for index in 0 ..< 50 {
+            sut.capture.onChunk?(
+                AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: index * 2560)
+            )
+        }
+        try await settle()
+
+        #expect(sut.engine.allPushedChunks.count == 50)
+        #expect(sut.controller.sessionMetadata != nil)
+        #expect(sut.latency.seconds == 8.0)
+    }
+
     @Test("capture errors surface through onCaptureError")
     func captureErrorsSurface() async throws {
         let sut = makeSUT()
