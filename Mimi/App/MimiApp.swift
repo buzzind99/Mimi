@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         // Let AppModel wind the session down on quit.
-        NotificationCenter.default.post(name: .init("MimiAppWillTerminate"), object: nil)
+        NotificationCenter.default.post(name: .mimiAppWillTerminate, object: nil)
     }
 }
 

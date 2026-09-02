@@ -86,3 +86,9 @@ enum SessionClock {
         return String(format: "%02d:%02d", m, s)
     }
 }
+
+extension Notification.Name {
+    /// Posted from `AppDelegate.applicationWillTerminate` so `AppModel` can
+    /// wind the live session down on quit.
+    static let mimiAppWillTerminate = Notification.Name("MimiAppWillTerminate")
+}

@@ -86,7 +86,7 @@ final class AppModel: ObservableObject {
         prepareDictionaryIfNeeded()
 
         NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("MimiAppWillTerminate"), object: nil, queue: .main
+            forName: .mimiAppWillTerminate, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.stop() }
         }
