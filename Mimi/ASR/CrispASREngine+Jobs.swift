@@ -288,6 +288,16 @@ extension CrispASREngine {
             session: session, pcm: pcm, languageCode: languageCode
         ) else {
             reportDecodeFailure()
+            if isFinal {
+                // A failed final must still close out the utterance: leaving
+                // it open keeps the endpoint/cap conditions true and
+                // re-decodes the same buffer forever (same rationale as the
+                // empty-text final below). Partials are step-gated and
+                // simply retry on the next step.
+                lock.lock()
+                finalizeUtteranceLocked(end: end)
+                lock.unlock()
+            }
             return
         }
         #if DEBUG
