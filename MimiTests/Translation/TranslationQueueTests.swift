@@ -215,6 +215,58 @@ struct TranslationQueueTests {
         #expect(engine.recordedBatches.count == 1, "cache hit must bypass the engine")
     }
 
+    // MARK: - enqueue skip-empty
+
+    /// Empty and whitespace-only finals never reach the engine: they are
+    /// dropped at `enqueue` and drain succeeds immediately (nothing pending).
+    @Test("empty and whitespace-only sentences never reach the engine", arguments: ["", " ", "\t\n　 "])
+    func emptyAndWhitespaceSentencesNeverReachTheEngine(text: String) async {
+        let engine = makeEchoEngine()
+        let (queue, sink) = makeSUT()
+        queue.setHandlers(
+            result: { index, translation in
+                sink.receive(index: index, translation: translation)
+            },
+            status: { sink.receive(status: $0) }
+        )
+
+        queue.enqueue(makeSentence(index: 0, text: text))
+
+        #expect(sink.results.isEmpty, "an empty sentence must not deliver a translation")
+        let worker = Task { await queue.run(with: engine) }
+        defer { worker.cancel() }
+        let drained = await queue.drain(timeout: 0.05)
+        #expect(drained, "an empty sentence must never enter pending")
+        #expect(engine.recordedBatches.isEmpty)
+    }
+
+    /// A real sentence enqueued alongside empty ones still translates with
+    /// its original index — skipping must not disturb FIFO order or indexing.
+    @Test("real sentences around empty ones keep their order and indexes")
+    func realSentencesAroundEmptyOnesKeepOrderAndIndexes() async {
+        let engine = makeEchoEngine()
+        let (queue, sink) = makeSUT()
+        await confirmation("translation delivered", expectedCount: 2) { delivered in
+            queue.setHandlers(
+                result: { index, translation in
+                    sink.receive(index: index, translation: translation)
+                    delivered()
+                },
+                status: { sink.receive(status: $0) }
+            )
+            let worker = Task { await queue.run(with: engine) }
+            defer { worker.cancel() }
+
+            queue.enqueue(makeSentence(index: 0, text: sentenceText))
+            queue.enqueue(makeSentence(index: 1, text: "   "))
+            queue.enqueue(makeSentence(index: 2, text: otherSentenceText))
+            await waitUntil(timeout: resultTimeout) { sink.results.count == 2 }
+        }
+
+        #expect(sink.results.map { $0.index } == [0, 2])
+        #expect(engine.recordedBatches.map { $0.count } == [2], "empties never split the batch")
+    }
+
     // MARK: - run(with:) batch sizing
 
     /// The engine's `preferredBatchSize` bounds each round-trip: three
