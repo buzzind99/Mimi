@@ -8,8 +8,7 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.0"
-    SWIFT_STRICT_CONCURRENCY: targeted
+    SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "Mimi Dev"
