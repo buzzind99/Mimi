@@ -9,7 +9,7 @@ struct TranslationPill: Equatable {
     }
 
     let tone: Tone
-    /// "On-device" or "External" (the engine label for red pills).
+    /// "On-device" or "External" — the engine label for every status.
     let label: String
 
     static func map(
@@ -28,7 +28,7 @@ struct TranslationPill: Equatable {
         case .unavailable:
             TranslationPill(tone: .red, label: engineLabel(activeEngine))
         case .idle:
-            TranslationPill(tone: .neutral, label: "")
+            TranslationPill(tone: .neutral, label: engineLabel(activeEngine))
         }
     }
 
