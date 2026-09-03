@@ -149,4 +149,64 @@ struct ReadingAnnotatorAnnotationTests {
 
         #expect(describe(segments) == [["漢", "漢", "漢字"]])
     }
+
+    // MARK: - Cross-token sokuon gemination
+
+    @Test("merges a stem-final sokuon with the geminating next token",
+          arguments: [
+              ([("言っ", "いっ"), ("て", "て")],
+               [["言って", "itte", "いって"]]),
+              ([("なかっ", nil), ("た", nil)],
+               [["なかった", "nakatta", nil]]),
+              ([("行っ", "いっ"), ("ちゃ", "ちゃ")],
+               [["行っちゃ", "iccha", "いっちゃ"]])
+          ])
+    func sokuonMergesWithNextToken(
+        pair: [(String, String?)], expected: [[String?]]
+    ) throws {
+        let annotator = makeAnnotator(tokens(pair.map(\.0), readings: pair.map(\.1)))
+
+        let segments = try #require(annotator.segments(for: pair.map(\.0).joined()))
+
+        #expect(describe(segments) == expected)
+    }
+
+    @Test("a sokuon before a vowel-initial token stays stranded (spoken tsu)")
+    func sokuonBeforeVowelDoesNotMerge() throws {
+        let annotator = makeAnnotator(tokens(["言っ", "あ"], readings: ["いっ", "あ"]))
+
+        let segments = try #require(annotator.segments(for: "言っあ"))
+
+        #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["あ", "a", nil]])
+    }
+
+    @Test("a sokuon before an overridden particle stays stranded")
+    func sokuonBeforeParticleDoesNotMerge() throws {
+        let annotator = makeAnnotator(tokens(["言っ", "は"], readings: ["いっ", "は"]))
+
+        let segments = try #require(annotator.segments(for: "言っは"))
+
+        #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["は", "wa", nil]])
+    }
+
+    @Test("a sokuon token separated from the next by a gap stays stranded")
+    func sokuonAcrossGapDoesNotMerge() throws {
+        let annotator = makeAnnotator([
+            token("言っ", start: 0, reading: "いっ"),
+            token("て", start: 3, reading: "て")
+        ])
+
+        let segments = try #require(annotator.segments(for: "言っ て"))
+
+        #expect(describe(segments) == [["言っ", "itsu", "いっ"], [" ", " ", nil], ["て", "te", nil]])
+    }
+
+    @Test("a trailing sokuon token has nothing to geminate with")
+    func trailingSokuonStaysStranded() throws {
+        let annotator = makeAnnotator(tokens(["そう", "言っ"], readings: ["そう", "いっ"]))
+
+        let segments = try #require(annotator.segments(for: "そう言っ"))
+
+        #expect(describe(segments) == [["そう", "sou", nil], ["言っ", "itsu", "いっ"]])
+    }
 }

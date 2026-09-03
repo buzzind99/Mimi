@@ -153,6 +153,26 @@ enum KanaRomaji {
         "ヮ": "wa"
     ]
 
+    /// Whether a reading's first mora can take a geminating sokuon — i.e.
+    /// `romaji(fromKana:)` on "っ" + `kana` would double a consonant ("って"
+    /// geminates, "あ"/"ん"/unmappable don't). Lets the annotator decide
+    /// whether a stem-final sokuon merges with the next token or strands as
+    /// "tsu". Mirrors `geminatedSokuon`'s accept/reject logic.
+    static func geminates(fromKana kana: String) -> Bool {
+        let normalized = kana.precomposedStringWithCanonicalMapping
+        let chars = Array(normalized)
+        guard let first = chars.first else { return false }
+        var mora: String?
+        if chars.count > 1, let digraph = digraphs[String(chars[0 ... 1])] {
+            mora = digraph
+        } else {
+            mora = singles[String(first)]
+        }
+        guard let mapped = mora, let onset = mapped.first,
+              !"aiueo".contains(onset) else { return false }
+        return true
+    }
+
     /// The romaji a sokuon contributes before the mora at `index`, plus the
     /// number of characters consumed: the next mora's leading consonant
     /// doubles ("っか" → "kka", "っち" → "cchi", "っちゃ" → "ccha", "っつ" →

@@ -35,7 +35,8 @@ struct ReadingAnnotatorLiveTests {
     @Test("the negative-continuous form walks its surface (言ってない)",
           arguments: [
               ("見た", [["見", "mi", "み"], ["た", "ta", nil]]),
-              ("言ってない", [["言っ", "itsu", "いっ"], ["て", "te", nil], ["ない", "nai", nil]]),
+              ("言ってない", [["言って", "itte", "いって"], ["ない", "nai", nil]]),
+              ("分かってない", [["分かって", "wakatte", "わかって"], ["ない", "nai", nil]]),
               ("来てない", [["来", "ki", "き"], ["て", "te", nil], ["ない", "nai", nil]])
           ])
     func surfaceWalkingConjugations(input: String, expected: [[String?]]) throws {
@@ -44,12 +45,12 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == expected)
     }
 
-    @Test("keeps the spoken-tsu fallback for the stem-final sokuon (高かっ → takakatsu)")
+    @Test("geminate-fuses the stem-final sokuon with the auxiliary (高かった → takakatta)")
     func stemFinalSokuon() throws {
         let segments = try segments("高かった")
 
         #expect(describe(segments) == [
-            ["高かっ", "takakatsu", "たかかっ"], ["た", "ta", nil]
+            ["高かった", "takakatta", "たかかった"]
         ])
     }
 
@@ -330,7 +331,7 @@ struct ReadingAnnotatorLiveTests {
         let segments = try segments("言ってあげる")
 
         #expect(describe(segments) == [
-            ["言っ", "itsu", "いっ"], ["て", "te", nil], ["あげる", "ageru", nil]
+            ["言って", "itte", "いって"], ["あげる", "ageru", nil]
         ])
     }
 

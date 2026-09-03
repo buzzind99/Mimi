@@ -73,7 +73,9 @@ final class ReadingAnnotator {
         // A numeral run held back for counter fusion (一回 → "ikkai").
         var pending: PendingNumber?
 
-        for token in tokens {
+        var i = 0
+        while i < tokens.count {
+            let token = tokens[i]
             if token.start > cursor {
                 // A held-back number never fuses across an uncovered span
                 // (三、四本): flush it, then emit the span as a plain run.
@@ -85,8 +87,32 @@ final class ReadingAnnotator {
 
             if Self.isNumeralRun(surface) {
                 Self.accumulate(token, surface: surface, into: &pending)
+                i += 1
             } else if !fuse(&pending, with: token, surface: surface, into: &segments) {
-                appendToken(token, surface: surface, into: &segments)
+                let nextSurface = i + 1 < tokens.count
+                    ? Self.scalarSlice(tokens[i + 1], of: scalars) : nil
+                if let merged = sokuonMergedSpan(
+                    token, surface: surface, next: i + 1 < tokens.count ? tokens[i + 1] : nil,
+                    nextSurface: nextSurface
+                ) {
+                    appendToken(
+                        DictionaryToken(
+                            text: merged.surface,
+                            start: token.start,
+                            end: tokens[i + 1].end,
+                            reading: merged.kana
+                        ),
+                        surface: merged.surface,
+                        into: &segments
+                    )
+                    cursor = tokens[i + 1].end
+                    i += 2
+                } else {
+                    appendToken(token, surface: surface, into: &segments)
+                    i += 1
+                }
+            } else {
+                i += 1
             }
         }
         flush(&pending, into: &segments)
@@ -118,6 +144,33 @@ final class ReadingAnnotator {
             romaji: romaji,
             furigana: Self.furigana(surface: surface, reading: reading)
         ))
+    }
+
+    /// Joins a sokuon-bearing token with the following one. IPADIC splits
+    /// conjugated forms at the stem boundary (言って → 言っ/て), stranding the
+    /// gemination target in the next token's reading; when the pair is
+    /// contiguous and the next reading begins with a geminable mora, the two
+    /// merge into one segment (surface 言って, reading イッテ) so `KanaRomaji`
+    /// derives "itte". Overridden particles (って + は) and numeral runs keep
+    /// their own conversions; a genuinely stranded sokuon falls back to the
+    /// spoken "tsu".
+    private func sokuonMergedSpan(
+        _ token: DictionaryToken, surface: String, next: DictionaryToken?, nextSurface: String?
+    ) -> (surface: String, kana: String)? {
+        guard let next, let nextSurface, next.start == token.end else { return nil }
+        guard let reading = token.reading ?? Self.selfReading(surface),
+              reading.unicodeScalars.last.map(Self.isSokuon) == true
+        else { return nil }
+        guard let nextReading = next.reading ?? Self.selfReading(nextSurface),
+              !Self.isNumeralRun(nextSurface),
+              Self.particleRomaji[nextSurface] == nil,
+              KanaRomaji.geminates(fromKana: nextReading)
+        else { return nil }
+        return (surface: surface + nextSurface, kana: reading + nextReading)
+    }
+
+    private static func isSokuon(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value == 0x3063 || scalar.value == 0x30C3 // っ, ッ
     }
 
     /// A kana-only surface's reading is the surface itself: kana carries its
