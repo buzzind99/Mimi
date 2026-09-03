@@ -5,7 +5,7 @@ import Security
 /// Keychain; tests inject an in-memory (or unique-service) stand-in.
 protocol SecureKeyStoring: Sendable {
     /// Stores (or overwrites) the key for a provider id.
-    func saveKey(_ key: String, for providerID: String) throws
+    func saveKey(_ key: String, for providerID: String) throws(KeychainStoreError)
 
     /// Returns the stored key, or nil when none is configured. Read failures
     /// degrade to nil ("no key configured") and never echo secret material.
@@ -38,7 +38,7 @@ struct KeychainStore: SecureKeyStoring {
         self.service = service
     }
 
-    func saveKey(_ key: String, for providerID: String) throws {
+    func saveKey(_ key: String, for providerID: String) throws(KeychainStoreError) {
         let attributes: [String: Any] = [
             kSecValueData as String: Data(key.utf8),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly

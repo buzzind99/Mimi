@@ -40,12 +40,21 @@ enum ModelVerifier {
         } catch {
             return false
         }
-        lock.withLock { verified.insert(key) }
+        verified.withLock { _ = $0.insert(key) }
         return true
     }
 
-    static func verify(_ file: URL) throws {
-        let digest = try SHA256.digest(file: file)
+    static func verify(_ file: URL) throws(VerificationError) {
+        let digest: SHA256Digest
+        do {
+            digest = try SHA256.digest(file: file)
+        } catch {
+            // The digest helper's failures are plain file-I/O errors; they
+            // surface here as verification failures with the cause attached.
+            throw VerificationError(
+                message: "model file could not be read for verification: \(error.localizedDescription)"
+            )
+        }
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         if hex != expectedSHA256.lowercased() {
             throw VerificationError(

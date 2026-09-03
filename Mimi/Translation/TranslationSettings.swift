@@ -91,9 +91,18 @@ final class TranslationSettings: ObservableObject {
     /// - Parameters:
     ///   - defaults: injectable for tests (unique suite per test).
     ///   - keys: injectable for tests (in-memory stand-in for the Keychain).
-    init(defaults: UserDefaults = .standard, keys: any SecureKeyStoring = KeychainStore()) {
+    ///     Nil (production default) uses the Keychain in release builds; dev
+    ///     builds get a no-op store instead — the dev-signed binary can't
+    ///     read items saved by the release app, so every Keychain read would
+    ///     pop an access prompt. With no readable key, dev always runs the
+    ///     Apple on-device engine.
+    init(defaults: UserDefaults = .standard, keys: (any SecureKeyStoring)? = nil) {
         self.defaults = defaults
-        self.keys = keys
+        #if DEBUG
+            self.keys = keys ?? DevNoopKeyStore()
+        #else
+            self.keys = keys ?? KeychainStore()
+        #endif
 
         let selected = defaults.string(forKey: Self.selectedKey)
             .flatMap(TranslationProvider.init(rawValue:)) ?? .apple
@@ -108,7 +117,7 @@ final class TranslationSettings: ObservableObject {
             let stored = defaults.bool(forKey: Self.hasKeyKey(provider))
             // Cross-check the flag against the actual key store: a flag
             // without a key (or vice versa) degrades to the truth.
-            hasKey[provider] = stored && keys.readKey(for: provider.rawValue) != nil
+            hasKey[provider] = stored && self.keys.readKey(for: provider.rawValue) != nil
             keyHints[provider] = defaults.string(forKey: Self.keyHintKey(provider))
             if let raw = defaults.string(forKey: Self.testResultKey(provider)) {
                 testResults[provider] = Self.decodeTestResult(raw)
@@ -140,7 +149,7 @@ final class TranslationSettings: ObservableObject {
     /// Writes the key to the secure store, records the non-secret `hasKey`
     /// flag + last-4 hint, and applies the auto-default policy: an external
     /// provider with a key becomes the selected provider.
-    func saveKey(_ key: String, for provider: TranslationProvider) throws {
+    func saveKey(_ key: String, for provider: TranslationProvider) throws(KeychainStoreError) {
         try keys.saveKey(key, for: provider.rawValue)
         hasKey[provider] = true
         let suffix = key.suffix(4)
@@ -237,3 +246,18 @@ final class TranslationSettings: ObservableObject {
         return nil
     }
 }
+
+#if DEBUG
+    /// Dev-only `SecureKeyStoring` that never touches the Keychain: saves are
+    /// discarded and reads always return nil, so dev builds pin translation to
+    /// the Apple on-device engine and no Keychain access prompt ever fires.
+    private struct DevNoopKeyStore: SecureKeyStoring {
+        func saveKey(_ key: String, for providerID: String) {}
+
+        func readKey(for providerID: String) -> String? {
+            nil
+        }
+
+        func deleteKey(for providerID: String) {}
+    }
+#endif
