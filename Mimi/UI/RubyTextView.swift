@@ -104,11 +104,12 @@ struct RubyTextView: View, Equatable {
     var annotationFont: Font
     var annotationColor: Color
     var surfaceItalic = false
-    /// Opt-in for hosts whose slot must hold a fixed geometry: in furigana
-    /// mode the plain fallback then reserves the invisible annotation line
-    /// above the surface (like `plainRun`), so the surface keeps its
-    /// vertical position when the first annotated unit appears mid-stream.
-    /// Off by default; `TranscriptRow` relies on the default.
+    /// Opt-in for hosts whose slot must hold a fixed geometry: when set, every
+    /// unit — annotated or plain, in every annotation mode — reserves the
+    /// annotation line above the surface (the visible furigana in furigana
+    /// mode, invisible in romaji/none). The surface then starts at the same
+    /// vertical position in None, Romaji, and Furigana modes, so mode toggles
+    /// never shift the kanji. Off by default; `TranscriptRow` relies on it.
     var reservesAnnotationLine = false
 
     var body: some View {
@@ -121,11 +122,9 @@ struct RubyTextView: View, Equatable {
             }
         } else if !units.isEmpty {
             // Nothing annotatable: plain text keeps the slot filled.
-            if reservesAnnotationLine, annotation == .furigana {
+            if reservesAnnotationLine {
                 VStack(spacing: 0) {
-                    Text(verbatim: " ")
-                        .font(annotationFont)
-                        .lineLimit(1)
+                    reservedAnnotationLine
                     Text(verbatim: text)
                         .font(surfaceFont)
                         .italic(surfaceItalic)
@@ -179,6 +178,14 @@ struct RubyTextView: View, Equatable {
         annotation == .furigana ? segment.furigana : segment.romaji
     }
 
+    /// Invisible spacer matching one annotation line; reserves the furigana
+    /// slot so surfaces across modes and units share one vertical position.
+    private var reservedAnnotationLine: some View {
+        Text(verbatim: " ")
+            .font(annotationFont)
+            .lineLimit(1)
+    }
+
     @ViewBuilder
     private func unitView(_ unit: DisplayUnit) -> some View {
         switch unit {
@@ -186,6 +193,12 @@ struct RubyTextView: View, Equatable {
             plainRun(run)
         case let .annotated(surface, note):
             VStack(spacing: 0) {
+                // Furigana mode already renders the annotation line above
+                // the surface; the reservation is only needed for modes
+                // that would otherwise start the surface at the top.
+                if annotation != .furigana, reservesAnnotationLine {
+                    reservedAnnotationLine
+                }
                 if annotation == .furigana {
                     Text(verbatim: note)
                         .font(annotationFont)
@@ -210,14 +223,14 @@ struct RubyTextView: View, Equatable {
     /// Furigana sits above the surface, and the flow layout top-aligns its
     /// children — so an unannotated run must reserve an invisible annotation
     /// line to keep its surface on the same baseline as annotated words.
-    /// (Romaji sits below the surface, where top alignment already works.)
+    /// (Romaji sits below the surface, where top alignment already works —
+    /// unless `reservesAnnotationLine` asks for the line above as well, to
+    /// pin the surface to the same height across all annotation modes.)
     @ViewBuilder
     private func plainRun(_ surface: String) -> some View {
-        if annotation == .furigana {
+        if annotation == .furigana || reservesAnnotationLine {
             VStack(spacing: 0) {
-                Text(verbatim: " ")
-                    .font(annotationFont)
-                    .lineLimit(1)
+                reservedAnnotationLine
                 Text(verbatim: surface)
                     .font(surfaceFont)
                     .italic(surfaceItalic)

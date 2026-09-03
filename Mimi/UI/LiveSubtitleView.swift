@@ -44,14 +44,20 @@ struct LiveSubtitleView: View {
         .background(.teal.opacity(0.12))
     }
 
-    /// All annotation modes hold the same total slot height — surface 22 +
-    /// spacing 4 + annotation 14 = 40 — so empty↔filled transitions and
-    /// None↔Romaji↔Furigana toggles never change the row height (which would
-    /// resize the transcript viewport above).
+    /// Every mode reserves the annotation line above the surface (visible
+    /// furigana, invisible in romaji/none), so the kanji sits at one vertical
+    /// position across None↔Romaji↔Furigana toggles and empty↔filled
+    /// transitions. Slot = annotation 14 + surface 22 + annotation 14 = 50,
+    /// sized to the tallest mode (romaji: line above + surface + romaji).
+    private static let slotHeight: CGFloat = 50
+
+    /// All annotation modes hold the same total slot height so mode toggles
+    /// never change the row height (which would resize the transcript
+    /// viewport above).
     private var annotatedPartial: some View {
         Group {
             if live.partial.isEmpty {
-                placeholder
+                placeholderAtSurface
             } else {
                 RubyTextView(
                     text: live.partial,
@@ -65,24 +71,40 @@ struct LiveSubtitleView: View {
                 .foregroundStyle(.teal)
             }
         }
-        .frame(minHeight: 40, alignment: .topLeading)
+        .frame(minHeight: Self.slotHeight, alignment: .topLeading)
     }
 
-    /// None mode: surface only, top-aligned to match the romaji surface
-    /// position, in the same 40pt slot.
+    /// None mode: surface only, at the same reserved-line offset as the
+    /// annotated modes, in the same slot.
     @ViewBuilder
     private var plainPartial: some View {
         if live.partial.isEmpty {
-            placeholder
-                .frame(height: 40, alignment: .topLeading)
+            placeholderAtSurface
+                .frame(height: Self.slotHeight, alignment: .topLeading)
         } else {
-            Text(live.partial)
-                .font(.system(size: 17, weight: .medium))
-                .italic()
-                .foregroundStyle(.teal)
-                .lineLimit(1)
-                .truncationMode(.head)
-                .frame(height: 40, alignment: .topLeading)
+            VStack(spacing: 0) {
+                reservedAnnotationLine
+                Text(live.partial)
+                    .font(.system(size: 17, weight: .medium))
+                    .italic()
+                    .foregroundStyle(.teal)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            .frame(height: Self.slotHeight, alignment: .topLeading)
+        }
+    }
+
+    private var reservedAnnotationLine: some View {
+        Text(verbatim: " ")
+            .font(.caption.monospaced())
+            .lineLimit(1)
+    }
+
+    private var placeholderAtSurface: some View {
+        VStack(spacing: 0) {
+            reservedAnnotationLine
+            placeholder
         }
     }
 
