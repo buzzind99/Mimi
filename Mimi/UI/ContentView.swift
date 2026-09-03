@@ -5,7 +5,7 @@ import Translation
 /// feeds it to the queue. This is also what surfaces the one-time OS
 /// language-pack download prompt.
 struct TranslationSessionHost: View {
-    @ObservedObject var model: AppModel
+    var model: AppModel
 
     var body: some View {
         Color.clear
@@ -18,9 +18,9 @@ struct TranslationSessionHost: View {
 
 /// Root view: onboarding until the model resolves, then the main panes.
 struct ContentView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var live: LivePartialState
-    @ObservedObject var latency: LatencyState
+    var model: AppModel
+    var live: LivePartialState
+    var latency: LatencyState
 
     var body: some View {
         Group {

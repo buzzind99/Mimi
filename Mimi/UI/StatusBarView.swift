@@ -3,8 +3,8 @@ import SwiftUI
 /// Status bar isolated into its own view so the high-frequency latency
 /// estimate re-renders only this bar, not the transcript or the header.
 struct StatusBarView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var latency: LatencyState
+    var model: AppModel
+    var latency: LatencyState
 
     var body: some View {
         HStack(spacing: 16) {

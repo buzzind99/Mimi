@@ -1,6 +1,6 @@
 import AppKit
-import Combine
 import Foundation
+import Observation
 import Translation
 
 /// Session lifecycle phases.
@@ -27,32 +27,33 @@ enum ActiveTranslationEngine: Equatable {
 /// the published UI state. All public state is @MainActor. The mechanics of
 /// a live session (engine, capture, buffering, timers) live in
 /// `SessionController`.
+@Observable
 @MainActor
-final class AppModel: ObservableObject {
-    // Published UI state
-    @Published var phase: SessionPhase = .idle
-    @Published var entries: [SessionEntry] = []
-    @Published var translationStatus: TranslationStatus = .idle
-    @Published var engineIsMock = false
-    @Published var modelURL: URL?
-    @Published var hudVisible = false
+final class AppModel {
+    // Observed UI state
+    var phase: SessionPhase = .idle
+    var entries: [SessionEntry] = []
+    var translationStatus: TranslationStatus = .idle
+    var engineIsMock = false
+    var modelURL: URL?
+    var hudVisible = false
     /// HUD translation history cursor: the pinned sentence index while
     /// browsing older translations, or nil to follow the latest translated
     /// entry. Pinning an older entry means new translations never move the
     /// view; nil tracks the newest.
-    @Published var hudPinnedIndex: Int?
-    @Published var errorMessage: String?
+    var hudPinnedIndex: Int?
+    var errorMessage: String?
     /// True while a session start is blocked on the first-launch dictionary
     /// build (see `ensureDictionaryReady`) so the status bar can show
     /// "Building dictionary…" instead of "Starting…".
-    @Published private(set) var isPreparingDictionary = false
+    private(set) var isPreparingDictionary = false
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
     /// verify hashes up to ~200 MB and must never run on the main thread.
-    @Published private(set) var isCheckingModel = true
+    private(set) var isCheckingModel = true
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
-    @Published var translationConfig: TranslationSession.Configuration?
+    var translationConfig: TranslationSession.Configuration?
 
     /// Launch-time model discovery, spawned async in `init` (the verify is a
     /// multi-hundred-MB hash and must not stall the first frame). Internal so
@@ -69,11 +70,11 @@ final class AppModel: ObservableObject {
 
     /// True once this session has latched onto Apple on-device after an
     /// external engine failed (the Settings "Currently using" row surfaces it).
-    @Published var translationFallbackActive = false
+    var translationFallbackActive = false
 
     /// The engine currently attached to the queue — Apple's via the hidden
     /// `.translationTask` host, an external one via `translationWorker`.
-    @Published private(set) var activeTranslationEngine: ActiveTranslationEngine = .apple
+    private(set) var activeTranslationEngine: ActiveTranslationEngine = .apple
 
     /// The spawned external-engine worker (`queue.run(with:)`). Apple runs
     /// belong to SwiftUI's `.translationTask` instead. Torn down on stop.
@@ -191,7 +192,7 @@ final class AppModel: ObservableObject {
     /// real store.
     func prepareDictionaryIfNeeded(
         resolve: () -> URL? = { DictionaryStore.resolve() },
-        prepare: ((@escaping (Result<URL, Error>) -> Void) -> Void) = {
+        prepare: ((@escaping @Sendable (Result<URL, Error>) -> Void) -> Void) = {
             DictionaryStore.shared.prepare(completion: $0)
         }
     ) {
@@ -338,9 +339,16 @@ final class AppModel: ObservableObject {
         } else {
             if translationSettings.selectedProvider.isExternal {
                 // Selected but unconfigured (key deleted): degrade to Apple
-                // with a status note instead of failing outright.
-                errorMessage =
-                    "\(translationSettings.selectedProvider.displayName) has no API key — using Apple on-device."
+                // with a status note instead of failing outright. Dev builds
+                // use a no-op key store (see `TranslationSettings.init`), so
+                // the note explains the dev pin instead of a missing key.
+                #if DEBUG
+                    errorMessage =
+                        "Dev build uses Apple on-device translation — external providers are disabled."
+                #else
+                    errorMessage =
+                        "\(translationSettings.selectedProvider.displayName) has no API key — using Apple on-device."
+                #endif
             }
             activeTranslationEngine = .apple
             translationConfig?.invalidate()

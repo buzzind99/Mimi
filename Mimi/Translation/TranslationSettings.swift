@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 
 /// Translation providers selectable behind the `TranslationQueue` seam.
@@ -46,29 +45,29 @@ enum ConnectionTestResult: Equatable {
 /// Auto-default policy: saving a key for an external provider switches the
 /// selection to it; Apple on-device stays active until any external provider
 /// is configured.
+@Observable
 @MainActor
-final class TranslationSettings: ObservableObject {
-    @Published private(set) var selectedProvider: TranslationProvider {
+final class TranslationSettings {
+    private(set) var selectedProvider: TranslationProvider {
         didSet { defaults.set(selectedProvider.rawValue, forKey: Self.selectedKey) }
     }
 
     /// OpenRouter chat-completions model, used verbatim in the request body.
-    @Published var openRouterModel: String {
+    var openRouterModel: String {
         didSet { defaults.set(openRouterModel, forKey: Self.openRouterModelKey) }
     }
 
     /// True when the selected DeepL key came from the free tier (`:fx`
     /// suffix) — drives the "DeepL (Free)" label. Non-secret.
-    @Published private(set) var deeplIsFreeTier: Bool {
+    private(set) var deeplIsFreeTier: Bool {
         didSet { defaults.set(deeplIsFreeTier, forKey: Self.deeplFreeKey) }
     }
 
-    /// Published so views update on `removeKey`/`setTestResult` without
-    /// incidental invalidation; subscript assignment routes through the
-    /// setter, firing `objectWillChange`.
-    @Published private(set) var hasKey: [TranslationProvider: Bool]
-    @Published private(set) var keyHints: [TranslationProvider: String]
-    @Published private(set) var testResults: [TranslationProvider: ConnectionTestResult]
+    /// Observed so views update on `removeKey`/`setTestResult`; dictionary
+    /// assignment routes through the property setter, firing observation.
+    private(set) var hasKey: [TranslationProvider: Bool]
+    private(set) var keyHints: [TranslationProvider: String]
+    private(set) var testResults: [TranslationProvider: ConnectionTestResult]
 
     private let defaults: UserDefaults
     private let keys: SecureKeyStoring

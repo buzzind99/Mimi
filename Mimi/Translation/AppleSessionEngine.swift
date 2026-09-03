@@ -5,7 +5,12 @@ import Translation
 /// SwiftUI hands out via `.translationTask`. Batches through
 /// `translations(from:)`, which amortizes the model round-trip across the
 /// batch exactly as the queue has always batched on-device work.
-struct AppleSessionEngine: TranslationEngine {
+///
+/// `@unchecked Sendable`: the `Translation` framework does not mark
+/// `TranslationSession` Sendable, but the session handed out by
+/// `.translationTask` is used only through this engine's `translate` calls
+/// (session methods are nonisolated and self-synchronizing in practice).
+struct AppleSessionEngine: TranslationEngine, @unchecked Sendable {
     let preferredBatchSize = 16
 
     /// On-device translation never retries — the hook stays unset.

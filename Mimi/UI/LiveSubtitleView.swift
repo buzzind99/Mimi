@@ -3,7 +3,7 @@ import SwiftUI
 /// Live partial-subtitle row. Isolated so the high-frequency partial state
 /// (6–10 Hz) re-renders only this row, never the transcript.
 struct LiveSubtitleView: View {
-    @ObservedObject var live: LivePartialState
+    var live: LivePartialState
     @ReadingAnnotationSetting private var readingAnnotation
     @State private var pulsing = false
 

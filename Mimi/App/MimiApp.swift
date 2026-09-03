@@ -3,11 +3,7 @@ import SwiftUI
 @main
 struct MimiApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model: AppModel
-
-    init() {
-        _model = StateObject(wrappedValue: AppModel())
-    }
+    @State private var model = AppModel()
 
     var body: some Scene {
         WindowGroup("Mimi") {
@@ -37,6 +33,7 @@ struct MimiApp: App {
 }
 
 /// Bridges AppKit (HUD panel).
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let hud = HUDWindowController.shared
 

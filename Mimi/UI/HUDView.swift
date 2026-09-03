@@ -3,8 +3,8 @@ import SwiftUI
 /// Floating HUD content: active JP partial/final on top, EN translation
 /// below. Hosted by `HUDHostingView` inside `HUDPanel` (HUDWindow.swift).
 struct HUDView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject var live: LivePartialState
+    var model: AppModel
+    var live: LivePartialState
     @ObservedObject var panel: HUDPanel
     @ReadingAnnotationSetting private var readingAnnotation
 

@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Floating HUD window: always-on-top semi-transparent subtitle overlay.
 /// Click-through when locked; unlock (padlock button) to move/resize.
+@MainActor
 final class HUDWindowController {
     static let shared = HUDWindowController()
 

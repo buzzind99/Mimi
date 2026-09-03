@@ -5,8 +5,8 @@ import SwiftUI
 /// (progress / resume / retry). A manually dropped-in GGUF is picked up
 /// automatically by `ModelLocator.resolve()`.
 struct OnboardingView: View {
-    @ObservedObject var model: AppModel
-    @StateObject private var downloader = ModelDownloader()
+    var model: AppModel
+    @State private var downloader = ModelDownloader()
 
     var body: some View {
         VStack(spacing: 24) {

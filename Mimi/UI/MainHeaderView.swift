@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 /// Header row of the main window: session controls, reading-annotation
 /// picker, mock-ASR badge, and the export menu.
 struct MainHeaderView: View {
-    @ObservedObject var model: AppModel
+    @Bindable var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
 
     @State private var exportPresented = false

@@ -19,7 +19,7 @@ import SwiftUI
 /// sits flush: a single scrollTo can land short while the insertion spring
 /// or the LazyVStack's estimated layout is still settling.
 struct TranscriptView: View {
-    @ObservedObject var model: AppModel
+    var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
     @State private var pinnedToBottom = true
     @State private var reAnchorScheduled = false

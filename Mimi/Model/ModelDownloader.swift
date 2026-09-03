@@ -1,10 +1,18 @@
-import Combine
 import Foundation
+import Observation
 
 /// First-launch model downloader: progress, resume, SHA-256
 /// verification, retry. Also accepts a manually dropped-in GGUF (the locator
 /// checks the models folder before/without any download).
-final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDelegate {
+///
+/// Main-actor isolated: all state mutation happens on the main actor. The
+/// URLSession delegate entry points are `nonisolated` (the session invokes
+/// them on its delegate queue) and hop via `Task { @MainActor in }` — the
+/// protocol itself carries Sendable checking in the current SDK, so the
+/// isolation must be explicit.
+@Observable
+@MainActor
+final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     enum State: Equatable {
         case idle
         case downloading(progress: Double, bytes: Int64, total: Int64?)
@@ -13,13 +21,13 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
     }
 
     /// Mutated only on the main actor (delegate callbacks hop via Task).
-    @Published private(set) var state: State = .idle
+    private(set) var state: State = .idle
 
     private func setState(_ new: State) {
         Task { @MainActor in self.state = new }
     }
 
-    static let downloadURL = URL(string:
+    nonisolated static let downloadURL = URL(string:
         "https://huggingface.co/cstr/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
 
     private let destination: URL
@@ -118,7 +126,7 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
 
     // MARK: - URLSessionDownloadDelegate
 
-    func urlSession(
+    nonisolated func urlSession(
         _ session: URLSession, downloadTask: URLSessionDownloadTask,
         didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
@@ -144,7 +152,7 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
     }
 
-    func urlSession(
+    nonisolated func urlSession(
         _ session: URLSession, downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
@@ -174,7 +182,7 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
     }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         Task { @MainActor in
             self.task = nil
             self.invalidateSession()
@@ -188,7 +196,7 @@ final class ModelDownloader: NSObject, ObservableObject, URLSessionDownloadDeleg
         }
     }
 
-    private static func verify(_ file: URL) throws {
+    private nonisolated static func verify(_ file: URL) throws(ModelVerifier.VerificationError) {
         try ModelVerifier.verify(file)
     }
 }

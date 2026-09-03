@@ -6,15 +6,15 @@ import SwiftUI
 /// the field), OpenRouter model, connection test, and a privacy notice while
 /// an external provider is selected.
 struct SettingsView: View {
-    @ObservedObject var model: AppModel
-    @ObservedObject private var settings: TranslationSettings
+    var model: AppModel
+    @Bindable private var settings: TranslationSettings
     @State private var keyDraft = ""
     @State private var keySaveFailed = false
     @State private var isTestingConnection = false
 
     init(model: AppModel) {
         self.model = model
-        _settings = ObservedObject(wrappedValue: model.translationSettings)
+        _settings = Bindable(wrappedValue: model.translationSettings)
     }
 
     var body: some View {

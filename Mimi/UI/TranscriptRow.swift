@@ -11,7 +11,7 @@ struct TranscriptRow: View, Equatable {
     /// `@AppStorage` via `ReadingAnnotationSetting` (a `DynamicProperty`),
     /// which invalidates this view directly when it changes, bypassing the
     /// Equatable skip — so comparing entries alone is sufficient.
-    static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
+    nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.entry == rhs.entry
     }
 
