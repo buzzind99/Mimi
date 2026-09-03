@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @testable import Mimi
 import Testing
@@ -18,9 +19,13 @@ struct AppModelTests {
     // MARK: - Helpers
 
     /// Awaits the launch-time model check so phase assertions are
-    /// deterministic (model discovery is async now).
+    /// deterministic. The check itself is stubbed (`initialModelResolve`):
+    /// the real locator SHA-256-hashes the dev GGUF and feeds the engine
+    /// warm-up — real blocking work that starves the cooperative pool under
+    /// parallel test execution. Flow coverage over scripted doubles lives in
+    /// `AppModelSessionTests`.
     private func makeSUT() async -> AppModel {
-        let model = AppModel()
+        let model = AppModel(initialModelResolve: { nil })
         await model.initialModelCheck?.value
         return model
     }
@@ -250,6 +255,16 @@ struct AppModelTests {
         let output = model.exportText()
 
         #expect(output == SessionExporter.plainText(entries: model.entries))
+    }
+
+    @Test("copyTranscript puts the plain-text transcript on the pasteboard")
+    func copyTranscriptPutsTranscriptOnPasteboard() async {
+        let model = await makeSUT()
+        model.sessionController.onSentence?(makeSentence())
+
+        model.copyTranscript()
+
+        #expect(NSPasteboard.general.string(forType: .string) == model.exportText())
     }
 
     @Test("txt export matches the plain exporter")

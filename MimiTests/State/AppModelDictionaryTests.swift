@@ -11,9 +11,15 @@ import Testing
 @Suite("AppModel dictionary preparation")
 struct AppModelDictionaryTests {
 
+    /// Stubbed launch check: the real locator hashes the dev GGUF and feeds
+    /// the engine warm-up — real blocking work tests must never trigger.
+    private func makeModel() -> AppModel {
+        AppModel(initialModelResolve: { nil })
+    }
+
     @Test("kicks dictionary preparation when no dictionary resolves")
     func kicksWhenUnresolved() {
-        let model = AppModel()
+        let model = makeModel()
         var prepareCalls = 0
 
         model.prepareDictionaryIfNeeded(
@@ -26,7 +32,7 @@ struct AppModelDictionaryTests {
 
     @Test("skips dictionary preparation when a dictionary already resolves")
     func skipsWhenResolved() {
-        let model = AppModel()
+        let model = makeModel()
         let resolved = URL(fileURLWithPath: "/tmp/ipadic.dic")
         var prepareCalls = 0
 
@@ -40,7 +46,7 @@ struct AppModelDictionaryTests {
 
     @Test("a failed preparation is log-only and raises no user-visible error")
     func failedBuildStaysQuiet() {
-        let model = AppModel()
+        let model = makeModel()
         var completion: ((Result<URL, Error>) -> Void)?
         let failure = DictionaryStore.DictionaryStoreError.libraryUnavailable
 
@@ -57,7 +63,7 @@ struct AppModelDictionaryTests {
 
     @Test("session-start gate skips preparation when a dictionary already resolves")
     func gateSkipsWhenResolved() async throws {
-        let model = AppModel()
+        let model = makeModel()
         let resolved = URL(fileURLWithPath: "/tmp/ipadic.dic")
         var prepareCalls = 0
 
@@ -75,7 +81,7 @@ struct AppModelDictionaryTests {
 
     @Test("session-start gate prepares when no dictionary resolves and clears the flag")
     func gatePreparesWhenUnresolved() async throws {
-        let model = AppModel()
+        let model = makeModel()
         var prepareCalls = 0
         var preparingDuringPreparation = false
 
@@ -95,7 +101,7 @@ struct AppModelDictionaryTests {
 
     @Test("session-start gate rethrows a failed preparation so the start fails visibly")
     func gateRethrowsFailedPreparation() async throws {
-        let model = AppModel()
+        let model = makeModel()
         let failure = DictionaryStore.DictionaryStoreError.prepareFailed(returnCode: 1)
 
         await #expect(throws: (any Error).self) {

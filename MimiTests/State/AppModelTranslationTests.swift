@@ -24,6 +24,12 @@ struct AppModelTranslationTests {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
     }
 
+    /// Stubbed launch check: the real locator hashes the dev GGUF and feeds
+    /// the engine warm-up — real blocking work tests must never trigger.
+    private func makeModel() -> AppModel {
+        AppModel(initialModelResolve: { nil })
+    }
+
     private func makeInstalledJAToENSession() async throws -> TranslationSession {
         guard #available(macOS 26.0, *) else {
             try Test.cancel("TranslationSession(installedSource:) requires macOS 26")
@@ -51,7 +57,7 @@ struct AppModelTranslationTests {
     @Test("a sentence flows through the queue into the transcript with its translation")
     func sentenceFlowsThroughQueueIntoEntries() async throws {
         let session = try await makeInstalledJAToENSession()
-        let model = AppModel()
+        let model = makeModel()
         let worker = Task { await model.translationQueue.run(with: AppleSessionEngine(session)) }
         defer { worker.cancel() }
 
@@ -74,7 +80,7 @@ struct AppModelTranslationTests {
     @Test("a repeat sentence resolves from the enqueue cache synchronously")
     func repeatSentenceHitsCacheSynchronously() async throws {
         let session = try await makeInstalledJAToENSession()
-        let model = AppModel()
+        let model = makeModel()
         let worker = Task { await model.translationQueue.run(with: AppleSessionEngine(session)) }
         defer { worker.cancel() }
 

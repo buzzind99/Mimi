@@ -154,17 +154,26 @@ struct AppModelSessionTests {
         let log = FlowLog()
         let engine = ScriptedASREngine(log: log, poll: poll)
         let capture = ScriptedCapture(log: log, startError: captureStartError, startGate: startGate)
-        let model = AppModel { live, latency, translationQueue in
-            SessionController(
-                live: live, latency: latency, translationQueue: translationQueue,
-                makeEngine: { _, allowMock in
-                    log.record("factory allowMock=\(allowMock)")
-                    return resolveEngine ? engine : nil
-                },
-                makeCapture: { capture },
-                ensurePermission: { true }
-            )
-        }
+        let model = AppModel(
+            makeSessionController: { live, latency, translationQueue in
+                SessionController(
+                    live: live, latency: latency, translationQueue: translationQueue,
+                    makeEngine: { _, allowMock in
+                        log.record("factory allowMock=\(allowMock)")
+                        return resolveEngine ? engine : nil
+                    },
+                    makeCapture: { capture },
+                    ensurePermission: { true },
+                    // Keep the detached-warm-up interleave (fake engine, safe)
+                    // that the ordered-subsequence log assertions account for.
+                    warmUpEnabled: { true }
+                )
+            },
+            // Stub the launch check: the real locator hashes the dev GGUF and
+            // the resolved URL feeds the warm-up. The scripted URL below
+            // drives the same path over the injected doubles.
+            initialModelResolve: { nil }
+        )
         // Quiesce the launch-time model check, then force an idle start with
         // a synthetic model URL (model discovery is async now).
         await model.initialModelCheck?.value
