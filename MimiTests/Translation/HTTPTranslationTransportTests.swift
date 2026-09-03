@@ -118,6 +118,23 @@ struct HTTPTranslationTransportTests {
         #expect(thrown == .network)
     }
 
+    /// A per-provider request timeout must surface as a classified
+    /// `.network` error — the queue renders it as clear status copy, never a
+    /// hang or a raw `URLError`.
+    @Test("a request timeout maps to network")
+    func requestTimeoutMapsToNetwork() async throws {
+        let transport = makeTransport { _ in
+            throw URLError(.timedOut)
+        }
+        let request = try URLRequest(url: #require(URL(string: "https://provider.test/translate")))
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await transport.send(request) { _, _ in nil }
+        }
+
+        #expect(thrown == .network)
+    }
+
     @Test("request cancellation stays CancellationError")
     func cancellationStaysCancellation() async throws {
         let transport = makeTransport { _ in
