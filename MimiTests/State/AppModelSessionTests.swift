@@ -61,11 +61,11 @@ struct AppModelSessionTests {
             pollScript = poll
         }
 
-        func prepare() throws {
+        func prepare() {
             log.record("engine.prepare")
         }
 
-        func openStream() throws {
+        func openStream() {
             log.record("engine.openStream")
         }
 
@@ -82,7 +82,7 @@ struct AppModelSessionTests {
         }
     }
 
-    private final class ScriptedCapture: AudioCapturing {
+    private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
         var onChunk: ((AudioChunk) -> Void)?
         var onIOError: ((CaptureError) -> Void)?
 
@@ -169,6 +169,7 @@ struct AppModelSessionTests {
                     warmUpEnabled: { true }
                 )
             },
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelSession"),
             // Stub the launch check: the real locator hashes the dev GGUF and
             // the resolved URL feeds the warm-up. The scripted URL below
             // drives the same path over the injected doubles.
@@ -184,21 +185,6 @@ struct AppModelSessionTests {
         )
     }
 
-    /// Lets spawned tasks and teardown finish before assertions.
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(200))
-    }
-
-    /// Pumps the main runloop so scheduled timers fire (poll interval is
-    /// 0.06 s) while `condition` is unmet.
-    private func pumpUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-    }
-
     // MARK: - start() happy path
 
     @Test("start brings the session up to running, surfaces partials, and wires translation")
@@ -208,17 +194,17 @@ struct AppModelSessionTests {
         sut.model.start()
 
         #expect(sut.model.phase == .starting)
-        await pumpUntil { sut.model.phase == .running }
+        await pollUntil { sut.model.phase == .running }
         #expect(sut.model.phase == .running)
         #expect(sut.model.translationConfig != nil)
         #expect(sut.model.errorMessage == nil)
         #expect(sut.controller.sessionMetadata != nil)
-        await pumpUntil { sut.model.live.partial == "ライブ" }
+        await pollUntil { sut.model.live.partial == "ライブ" }
         #expect(sut.model.live.partial == "ライブ")
 
         sut.model.stop()
         #expect(sut.model.phase == .stopping)
-        await settle()
+        await pollUntil { sut.model.phase == .idle }
         #expect(sut.model.phase == .idle)
         #expect(sut.model.live.partial == "")
         #expect(sut.model.translationStatus == .idle)
@@ -240,7 +226,7 @@ struct AppModelSessionTests {
 
         sut.model.start()
 
-        await pumpUntil { sut.model.phase == .needsModel }
+        await pollUntil { sut.model.phase == .needsModel }
         #expect(sut.model.phase == .needsModel)
         #expect(sut.model.translationConfig == nil)
         #expect(sut.controller.sessionMetadata == nil)
@@ -253,7 +239,7 @@ struct AppModelSessionTests {
 
         sut.model.start()
 
-        await pumpUntil { sut.model.phase == .failed("boom") }
+        await pollUntil { sut.model.phase == .failed("boom") }
         #expect(sut.model.phase == .failed("boom"))
         #expect(sut.log.names.contains("capture.start"))
         #expect(sut.controller.sessionMetadata == nil)
@@ -268,14 +254,16 @@ struct AppModelSessionTests {
         let sut = await makeSUT(startGate: gate)
 
         sut.model.start()
-        await pumpUntil { sut.log.names.contains("capture.start") }
+        await pollUntil { sut.log.names.contains("capture.start") }
         #expect(sut.model.phase == .starting)
 
         sut.model.stop()
         #expect(sut.model.phase == .stopping)
 
         gate.open()
-        await settle()
+        // Teardown runs through a detached engine finish and the queue drain
+        // (5 s bound) — give it the same headroom.
+        await pollUntil(timeout: 5) { sut.model.phase == .idle }
 
         #expect(sut.model.phase == .idle)
         #expect(sut.model.live.partial == "")

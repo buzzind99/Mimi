@@ -14,7 +14,10 @@ struct AppModelDictionaryTests {
     /// Stubbed launch check: the real locator hashes the dev GGUF and feeds
     /// the engine warm-up — real blocking work tests must never trigger.
     private func makeModel() -> AppModel {
-        AppModel(initialModelResolve: { nil })
+        AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelDictionary"),
+            initialModelResolve: { nil }
+        )
     }
 
     @Test("kicks dictionary preparation when no dictionary resolves")

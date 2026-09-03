@@ -122,7 +122,7 @@ struct TranslationQueueFallbackTests {
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
 
-        let deadWorker = Task { await queue.run(with: dead) }
+        _ = Task { await queue.run(with: dead) }
         await waitUntil {
             if case .unavailable = queue.status {
                 return true
@@ -162,8 +162,11 @@ struct TranslationQueueFallbackTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
 
+        // Sleeps only long enough to be observably in-flight: cancellation
+        // must interrupt it, so a lost propagation fails in ~2 s instead of
+        // stalling the suite.
         let sleeper = EchoEngine { _ in
-            try await Task.sleep(for: .seconds(30))
+            try await Task.sleep(for: .seconds(2))
             return "unreachable"
         }
         let worker = Task { await queue.run(with: sleeper) }

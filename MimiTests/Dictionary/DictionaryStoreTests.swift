@@ -7,7 +7,8 @@ import Testing
 //
 // Top-level C-convention functions (no captures, so they convert to the FFI
 // function-pointer types) plus file-scope counters. The suite is serialized,
-// so plain globals are safe. The fake prepare actually writes a file at the
+// so plain globals are safe (hence `nonisolated(unsafe)`); access is test-
+// driven and never concurrent. The fake prepare actually writes a file at the
 // requested output path so the store's promote step behaves like the real
 // thing.
 
@@ -18,8 +19,8 @@ private let fakeDicContents = "fake dic"
 /// The smoke word the store tokenizes; lives in the fake tokenize payloads.
 private let smokeWord = "学生"
 
-private var fakePrepareCalls = 0
-private var fakePrepareDelayMs = 0
+private nonisolated(unsafe) var fakePrepareCalls = 0
+private nonisolated(unsafe) var fakePrepareDelayMs = 0
 
 private func fakePrepareWriteFile(
     _ zstPath: UnsafePointer<CChar>, _ outPath: UnsafePointer<CChar>
@@ -320,9 +321,11 @@ final class DictionaryStoreTests {
         fakePrepareDelayMs = 300
         let store = makeStore()
 
-        async let first = prepare(store)
-        async let second = prepare(store)
-        async let third = prepare(store)
+        // Call `store.prepare()` directly (not via `self.prepare`) so the
+        // `async let`s only send the Sendable store, not the test instance.
+        async let first = store.prepare()
+        async let second = store.prepare()
+        async let third = store.prepare()
         let results = try await(first, second, third)
 
         #expect(results.0 == results.1 && results.1 == results.2)

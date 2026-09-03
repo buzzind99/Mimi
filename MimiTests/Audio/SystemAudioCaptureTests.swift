@@ -336,8 +336,11 @@ struct SystemAudioCaptureTests {
             deliveryGate.unlock()
         }
 
+        // The callback thread deliberately hands the buffer in off-main —
+        // that is the real production path; the buffer is read-only here.
+        nonisolated(unsafe) let callbackBuffer = buffer
         let callbackThread = Thread {
-            capture.handleSampleBuffer(buffer, type: .audio)
+            capture.handleSampleBuffer(callbackBuffer, type: .audio)
         }
         callbackThread.start()
         #expect(chunkDelivered.wait(timeout: .now() + 2) == .success)
@@ -377,19 +380,28 @@ struct SystemAudioCaptureTests {
     @Test("a stop during extraction drops the in-flight samples")
     func stopDuringExtractionDropsSamples() throws {
         let capture = makeCapture(running: true)
-        // A payload whose downmix is still running when stop() fires below:
-        // the callback passes the cheap entry check, then gets fenced by the
-        // locked re-check and must deliver nothing. The payload is sized so
-        // the downmix outlasts the 10 ms stop delay without costing seconds.
-        let buffer = try SampleBufferSynthesis.make(frames: 2_000_000)
+        // Extraction (buffer-list copy + downmix) must comfortably outlast
+        // the gap between the callback-start signal and stop()'s fence:
+        // 8M frames downmix in tens of milliseconds, so the callback is
+        // guaranteed to still be inside `extractMono` — before the locked
+        // re-check — when stop() flips `isRunning`. The re-check then drops
+        // the whole buffer.
+        let buffer = try SampleBufferSynthesis.make(frames: 8_000_000)
 
+        let callbackStarted = DispatchSemaphore(value: 0)
         let callbackFinished = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) let callbackBuffer = buffer
         let callbackThread = Thread {
-            capture.handleSampleBuffer(buffer, type: .audio)
+            callbackStarted.signal()
+            capture.handleSampleBuffer(callbackBuffer, type: .audio)
             callbackFinished.signal()
         }
         callbackThread.start()
-        Thread.sleep(forTimeInterval: 0.01)
+        #expect(callbackStarted.wait(timeout: .now() + 2) == .success)
+        // The entry checks are microseconds; this settle only has to let the
+        // callback pass them and enter extraction. If the thread has not
+        // scheduled at all, the entry `isRunning` guard drops the buffer too.
+        Thread.sleep(forTimeInterval: 0.002)
         capture.stop()
 
         #expect(callbackFinished.wait(timeout: .now() + 10) == .success)

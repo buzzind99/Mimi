@@ -9,7 +9,9 @@ struct HTTPTranslationTransportTests {
 
     // MARK: - Helpers
 
-    private static let okResponse = {
+    /// `nonisolated(unsafe)`: capture-free factory returning a fresh
+    /// response per call — no shared mutable state.
+    private nonisolated(unsafe) static let okResponse = {
         HTTPURLResponse(url: URL(string: "https://provider.test/translate")!, statusCode: 200, httpVersion: nil, headerFields: nil)!
     }
 

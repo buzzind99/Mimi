@@ -69,14 +69,16 @@ struct CrispASREngineLiveTests {
         }
 
         let pcm = speechCycles(samples: 4 * CrispASREngine.sampleRate)
-        let sliceResult = library.vadSlices(
-            modelPath: vadPath, pcm: pcm,
-            parameters: CrispASRVADParameters(
-                sampleRate: CrispASREngine.sampleRate, threshold: CrispASREngine.vadThreshold,
-                minSpeechMS: CrispASREngine.vadMinSpeechMS,
-                minSilenceMS: CrispASREngine.vadMinSilenceMS, padMS: CrispASREngine.vadPadMS
+        let sliceResult = pcm.withUnsafeBufferPointer { buf in
+            library.vadSlices(
+                modelPath: vadPath, pcm: Span(_unsafeElements: buf),
+                parameters: CrispASRVADParameters(
+                    sampleRate: CrispASREngine.sampleRate, threshold: CrispASREngine.vadThreshold,
+                    minSpeechMS: CrispASREngine.vadMinSpeechMS,
+                    minSilenceMS: CrispASREngine.vadMinSilenceMS, padMS: CrispASREngine.vadPadMS
+                )
             )
-        )
+        }
         let slices = try #require(sliceResult, "the dispatcher-backed ABI must not return nil")
 
         #expect(slices.count >= 0, "a present model must not fail the C call (negative code)")
@@ -109,7 +111,11 @@ struct CrispASREngineLiveTests {
         defer { engine.close() }
 
         let pcm = [Float](repeating: 0, count: 2 * CrispASREngine.sampleRate) // 2 s at the conv floor
-        let text = engine.lib.transcribeText(session: session(engine), pcm: pcm, languageCode: "ja")
+        let text = pcm.withUnsafeBufferPointer { buf in
+            engine.lib.transcribeText(
+                session: session(engine), pcm: Span(_unsafeElements: buf), languageCode: "ja"
+            )
+        }
 
         #expect(text != nil, "the FFI call must round-trip; empty text is a valid result")
     }

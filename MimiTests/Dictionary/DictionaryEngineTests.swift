@@ -30,18 +30,19 @@ let dictionaryEnvLock = NSLock()
 //
 // Top-level C-convention functions (no captures, so they convert to the FFI
 // function-pointer types) plus file-scope counters and a per-test payload
-// variable. The suite below is serialized, so plain globals are safe.
+// variable. The suite below is serialized, so plain globals are safe (hence
+// `nonisolated(unsafe)`; access is test-driven and never concurrent).
 
-private let fakeHandle = UnsafeMutableRawPointer(bitPattern: 0xCAFE_FEED)
+private nonisolated(unsafe) let fakeHandle = UnsafeMutableRawPointer(bitPattern: 0xCAFE_FEED)
 
-private var fakeOpenCalls = 0
+private nonisolated(unsafe) var fakeOpenCalls = 0
 /// Number of initial open attempts that fail before the fake succeeds.
-private var fakeOpenFailuresBeforeSuccess = 0
+private nonisolated(unsafe) var fakeOpenFailuresBeforeSuccess = 0
 
 /// Raw JSON the tokenize fake returns; nil means "return a null pointer".
-private var fakeTokenizeJSONText: String?
+private nonisolated(unsafe) var fakeTokenizeJSONText: String?
 
-private var fakeFreeStringCalls = 0
+private nonisolated(unsafe) var fakeFreeStringCalls = 0
 
 private func fakeOpenCounting(_ dicPath: UnsafePointer<CChar>) -> UnsafeMutableRawPointer? {
     fakeOpenCalls += 1

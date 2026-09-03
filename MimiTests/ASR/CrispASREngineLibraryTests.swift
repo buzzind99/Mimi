@@ -417,16 +417,17 @@ private final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable
     }
 
     func transcribeText(
-        session: OpaquePointer?, pcm: [Float], languageCode: String
+        session: OpaquePointer?, pcm: borrowing Span<Float>, languageCode: String
     ) -> String? {
+        let pcmCopy = pcm.withUnsafeBufferPointer { Array($0) }
         if let hold = transcribeHoldSemaphore {
             lock.withLock { transcribeEntered = true }
             hold.wait()
         }
         lock.withLock {
             transcribeCalls.append(TranscribeCall(
-                pcmCount: pcm.count,
-                pcm: recordTranscribePcm ? pcm : [],
+                pcmCount: pcmCopy.count,
+                pcm: recordTranscribePcm ? pcmCopy : [],
                 languageCode: languageCode
             ))
         }
@@ -436,10 +437,10 @@ private final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable
 
     func vadSlices(
         modelPath: String,
-        pcm: [Float],
+        pcm: borrowing Span<Float>,
         parameters: CrispASRVADParameters
     ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)? {
-        lock.withLock { vadCalls.append(pcm) }
+        lock.withLock { vadCalls.append(pcm.withUnsafeBufferPointer { Array($0) }) }
         if let hold = vadHoldSemaphore {
             lock.withLock { vadEntered = true }
             hold.wait()

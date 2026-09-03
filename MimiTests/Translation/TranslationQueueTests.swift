@@ -367,11 +367,15 @@ struct TranslationQueueTests {
         }
         #expect(!message.isEmpty)
 
+        // Generous margin over drain's own timeout: the early return is
+        // near-instant, and the assertion must never trip on scheduling
+        // jitter. A regression (waiting out the deadline) costs 3 s, not a
+        // hang.
         let start = Date()
-        let drained = await queue.drain(timeout: 1.0)
+        let drained = await queue.drain(timeout: 3.0)
         #expect(!drained)
         #expect(
-            Date().timeIntervalSince(start) < 0.8,
+            Date().timeIntervalSince(start) < 1.5,
             "drain must early-return on .unavailable, not wait out the deadline"
         )
     }
@@ -427,9 +431,7 @@ private final class MockTranslationEngine: TranslationEngine, @unchecked Sendabl
     }
 
     func translate(_ texts: [String]) async throws -> [String] {
-        lock.lock()
-        batches.append(texts)
-        lock.unlock()
+        lock.withLock { batches.append(texts) }
         return try await handler(texts)
     }
 }

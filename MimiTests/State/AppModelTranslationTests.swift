@@ -27,7 +27,10 @@ struct AppModelTranslationTests {
     /// Stubbed launch check: the real locator hashes the dev GGUF and feeds
     /// the engine warm-up — real blocking work tests must never trigger.
     private func makeModel() -> AppModel {
-        AppModel(initialModelResolve: { nil })
+        AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelTranslation"),
+            initialModelResolve: { nil }
+        )
     }
 
     private func makeInstalledJAToENSession() async throws -> TranslationSession {

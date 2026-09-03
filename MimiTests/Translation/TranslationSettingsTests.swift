@@ -1,6 +1,6 @@
-import Combine
 import Foundation
 @testable import Mimi
+import Security
 import Testing
 
 /// Tests `TranslationSettings` with an isolated `UserDefaults` suite and an
@@ -13,11 +13,9 @@ struct TranslationSettingsTests {
 
     /// Key store whose save always fails — stands in for Keychain errors
     /// (auth denied, storage failure).
-    private struct KeySaveFailed: Error {}
-
     private struct ThrowingKeyStore: SecureKeyStoring {
-        func saveKey(_ key: String, for providerID: String) throws {
-            throw KeySaveFailed()
+        func saveKey(_ key: String, for providerID: String) throws(KeychainStoreError) {
+            throw KeychainStoreError(status: errSecAuthFailed)
         }
 
         func readKey(for providerID: String) -> String? {
@@ -132,7 +130,7 @@ struct TranslationSettingsTests {
     func failedSaveSurfacesErrorAndMutatesNothing() {
         let (settings, _) = makeSUT(keys: ThrowingKeyStore())
 
-        #expect(throws: (any Error).self) {
+        #expect(throws: KeychainStoreError.self) {
             try settings.saveKey("sk-google", for: .google)
         }
         #expect(!settings.hasKey(for: .google))
@@ -143,26 +141,38 @@ struct TranslationSettingsTests {
 
     // MARK: - Observation
 
-    /// Locks in that `hasKey`/`keyHints`/`testResults` mutations publish:
-    /// views must update on `setTestResult`/`removeKey` without incidental
-    /// invalidation from a nearby `@Published` write.
-    @Test("mutating keys and test results publishes objectWillChange")
-    func mutationsPublishObjectWillChange() throws {
+    /// Locks in that `hasKey`/`keyHints`/`testResults` mutations are observed
+    /// by tracking readers: views must update on `setTestResult`/`removeKey`.
+    /// Each recorder pins the dictionary property the UI actually reads.
+    /// The recorder's read hops to the main actor post-mutation, so each
+    /// mutation is followed by a settle.
+    @Test("mutating keys and test results is observed by tracking readers")
+    func mutationsAreObserved() async throws {
         let (settings, _) = makeSUT()
-        var publishedCount = 0
-        var subscriptions: [AnyCancellable] = []
-        settings.objectWillChange.sink { _ in publishedCount += 1 }.store(in: &subscriptions)
+        let hasKeyRecorder = ObservedValuesRecorder(read: { settings.hasKey[.google] ?? false })
+        let keyHintsRecorder = ObservedValuesRecorder(read: { settings.keyHints[.google] })
+        let testResultsRecorder = ObservedValuesRecorder(read: { settings.testResult(for: .google) })
+        func settle() async {
+            for _ in 0 ..< 20 {
+                await Task.yield()
+            }
+        }
 
         settings.setTestResult(.success, for: .google)
-        #expect(publishedCount >= 1)
+        await settle()
+        #expect(testResultsRecorder.values == [.success])
+        #expect(hasKeyRecorder.values.isEmpty)
+        #expect(keyHintsRecorder.values.isEmpty)
 
-        publishedCount = 0
         try settings.saveKey("sk-google-1234", for: .google)
-        #expect(publishedCount >= 1)
+        await settle()
+        #expect(hasKeyRecorder.values == [true])
+        #expect(keyHintsRecorder.values == ["1234"])
 
-        publishedCount = 0
         settings.removeKey(for: .google)
-        #expect(publishedCount >= 1)
+        await settle()
+        #expect(hasKeyRecorder.values == [true, false])
+        #expect(keyHintsRecorder.values == ["1234", nil])
     }
 
     // MARK: - Selection persistence

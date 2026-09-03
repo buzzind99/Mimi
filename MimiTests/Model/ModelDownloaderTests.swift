@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 @testable import Mimi
 import Testing
@@ -68,7 +67,7 @@ struct ModelDownloaderTests {
     @Test("cancel while idle is a no-op that republishes nothing")
     func cancelWhileIdle() async {
         let downloader = ModelDownloader()
-        let emissions = PublishedValuesRecorder(downloader.$state)
+        let emissions = ObservedValuesRecorder(read: { downloader.state })
 
         downloader.cancel()
         downloader.cancel()
@@ -98,7 +97,7 @@ struct ModelDownloaderTests {
         #expect(done, "state should reach .done via the already-verified-model arm")
         #expect(downloader.state == .done(destination))
 
-        let emissions = PublishedValuesRecorder(downloader.$state)
+        let emissions = ObservedValuesRecorder(read: { downloader.state })
         downloader.start()
         await settle()
 
@@ -141,7 +140,7 @@ struct ModelDownloaderTests {
         #expect(downloader.state == .downloading(progress: 0, bytes: 0, total: nil))
         #expect(!FileManager.default.fileExists(atPath: file.path), "an unverifiable destination is removed")
 
-        let emissions = PublishedValuesRecorder(downloader.$state)
+        let emissions = ObservedValuesRecorder(read: { downloader.state })
         downloader.start()
         await settle()
 
@@ -156,11 +155,16 @@ struct ModelDownloaderTests {
             makeSession: { _ in URLSession(configuration: .ephemeral) },
             makeTask: { session in
                 let task = session.downloadTask(with: url)
-                task.suspend() // begin()'s resume() then leaves it suspended: no network
+                // Suspend twice: begin()'s resume() consumes one suspension,
+                // leaving the task suspended so no network ever starts. A
+                // single suspend would let the task run and race cancel()
+                // against a real DNS failure for the invalid host.
+                task.suspend()
+                task.suspend()
                 return task
             }
         )
-        let emissions = PublishedValuesRecorder(downloader.$state)
+        let emissions = ObservedValuesRecorder(read: { downloader.state })
 
         downloader.start()
         _ = await waitFor(downloader, timeout: 5) { state in
@@ -176,6 +180,9 @@ struct ModelDownloaderTests {
             }
             return false
         }
+        // The .idle emission is recorded via a main-actor hop; let it land
+        // before reading the recorder.
+        await settle()
 
         #expect(idle, "cancel() publishes the idle state")
         #expect(downloader.state == .idle)

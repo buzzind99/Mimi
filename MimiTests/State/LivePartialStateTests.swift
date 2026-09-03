@@ -1,40 +1,49 @@
-import Combine
 @testable import Mimi
 import Testing
 
-/// Tests `LivePartialState` published partial set/clear.
+/// Tests `LivePartialState` observed partial set/clear.
 @MainActor
 @Suite("LivePartialState")
 struct LivePartialStateTests {
 
     // MARK: - Helpers
 
-    private func makeSUT() -> (LivePartialState, PublishedValuesRecorder<String>) {
+    private func makeSUT() -> (LivePartialState, ObservedValuesRecorder<String>) {
         let sut = LivePartialState()
-        let published = PublishedValuesRecorder(sut.$partial)
-        return (sut, published)
+        let observed = ObservedValuesRecorder(read: { sut.partial })
+        return (sut, observed)
     }
 
-    // MARK: - Published partial
+    /// Lets the recorder's post-mutation read hops run before assertions.
+    private func settle() async {
+        for _ in 0 ..< 20 {
+            await Task.yield()
+        }
+    }
 
-    @Test("setting the partial publishes the new value")
-    func setPublishesNewValue() {
-        let (sut, published) = makeSUT()
+    // MARK: - Observed partial
+
+    @Test("setting the partial fires the new value")
+    func setFiresNewValue() async {
+        let (sut, observed) = makeSUT()
 
         sut.partial = "こんにちは"
+        await settle()
 
         #expect(sut.partial == "こんにちは")
-        #expect(published.values == ["こんにちは"])
+        #expect(observed.values == ["こんにちは"])
     }
 
-    @Test("clearing the partial publishes an empty string")
-    func clearPublishesEmptyString() {
-        let (sut, published) = makeSUT()
+    @Test("clearing the partial fires an empty string")
+    func clearFiresEmptyString() async {
+        let (sut, observed) = makeSUT()
         sut.partial = "こんにちは"
+        await settle()
 
         sut.partial = ""
+        await settle()
 
         #expect(sut.partial == "")
-        #expect(published.values == ["こんにちは", ""])
+        #expect(observed.values == ["こんにちは", ""])
     }
 }

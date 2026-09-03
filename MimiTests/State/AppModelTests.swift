@@ -25,18 +25,16 @@ struct AppModelTests {
     /// parallel test execution. Flow coverage over scripted doubles lives in
     /// `AppModelSessionTests`.
     private func makeSUT() async -> AppModel {
-        let model = AppModel(initialModelResolve: { nil })
+        let model = AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
+            initialModelResolve: { nil }
+        )
         await model.initialModelCheck?.value
         return model
     }
 
     private func makeSentence(index: Int = 0) -> Sentence {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: sentenceText)
-    }
-
-    /// Lets any spawned teardown task finish before assertions.
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(200))
     }
 
     // MARK: - stop() guards
@@ -47,7 +45,6 @@ struct AppModelTests {
         model.phase = .idle
 
         model.stop()
-        await settle()
 
         #expect(model.phase == .idle)
     }
@@ -58,7 +55,6 @@ struct AppModelTests {
         model.phase = .needsModel
 
         model.stop()
-        await settle()
 
         #expect(model.phase == .needsModel)
     }
@@ -69,7 +65,6 @@ struct AppModelTests {
         model.phase = .failed("boom")
 
         model.stop()
-        await settle()
 
         #expect(model.phase == .failed("boom"))
     }
@@ -84,7 +79,7 @@ struct AppModelTests {
         model.stop()
 
         #expect(model.phase == .stopping)
-        await settle()
+        await pollUntil { model.phase == .idle }
         #expect(model.phase == .idle)
     }
 
@@ -96,7 +91,7 @@ struct AppModelTests {
         model.stop()
 
         #expect(model.phase == .stopping)
-        await settle()
+        await pollUntil { model.phase == .idle }
         #expect(model.phase == .idle)
         #expect(model.translationStatus == .idle)
     }
@@ -109,7 +104,7 @@ struct AppModelTests {
         model.stop()
 
         #expect(model.phase == .stopping)
-        await settle()
+        await pollUntil { model.phase == .idle }
         #expect(model.phase == .idle)
     }
 
@@ -446,7 +441,7 @@ struct AppModelTests {
         model.phase = .running
 
         NotificationCenter.default.post(name: Self.willTerminateNotification, object: nil)
-        await settle()
+        await pollUntil { model.phase == .idle }
 
         #expect(model.phase == .idle)
     }

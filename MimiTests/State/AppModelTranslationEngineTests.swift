@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimi
+import Synchronization
 import Testing
 
 /// Tests `AppModel`'s engine selection: an external provider spawns a
@@ -19,11 +20,8 @@ struct AppModelTranslationEngineTests {
     }
 
     private func makeSettings(provider: TranslationProvider) -> TranslationSettings {
-        let defaults = UserDefaults(suiteName: "test.AppModelEngine.\(UUID().uuidString)")!
-        let settings = TranslationSettings(defaults: defaults, keys: InMemoryKeyStore())
-        if provider == .apple {
-            settings.select(.apple)
-        } else {
+        let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
+        if provider != .apple {
             // Saving a key for an external provider auto-selects it.
             try? settings.saveKey("test-key-1234", for: provider)
         }
@@ -78,11 +76,8 @@ struct AppModelTranslationEngineTests {
     }
 
     @Test("an unconfigured selected provider degrades to Apple with a note")
-    func unconfiguredProviderFallsBackToAppleWithNote() throws {
-        let defaults = try #require(
-            UserDefaults(suiteName: "test.AppModelEngine.\(UUID().uuidString)")
-        )
-        let settings = TranslationSettings(defaults: defaults, keys: InMemoryKeyStore())
+    func unconfiguredProviderFallsBackToAppleWithNote() {
+        let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         settings.select(.openrouter)
         let model = AppModel(translationSettings: settings, initialModelResolve: { nil })
 
@@ -90,7 +85,13 @@ struct AppModelTranslationEngineTests {
 
         #expect(model.activeTranslationEngine == .apple)
         #expect(model.translationConfig != nil)
-        #expect(model.errorMessage?.contains("no API key") == true)
+        // Release names the missing key; dev pins to Apple via the no-op key
+        // store and says so instead.
+        #if DEBUG
+            #expect(model.errorMessage?.contains("Apple on-device") == true)
+        #else
+            #expect(model.errorMessage?.contains("no API key") == true)
+        #endif
     }
 
     @Test("each external provider builds its engine and spawns the worker")
@@ -185,12 +186,11 @@ struct AppModelTranslationEngineTests {
     func engineRetryProgressSurfacesAsRetrying() async {
         // First round-trip 429 (transient → one retry), then a valid
         // chat-completions response.
-        let lock = NSLock()
-        var attempts = 0
+        let attempts = Mutex(0)
         let transport = HTTPTranslationTransport(timeout: 5) { request in
-            let attempt = lock.withLock {
-                attempts += 1
-                return attempts
+            let attempt = attempts.withLock { state -> Int in
+                state += 1
+                return state
             }
             let status = attempt == 1 ? 429 : 200
             let body = attempt == 1

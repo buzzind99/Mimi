@@ -28,15 +28,45 @@ struct SessionControllerTests {
 
     // MARK: - Helpers
 
-    private func settle() async throws {
-        try await Task.sleep(for: .milliseconds(200))
+    /// Bounded wait proving absence of activity: gives a (buggy) warm-up
+    /// spawn a window to run before asserting it did not.
+    private func settle() async {
+        try? await Task.sleep(for: .milliseconds(200))
     }
 
-    /// Lets scheduled timers fire (poll interval is 0.06 s) and gives the
-    /// main actor a slot to run the tasks their closures enqueue.
-    private func pumpTimers() async {
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        try? await Task.sleep(for: .milliseconds(50))
+    /// Pumps the main runloop in short slices for `seconds` total so the
+    /// controller's scheduled timers fire, giving the main actor slots
+    /// between slices to run the tasks their closures enqueue. For the
+    /// absence-of-activity tests, which have no observable success state.
+    private func pumpTimers(seconds: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            pumpRunLoop(seconds: 0.05)
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// Condition-driven timer pump: pumps until `condition` holds or the
+    /// timeout expires, so assertions never hinge on a fixed delay outrunning
+    /// timer-fire scheduling under load. Returns false on timeout.
+    private func pumpTimers(
+        timeout: TimeInterval = 2,
+        until condition: @autoclosure () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else { return false }
+            pumpRunLoop(seconds: 0.05)
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return true
+    }
+
+    /// Sync wrapper around the noasync-annotated `RunLoop.run(until:)`:
+    /// `Task.sleep` does not spin the main runloop, so the scheduled
+    /// poll/tick timers never fire without this deliberate pump.
+    private nonisolated func pumpRunLoop(seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
     private func makeSUT(
@@ -82,12 +112,14 @@ struct SessionControllerTests {
     }
 
     @Test("repeated warm-up calls schedule exactly one background prepare")
-    func warmUpPreparesOnce() async throws {
+    func warmUpPreparesOnce() async {
         let sut = makeSUT()
 
         sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
         sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
-        try await settle()
+        await pollUntil {
+            sut.log.names == ["factory allowMock=false", "engine.prepare"]
+        }
 
         #expect(sut.log.names == ["factory allowMock=false", "engine.prepare"])
         #expect(sut.live.partial == "")
@@ -99,7 +131,7 @@ struct SessionControllerTests {
     /// a ggml-metal init wedge). The scheduling tests above opt back in via
     /// the `warmUpEnabled` seam.
     @Test("warm-up is suppressed by default in the unit-test host")
-    func warmUpDefaultsSuppressedInTestHost() async throws {
+    func warmUpDefaultsSuppressedInTestHost() async {
         let log = CallLog()
         let controller = SessionController(
             live: LivePartialState(), latency: LatencyState(), translationQueue: TranslationQueue(),
@@ -111,7 +143,7 @@ struct SessionControllerTests {
 
         controller.warmUpIfNeeded(modelURL: warmUpModelURL)
         controller.warmUpIfNeeded(modelURL: warmUpModelURL)
-        try await settle()
+        await settle()
 
         #expect(log.names.isEmpty)
     }
@@ -155,7 +187,7 @@ struct SessionControllerTests {
         let sut = makeSUT()
 
         sut.controller.startTimers()
-        await pumpTimers()
+        await pumpTimers(seconds: 0.3)
         await sut.controller.stop()
 
         #expect(sut.live.partial == "")
@@ -167,9 +199,9 @@ struct SessionControllerTests {
         let sut = makeSUT()
 
         sut.controller.startTimers()
-        await pumpTimers()
+        await pumpTimers(seconds: 0.3)
         await sut.controller.stop()
-        await pumpTimers()
+        await pumpTimers(seconds: 0.3)
 
         #expect(sut.live.partial == "")
         #expect(sut.controller.sessionMetadata == nil)
@@ -271,8 +303,9 @@ struct SessionControllerTests {
 
         sut.capture.onChunk?(AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: 0))
         sut.controller.startTimers()
-        await pumpTimers()
+        let surfaced = await pumpTimers(until: sut.latency.seconds == 0.2)
 
+        #expect(surfaced, "the poll tick must surface the latency readback")
         #expect(sut.latency.seconds == 0.2)
     }
 
@@ -290,8 +323,9 @@ struct SessionControllerTests {
             )
         }
         sut.controller.startTimers()
-        await pumpTimers()
+        let surfaced = await pumpTimers(until: sut.latency.seconds == 8.0)
 
+        #expect(surfaced, "the poll tick must accumulate the full ingress latency")
         #expect(sut.engine.allPushedChunks.count == 50)
         #expect(sut.controller.sessionMetadata != nil)
         #expect(sut.latency.seconds == 8.0)
@@ -305,7 +339,7 @@ struct SessionControllerTests {
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.capture.onIOError?(.streamSetupFailed(captureFailureDetail))
-        try await settle()
+        await pollUntil { !messages.isEmpty }
 
         #expect(messages.first == CaptureError.streamSetupFailed(captureFailureDetail).errorDescription)
     }
@@ -318,7 +352,7 @@ struct SessionControllerTests {
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.engine.onEngineError?(engineFailureMessage)
-        try await settle()
+        await pollUntil { !messages.isEmpty }
 
         #expect(messages == [engineFailureMessage])
     }
@@ -330,7 +364,8 @@ struct SessionControllerTests {
         let sut = makeSUT(poll: [.partial(text: pendingPartial)])
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
         sut.controller.startTimers()
-        await pumpTimers()
+        let surfaced = await pumpTimers(until: sut.live.partial == pendingPartial)
+        #expect(surfaced, "the poll timer must surface the scripted partial")
         let surfacedPartial = sut.live.partial
 
         await sut.controller.stop()
@@ -351,12 +386,12 @@ struct SessionControllerTests {
         sut.controller.onSentence = { sentences.append($0) }
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
         sut.controller.startTimers()
-        await pumpTimers()
-        let emitted = sentences
+        let emitted = await pumpTimers(until: !sentences.isEmpty)
         await sut.controller.stop()
 
+        #expect(emitted, "the poll timer must route the final into the sentence pipeline")
         #expect(
-            emitted == [
+            sentences == [
                 Sentence(index: 0, startS: 0.0, endS: 1.0, lang: "ja", text: fullSentence)
             ]
         )
@@ -402,7 +437,7 @@ private struct SUT {
     let log: CallLog
 }
 
-private final class CallLog {
+private final class CallLog: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [String] = []
 
@@ -433,11 +468,11 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
         finishQueue = finish
     }
 
-    func prepare() throws {
+    func prepare() {
         log.record("engine.prepare")
     }
 
-    func openStream() throws {
+    func openStream() {
         log.record("engine.openStream")
     }
 
@@ -470,7 +505,7 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
     }
 }
 
-private final class ScriptedCapture: AudioCapturing {
+private final class ScriptedCapture: AudioCapturing, @unchecked Sendable {
     var onChunk: ((AudioChunk) -> Void)?
     var onIOError: ((CaptureError) -> Void)?
 
