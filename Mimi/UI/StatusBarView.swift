@@ -11,6 +11,7 @@ struct StatusBarView: View {
             statusBadge
             translationPill
             translationStatusMessage
+            errorMessage
             Spacer()
             Text("≈ \(latency.seconds.formatted(.number.precision(.fractionLength(1)))) s behind")
                 .font(.caption.monospacedDigit())
@@ -51,13 +52,7 @@ struct StatusBarView: View {
             Label("Idle", systemImage: "circle")
                 .font(.caption).foregroundStyle(.secondary)
         }
-
-        if let message = model.errorMessage {
-            Text(message).font(.caption).foregroundStyle(.red)
-        }
     }
-
-    // MARK: - Translation connection pill + footer copy
 
     /// Green/yellow/red connection pill, derived from (status × active
     /// engine) by the tested `TranslationPill.map` function.
@@ -102,6 +97,13 @@ struct StatusBarView: View {
             Text("Translating…").font(.caption).foregroundStyle(.secondary)
         case .ready, .idle:
             EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var errorMessage: some View {
+        if let message = model.errorMessage {
+            Text(message).font(.caption).foregroundStyle(.red)
         }
     }
 
