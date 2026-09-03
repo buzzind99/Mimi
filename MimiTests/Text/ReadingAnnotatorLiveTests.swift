@@ -188,6 +188,29 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["七", "nana", "なな"], ["回", "kai", "かい"]])
     }
 
+    @Test("reads the irregular people counter as one fused word (一人/二人/四人)",
+          arguments: [
+              ("一人", "hitori", "ひとり"),
+              ("二人", "futari", "ふたり"),
+              ("四人", "yonin", "よにん")
+          ])
+    func irregularPeopleCounter(input: String, romaji: String, furigana: String) throws {
+        let segments = try segments(input)
+
+        #expect(describe(segments) == [[input, romaji, furigana]])
+    }
+
+    @Test("keeps regular people counters on the numeral + 人 split (三人/十人)",
+          arguments: [
+              ("三人", [["三", "san", "さん"], ["人", "nin", "にん"]]),
+              ("十人", [["十", "juu", "じゅう"], ["人", "nin", "にん"]])
+          ])
+    func regularPeopleCounter(input: String, expected: [[String?]]) throws {
+        let segments = try segments(input)
+
+        #expect(describe(segments) == expected)
+    }
+
     @Test("fuses Arabic digits with a counter via the digit table (600回)")
     func digitCounter() throws {
         let segments = try segments("600回")
@@ -395,7 +418,8 @@ struct ReadingAnnotatorLiveTests {
         "三万本", "二十日", "二十歳", "お母さん", "食べました", "見た", "言ってない", "来てない",
         "高かった", "田中さん", "A B", "𠮷野家", "そう言っ", "は", "を", "私達", "その方がいい",
         "こんにちは", "123", "お、母さん", "母、さん", "私の母です", "六等", "六歳", "七回",
-        "2年", "八年", "十四日", "おっ、いいね", "言ってあげる", "こっちの方", "㐂", "𠮷", "Hello"
+        "2年", "八年", "十四日", "おっ、いいね", "言ってあげる", "こっちの方", "㐂", "𠮷", "Hello",
+        "一人", "二人", "四人", "一人前"
     ])
     func concatenateBack(text: String) throws {
         let segments = try segments(text)

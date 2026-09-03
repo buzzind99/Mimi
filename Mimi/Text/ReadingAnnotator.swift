@@ -340,6 +340,17 @@ final class ReadingAnnotator: @unchecked Sendable {
             append(surface: surface, kana: "ほん", romaji: "bon", into: &segments)
             return true
         }
+        // 人 is the irregular people counter: the model always splits
+        // 一人/二人/四人 into numeral + 人 (にん), and the fused readings
+        // that split implies (いちにん/ににん/よんにん) are wrong — the words
+        // read ひとり/ふたり/よにん.
+        if surface == "人", !held.unresolved,
+           let people = Self.peopleCounterReadings[held.kana]
+        {
+            pending = nil
+            append(surface: held.surface + surface, kana: people, into: &segments)
+            return true
+        }
         // Generic fusion: the number keeps its geminating stem and the
         // counter takes a sokuon (ろく+かい → ろっかい), except where the
         // plain reading is lexical (六 + 歳/等/千).
@@ -379,6 +390,14 @@ final class ReadingAnnotator: @unchecked Sendable {
         guard geminates.contains(where: kana.hasSuffix) else { return nil }
         return String(kana.dropLast())
     }
+
+    /// Irregular people-counter readings keyed by the number's kana: the
+    /// two-token split 一+人 can only imply いちにん, never ひとり. Numbers
+    /// outside the table (三人, 十人, 二十人) read regularly and stay on the
+    /// generic path.
+    private static let peopleCounterReadings: [String: String] = [
+        "いち": "ひとり", "に": "ふたり", "よん": "よにん"
+    ]
 
     /// 六 keeps its plain reading before 歳/等/千 (ろくさい/ろくとう/ろくせん):
     /// the fusion must not produce ろっさい.

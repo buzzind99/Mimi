@@ -108,6 +108,48 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["六", "roku", "ろく"], ["等", "tou", "とう"]])
     }
 
+    @Test("reads the irregular people counter as one fused word (一人/二人/四人)",
+          arguments: [
+              (["一", "人"], ["いち", "にん"], "一人", "hitori", "ひとり"),
+              (["二", "人"], ["に", "にん"], "二人", "futari", "ふたり"),
+              (["四", "人"], ["よん", "にん"], "四人", "yonin", "よにん")
+          ])
+    func irregularPeopleCounterFusion(
+        surfaces: [String], readings: [String], text: String, romaji: String, furigana: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: readings))
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == [[text, romaji, furigana]])
+    }
+
+    @Test("fuses Arabic digits with the irregular people counter (2人 → futari)")
+    func digitPeopleCounterFusion() throws {
+        let annotator = makeAnnotator(tokens(
+            ["2", "人"], readings: [nil, "にん"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "2人"))
+
+        #expect(describe(segments) == [["2人", "futari", "ふたり"]])
+    }
+
+    @Test("keeps regular people counters separate (三人/十人)",
+          arguments: [
+              (["三", "人"], ["さん", "にん"], "三人", [["三", "san", "さん"], ["人", "nin", "にん"]]),
+              (["十", "人"], ["じゅう", "にん"], "十人", [["十", "juu", "じゅう"], ["人", "nin", "にん"]])
+          ])
+    func regularPeopleCounterStaysSplit(
+        surfaces: [String], readings: [String], text: String, expected: [[String?]]
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: readings))
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == expected)
+    }
+
     @Test("voices 本 to bon after さん/まん, with furigana ほん (三万本)")
     func voicedHon() throws {
         let annotator = makeAnnotator(tokens(
