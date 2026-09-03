@@ -3,8 +3,9 @@ import Foundation
 import Testing
 
 /// Tests `OpenRouterEngine` against a scripted transport: request shape,
-/// strict-JSON-array parsing (with code fences), error mapping, and batch
-/// retry behavior (no per-sentence fallback). No network.
+/// lenient single-sentence parsing (fences/quotes stripped), error mapping,
+/// and retry behavior (`badResponse` from a rambling reply is retried). The
+/// engine's ladder mirrors production (`retriesBadResponse: true`). No network.
 @Suite("OpenRouterEngine")
 struct OpenRouterEngineTests {
 
@@ -90,7 +91,7 @@ struct OpenRouterEngineTests {
             apiKey: apiKey,
             model: model,
             transport: transport,
-            ladder: TransientRetryLadder(sleep: { _ in })
+            ladder: TransientRetryLadder(retriesBadResponse: true, sleep: { _ in })
         )
     }
 
@@ -101,9 +102,9 @@ struct OpenRouterEngineTests {
 
     // MARK: - Request shape
 
-    @Test("sends a chat-completions POST with the bearer key and model verbatim")
+    @Test("sends one chat-completions POST per sentence with the bearer key and model verbatim")
     func requestShape() async throws {
-        let script = Script(handler: Self.okContent("[\"hello\"]"))
+        let script = Script(handler: Self.okContent("hello"))
         let engine = makeEngine(script: script)
 
         _ = try await engine.translate(["こんにちは"])
@@ -121,12 +122,12 @@ struct OpenRouterEngineTests {
         // feeds speech-recognized text, and the model needs the leniency.
         #expect(decoded.messages[0].content.contains("ASR"))
         #expect(decoded.messages[1].role == "user")
-        #expect(decoded.messages[1].content.contains("こんにちは"))
+        #expect(decoded.messages[1].content == "こんにちは")
     }
 
     @Test("an empty model string falls back to the default model")
     func emptyModelFallsBackToDefault() async throws {
-        let script = Script(handler: Self.okContent("[\"hello\"]"))
+        let script = Script(handler: Self.okContent("hello"))
         let engine = makeEngine(script: script, model: "")
 
         _ = try await engine.translate(["こんにちは"])
@@ -136,40 +137,66 @@ struct OpenRouterEngineTests {
         #expect(decoded.model == OpenRouterEngine.defaultModel)
     }
 
-    // MARK: - Response parsing
-
-    @Test("parses a well-formed JSON array response 1:1")
-    func happyPath() async throws {
-        let script = Script(handler: Self.okContent("[\"hello\", \"world\"]"))
+    @Test("multiple texts issue one request per sentence, order preserved")
+    func multiTextIssuesOneRequestPerSentence() async throws {
+        let script = Script(handler: { index in
+            try Self.okContent("translation \(index)")(index)
+        })
         let engine = makeEngine(script: script)
 
-        let translations = try await engine.translate(["こんにちは", "世界"])
+        let translations = try await engine.translate(["一", "二", "三"])
 
-        #expect(translations == ["hello", "world"])
+        #expect(translations == ["translation 0", "translation 1", "translation 2"])
+        #expect(script.requestCount == 3)
     }
 
-    @Test("code fences around the JSON array are stripped")
+    // MARK: - Response parsing
+
+    @Test("the reply is the translation")
+    func happyPath() async throws {
+        let script = Script(handler: Self.okContent("hello there"))
+        let engine = makeEngine(script: script)
+
+        let translations = try await engine.translate(["こんにちは"])
+
+        #expect(translations == ["hello there"])
+    }
+
+    @Test("code fences around the translation are stripped")
     func codeFencesStripped() throws {
-        let parsed = try OpenRouterEngine.parse("```json\n[\"hello\"]\n```", expectedCount: 1)
-
-        #expect(parsed == ["hello"])
+        #expect(try OpenRouterEngine.parse("```json\nhello\n```") == "hello")
+        #expect(try OpenRouterEngine.parse("```\nhello there\n```") == "hello there")
     }
 
-    @Test("a fence with no newline reaches the parser and fails as badResponse")
-    func fenceWithoutNewlineFailsParse() {
-        #expect(throws: TranslationEngineError.badResponse("Model did not return a JSON array")) {
-            try OpenRouterEngine.parse("```not json", expectedCount: 1)
-        }
+    @Test("a fence with no newline still strips the bare markers")
+    func fenceWithoutNewlineStripped() throws {
+        #expect(try OpenRouterEngine.parse("```hello```") == "hello")
+        #expect(try OpenRouterEngine.parse("```not json") == "not json")
     }
 
-    @Test("an empty translation surfaces as badResponse")
+    @Test("one pair of wrapping quotes is stripped")
+    func wrappingQuotesStripped() throws {
+        #expect(try OpenRouterEngine.parse("\"hello\"") == "hello")
+        #expect(try OpenRouterEngine.parse("\u{201C}hello\u{201D}") == "hello")
+        #expect(try OpenRouterEngine.parse("\u{300C}hello\u{300D}") == "hello")
+    }
+
+    @Test("an unquoted reply is left untouched")
+    func plainReplyUnchanged() throws {
+        #expect(try OpenRouterEngine.parse("hello there") == "hello there")
+    }
+
+    @Test("a whitespace-only reply surfaces as badResponse")
     func emptyTranslationThrows() {
         #expect(throws: TranslationEngineError.badResponse("Model returned an empty translation")) {
-            try OpenRouterEngine.parse("[\"hello\", \"  \"]", expectedCount: 2)
+            try OpenRouterEngine.parse("   ")
+        }
+        #expect(throws: TranslationEngineError.badResponse("Model returned an empty translation")) {
+            try OpenRouterEngine.parse("")
         }
     }
 
-    @Test("a 200 response with no choices surfaces as badResponse")
+    @Test("a 200 response with no choices is retried then surfaces as badResponse")
     func noChoicesThrows() async {
         let script = Script(handler: { _ in
             try (JSONEncoder().encode(FakeResponse(choices: [])), Self.httpResponse(200))
@@ -181,9 +208,10 @@ struct OpenRouterEngineTests {
         }
 
         #expect(thrown == .badResponse("Response contained no choices"))
+        #expect(script.requestCount == 3)
     }
 
-    @Test("an unparseable 200 body surfaces as badResponse")
+    @Test("an unparseable 200 body is retried then surfaces as badResponse")
     func unparseableBodyThrows() async {
         let script = Script(handler: { _ in (Data("garbage".utf8), Self.httpResponse(200)) })
         let engine = makeEngine(script: script)
@@ -193,59 +221,36 @@ struct OpenRouterEngineTests {
         }
 
         #expect(thrown == .badResponse("Unparseable response body"))
+        #expect(script.requestCount == 3)
     }
 
-    @Test("malformed model output surfaces as badResponse", arguments: [
-        "not json at all",
-        "[\"one\", \"two\", \"three\"]",
-        "[\"\"]",
-        "{\"translations\":[]}"
-    ])
-    func malformedOutputThrows(content: String) async {
-        let script = Script(handler: Self.okContent(content))
-        let engine = makeEngine(script: script)
-
-        let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await engine.translate(["こんにちは", "世界"])
-        }
-
-        guard case .badResponse = thrown else {
-            Issue.record("expected badResponse, got \(String(describing: thrown))")
-            return
-        }
-    }
-
-    // MARK: - Batch behavior
-
-    @Test("a malformed batch fails without splitting into per-sentence requests")
-    func batchFailureDoesNotSplit() async {
-        // The batch returns a count mismatch; the engine surfaces the error
-        // immediately instead of issuing per-sentence fallback requests.
-        let script = Script(handler: Self.okContent("[\"hello\"]"))
+    @Test("malformed model output is retried as badResponse")
+    func malformedOutputIsRetried() async {
+        // Whitespace-only replies are the lenient parse's only failure mode;
+        // a rambling model gets its retry budget before the sentence fails.
+        let script = Script(handler: Self.okContent("   "))
         let log = ProgressLog()
         var engine = makeEngine(script: script)
         engine.onRetry = { log.append($0) }
 
         let thrown = await #expect(throws: TranslationEngineError.self) {
-            try await engine.translate(["一", "二", "三"])
+            try await engine.translate(["こんにちは"])
         }
 
-        #expect(thrown == .badResponse("Expected 3 translations, got 1"))
-        #expect(script.requestCount == 1)
-        #expect(log.entries.isEmpty)
+        #expect(thrown == .badResponse("Model returned an empty translation"))
+        #expect(script.requestCount == 3)
+        #expect(log.entries.map(\.attemptsLeft) == [2, 1])
     }
 
-    @Test("a transient batch failure is retried")
-    func transientBatchFailureIsRetried() async throws {
+    // MARK: - Retry behavior
+
+    @Test("a transient failure is retried")
+    func transientFailureIsRetried() async throws {
         let script = Script(handler: { index in
             if index == 0 {
                 return try Self.status(429)(index)
             }
-            if index == 1 {
-                return try Self.okContent("[\"hello\"]")(index)
-            }
-            Issue.record("unexpected extra request")
-            return try Self.okContent("[]")(index)
+            return try Self.okContent("hello")(index)
         })
         let log = ProgressLog()
         var engine = makeEngine(script: script)

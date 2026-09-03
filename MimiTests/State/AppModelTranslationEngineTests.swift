@@ -195,7 +195,7 @@ struct AppModelTranslationEngineTests {
             let status = attempt == 1 ? 429 : 200
             let body = attempt == 1
                 ? Data()
-                : Data(#"{"choices":[{"message":{"content":"[\"hello\"]"}}]}"#.utf8)
+                : Data(#"{"choices":[{"message":{"content":"hello"}}]}"#.utf8)
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
             )!

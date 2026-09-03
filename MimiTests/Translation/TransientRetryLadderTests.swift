@@ -84,6 +84,64 @@ struct TransientRetryLadderTests {
         #expect(log.delays.isEmpty)
     }
 
+    @Test("badResponse is non-transient by default")
+    func badResponseNotRetriedByDefault() async throws {
+        let log = Log()
+        let ladder = makeLadder(log: log)
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await ladder.run {
+                log.recordCall()
+                throw TranslationEngineError.badResponse("rambled")
+            }
+        }
+
+        #expect(thrown == .badResponse("rambled"))
+        #expect(log.calls == 1)
+        #expect(log.delays.isEmpty)
+    }
+
+    @Test("badResponse retries when the ladder opts in")
+    func badResponseRetriedWhenOptedIn() async throws {
+        let log = Log()
+        let ladder = TransientRetryLadder(
+            retriesBadResponse: true,
+            sleep: { log.recordDelay($0) }
+        )
+
+        let result = try await ladder.run {
+            log.recordCall()
+            if log.calls < 3 {
+                throw TranslationEngineError.badResponse("rambled")
+            }
+            return "ok"
+        }
+
+        #expect(result == "ok")
+        #expect(log.calls == 3)
+        #expect(log.delays == [.milliseconds(500), .seconds(2)])
+    }
+
+    @Test("an opted-in ladder still fails invalidKey immediately")
+    func optedInLadderKeepsInvalidKeyNonTransient() async throws {
+        let log = Log()
+        let ladder = TransientRetryLadder(
+            retriesBadResponse: true,
+            sleep: { log.recordDelay($0) }
+        )
+
+        let thrown = await #expect(throws: TranslationEngineError.self) {
+            try await ladder.run {
+                log.recordCall()
+                throw TranslationEngineError.invalidKey
+            }
+        }
+
+        #expect(thrown == .invalidKey)
+        #expect(log.calls == 1)
+        #expect(log.delays.isEmpty)
+    }
+
     @Test("a transport Retry-After overrides the default backoff")
     func retryAfterRespected() async throws {
         let log = Log()

@@ -23,19 +23,23 @@ struct ChatCompletionsClient: Sendable {
     init(
         config: Config,
         transport: HTTPTranslationTransport? = nil,
-        ladder: TransientRetryLadder = TransientRetryLadder()
+        ladder: TransientRetryLadder = TransientRetryLadder(retriesBadResponse: true)
     ) {
         self.config = config
         self.transport = transport ?? HTTPTranslationTransport(timeout: 30)
         self.ladder = ladder
     }
 
-    /// One chat completion; returns the assistant message content.
-    /// `onRetry` fires on transient-failure retries (engine → queue → UI).
-    func complete(
+    /// One chat completion, decoded by the caller's closure *inside* the retry
+    /// ladder — decode failures share the transient-retry budget with the
+    /// transport round-trip. Chat-completions providers return
+    /// nondeterministic LLM output, so this client's default ladder retries
+    /// `.badResponse` (fixed-contract callers can inject a plain ladder).
+    func complete<T: Sendable>(
         _ messages: [Message],
+        decode: @escaping @Sendable (Data) throws -> T,
         onRetry: (@Sendable (RetryProgress) -> Void)? = nil
-    ) async throws -> String {
+    ) async throws -> T {
         func makeRequest() throws -> URLRequest {
             var request = URLRequest(url: config.endpoint)
             request.httpMethod = "POST"
@@ -50,15 +54,31 @@ struct ChatCompletionsClient: Sendable {
         }
         let request = try makeRequest()
 
-        let data: Data
         do {
-            data = try await ladder.run({
-                try await transport.send(request, classify: { Self.classify($0, $1) })
+            return try await ladder.run({
+                let data = try await transport.send(request, classify: { Self.classify($0, $1) })
+                return try decode(data)
             }, onRetry: onRetry)
         } catch let failure as HTTPTranslationTransport.Failure {
             throw failure.engineError
         }
-        return try Self.decode(data)
+    }
+
+    /// Extracts the assistant message content from the chat-completions
+    /// envelope — the first step of `decode` for engines that parse the reply
+    /// themselves.
+    static func content(of data: Data) throws -> String {
+        do {
+            let response = try JSONDecoder().decode(ChatCompletionsResponse.self, from: data)
+            guard let content = response.choices.first?.message.content else {
+                throw TranslationEngineError.badResponse("Response contained no choices")
+            }
+            return content
+        } catch let error as TranslationEngineError {
+            throw error
+        } catch {
+            throw TranslationEngineError.badResponse("Unparseable response body")
+        }
     }
 
     /// Error mapping shared by every OpenAI-compatible variant: 401 invalid
@@ -70,20 +90,6 @@ struct ChatCompletionsClient: Sendable {
         case 402: .quotaExceeded
         case 429: .rateLimited
         default: .serverError(status)
-        }
-    }
-
-    private static func decode(_ data: Data) throws -> String {
-        do {
-            let response = try JSONDecoder().decode(ChatCompletionsResponse.self, from: data)
-            guard let content = response.choices.first?.message.content else {
-                throw TranslationEngineError.badResponse("Response contained no choices")
-            }
-            return content
-        } catch let error as TranslationEngineError {
-            throw error
-        } catch {
-            throw TranslationEngineError.badResponse("Unparseable response body")
         }
     }
 }

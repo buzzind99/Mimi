@@ -8,22 +8,34 @@ import Foundation
 /// `cancelled`) and exhausted retries rethrow the original error untouched —
 /// `CancellationError` in particular must reach `TranslationQueue` so a torn
 /// down run lands on `.idle`, not `.unavailable`.
+///
+/// `.badResponse` is non-transient by default: for fixed-contract APIs
+/// (Google, DeepL) a malformed envelope is deterministic and retrying is
+/// pointless. Chat-completions engines opt in via `retriesBadResponse` — LLM
+/// output is nondeterministic, and a rambling or empty reply usually fixes
+/// itself on re-ask.
 struct TransientRetryLadder: Sendable {
     let retries: Int
     let backoffs: [Duration]
+    /// Treat `.badResponse` as transient. Off for fixed-contract APIs,
+    /// on for nondeterministic LLM output (see the doc comment above).
+    let retriesBadResponse: Bool
     let sleep: @Sendable (Duration) async throws -> Void
 
     /// - Parameters:
     ///   - retries: transient retries after the first attempt (default 2).
     ///   - backoffs: delay before retry *n* (0-based failure index).
+    ///   - retriesBadResponse: also retry `.badResponse` (LLM engines only).
     ///   - sleep: injectable for tests (no real waiting).
     init(
         retries: Int = 2,
         backoffs: [Duration] = [.milliseconds(500), .seconds(2)],
+        retriesBadResponse: Bool = false,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.retries = retries
         self.backoffs = backoffs
+        self.retriesBadResponse = retriesBadResponse
         self.sleep = sleep
     }
 
@@ -38,7 +50,7 @@ struct TransientRetryLadder: Sendable {
             do {
                 return try await operation()
             } catch {
-                guard attempt < retries, Self.isTransient(error) else { throw error }
+                guard attempt < retries, isTransient(error) else { throw error }
                 onRetry?(RetryProgress(stage: stage, attemptsLeft: retries - attempt))
                 let delay = Self.retryAfter(of: error).map(Duration.seconds)
                     ?? backoffs[min(attempt, backoffs.count - 1)]
@@ -49,9 +61,10 @@ struct TransientRetryLadder: Sendable {
         throw TranslationEngineError.network
     }
 
-    static func isTransient(_ error: Error) -> Bool {
-        switch engineError(of: error) {
+    func isTransient(_ error: Error) -> Bool {
+        switch TransientRetryLadder.engineError(of: error) {
         case .rateLimited, .network, .serverError: true
+        case .badResponse: retriesBadResponse
         default: false
         }
     }

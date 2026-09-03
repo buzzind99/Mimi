@@ -2,17 +2,21 @@ import Foundation
 
 /// OpenRouter engine: chat-completions with an arbitrary user-supplied model.
 ///
-/// Prompt contract: a strict JSON array of exactly N translations. Input is
-/// ASR output, so the prompt tells the model to infer intent past recognition
-/// errors. Model output is parsed defensively (code fences stripped, count +
-/// non-empty validated); malformed output surfaces as `badResponse` — no
-/// per-sentence fallback, since chat-completions providers are batch-native
-/// and splitting would multiply rate-limited requests. No `response_format`
+/// One sentence per request (`preferredBatchSize == 1`): the reply *is* the
+/// translation, so the model faces a natural "reply with only the
+/// translation" contract instead of a strict multi-item JSON shape, and a
+/// malformed reply fails one sentence rather than a batch. Input is ASR
+/// output, so the prompt tells the model to infer intent past recognition
+/// errors. Parsing is defensive (code fences and one pair of wrapping quotes
+/// stripped, non-empty validated); malformed output surfaces as
+/// `badResponse`, which the engine's ladder retries — LLM replies are
+/// nondeterministic and usually improve on re-ask. No `response_format`
 /// is sent: arbitrary user models may 400 on it.
 struct OpenRouterEngine: TranslationEngine {
     /// Long numbered lists degrade JSON adherence and translation quality on
-    /// small models — batches stay small.
-    let preferredBatchSize = 8
+    /// small models, and single-sentence requests keep failures isolated —
+    /// the queue slices every batch to one sentence.
+    let preferredBatchSize = 1
 
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
@@ -25,7 +29,7 @@ struct OpenRouterEngine: TranslationEngine {
         apiKey: String,
         model: String,
         transport: HTTPTranslationTransport? = nil,
-        ladder: TransientRetryLadder = TransientRetryLadder()
+        ladder: TransientRetryLadder = TransientRetryLadder(retriesBadResponse: true)
     ) {
         // An empty model string (placeholder-only Settings field) would be
         // sent verbatim and rejected by the API; fall back to the default.
@@ -43,50 +47,50 @@ struct OpenRouterEngine: TranslationEngine {
     func translate(_ texts: [String]) async throws -> [String] {
         guard !texts.isEmpty else { return [] }
 
-        // One request for the whole batch; transient failures are retried by
-        // the client's ladder (progress reported as `.batchRetry`).
-        let content = try await client.complete(Self.messages(for: texts), onRetry: onRetry)
-        return try Self.parse(content, expectedCount: texts.count)
+        // The queue slices batches to `preferredBatchSize == 1`, but stay
+        // correct for any caller: one request per sentence, order preserved.
+        // Parse runs inside the client's ladder, so a malformed reply is
+        // retried before it can fail the sentence.
+        var results: [String] = []
+        results.reserveCapacity(texts.count)
+        for text in texts {
+            try results.append(await client.complete(
+                Self.messages(for: text),
+                decode: { data in try Self.parse(ChatCompletionsClient.content(of: data)) },
+                onRetry: onRetry
+            ))
+        }
+        return results
     }
 
     // MARK: - Prompt + parsing
 
-    static func messages(for texts: [String]) -> [ChatCompletionsClient.Message] {
+    static func messages(for text: String) -> [ChatCompletionsClient.Message] {
         let system = """
         You are a Japanese-to-English translation engine. Input is ASR output and may \
         contain recognition errors or fragments — infer the intended meaning in casual \
-        English. Respond with a strict JSON array of exactly one translated string per \
-        input sentence, same order, nothing else.
+        English. Reply with only the English translation: no quotes, no explanations, \
+        no romaji, nothing else.
         """
-        let payload = (try? JSONEncoder().encode(texts))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        let user = "Translate these \(texts.count) Japanese sentences to English:\n\(payload)"
         return [
             ChatCompletionsClient.Message(role: "system", content: system),
-            ChatCompletionsClient.Message(role: "user", content: user)
+            ChatCompletionsClient.Message(role: "user", content: text)
         ]
     }
 
-    /// Robust parse of the model's JSON array: strips code fences, requires
-    /// the exact count and non-empty strings.
-    static func parse(_ content: String, expectedCount: Int) throws -> [String] {
-        guard let data = strippedFences(content).data(using: .utf8),
-              let array = try? JSONDecoder().decode([String].self, from: data)
-        else {
-            throw TranslationEngineError.badResponse("Model did not return a JSON array")
-        }
-        guard array.count == expectedCount else {
-            throw TranslationEngineError.badResponse(
-                "Expected \(expectedCount) translations, got \(array.count)"
-            )
-        }
-        guard array.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+    /// Lenient parse of a single-sentence reply: strips code fences and one
+    /// pair of wrapping quotes, then requires non-empty output. What remains
+    /// is the translation.
+    static func parse(_ content: String) throws -> String {
+        var text = strippedFences(content)
+        text = strippedQuotes(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
             throw TranslationEngineError.badResponse("Model returned an empty translation")
         }
-        return array
+        return text
     }
 
-    /// Removes ```-fenced wrappers some models emit around JSON.
+    /// Removes ```-fenced wrappers some models emit around the translation.
     private static func strippedFences(_ content: String) -> String {
         var text = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.hasPrefix("```") else { return text }
@@ -94,11 +98,28 @@ struct OpenRouterEngine: TranslationEngine {
         if let firstNewline = text.firstIndex(of: "\n") {
             text = String(text[text.index(after: firstNewline)...])
         } else {
-            return text
+            // A fence with no newline: strip the bare markers.
+            text = String(text.dropFirst(3))
+            if text.hasSuffix("```") {
+                text = String(text.dropLast(3))
+            }
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if let fenceEnd = text.range(of: "```", options: .backwards) {
             text = String(text[..<fenceEnd.lowerBound])
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Removes one pair of wrapping straight/curly double quotes or Japanese
+    /// corner brackets some models add despite the prompt.
+    private static func strippedQuotes(_ content: String) -> String {
+        let pairs = [("\"", "\""), ("\u{201C}", "\u{201D}"), ("\u{300C}", "\u{300D}")]
+        for (open, close) in pairs
+            where content.count >= 2 && content.hasPrefix(open) && content.hasSuffix(close)
+        {
+            return String(content.dropFirst().dropLast())
+        }
+        return content
     }
 }
