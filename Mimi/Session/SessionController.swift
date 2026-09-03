@@ -12,6 +12,7 @@ final class SessionController {
     private let makeEngine: (URL?, Bool) -> ASREngine?
     private let makeCapture: () -> any AudioCapturing
     private let ensurePermission: () async -> Bool
+    private let warmUpEnabled: () -> Bool
 
     /// A session is about to run: clear transcript state.
     var onSessionBegin: (() -> Void)?
@@ -42,7 +43,11 @@ final class SessionController {
     /// the real implementations; tests inject doubles so `begin()` and the
     /// event paths run without TCC, ScreenCaptureKit, or the native runtime.
     /// `makeEngine` receives `allowMock` (true from `begin`, false from the
-    /// warm-up, which must never fall back to the mock).
+    /// warm-up, which must never fall back to the mock). `warmUpEnabled`
+    /// defaults to off inside a unit-test host: that app runs the real launch
+    /// path during `xcodebuild test`, and its detached warm-up would construct
+    /// a real engine that races the suites' own engine constructions into a
+    /// permanent ggml-metal init wedge. Warm-up tests opt back in explicitly.
     init(
         live: LivePartialState,
         latency: LatencyState,
@@ -53,6 +58,9 @@ final class SessionController {
         makeCapture: @escaping () -> any AudioCapturing = { SystemAudioCapture() },
         ensurePermission: @escaping () async -> Bool = {
             await SystemAudioCapture.ensurePermission()
+        },
+        warmUpEnabled: @escaping () -> Bool = {
+            ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
         }
     ) {
         self.live = live
@@ -61,6 +69,7 @@ final class SessionController {
         self.makeEngine = makeEngine
         self.makeCapture = makeCapture
         self.ensurePermission = ensurePermission
+        self.warmUpEnabled = warmUpEnabled
     }
 
     // MARK: - Warm-up
@@ -71,7 +80,7 @@ final class SessionController {
     /// `prepare` is serialized, and a second opener reuses the already-open
     /// session.
     func warmUpIfNeeded(modelURL: URL?) {
-        guard !warmUpScheduled, let url = modelURL else { return }
+        guard warmUpEnabled(), !warmUpScheduled, let url = modelURL else { return }
         warmUpScheduled = true
         #if DEBUG
             print("[warmup] preparing ASR engine in background")

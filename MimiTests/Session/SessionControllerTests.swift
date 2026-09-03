@@ -58,7 +58,8 @@ struct SessionControllerTests {
                 return resolveEngine ? engine : nil
             },
             makeCapture: { capture },
-            ensurePermission: { permissionGranted }
+            ensurePermission: { permissionGranted },
+            warmUpEnabled: { true }
         )
         return SUT(
             controller: controller, live: live, latency: latency,
@@ -91,6 +92,28 @@ struct SessionControllerTests {
         #expect(sut.log.names == ["factory allowMock=false", "engine.prepare"])
         #expect(sut.live.partial == "")
         #expect(sut.controller.sessionMetadata == nil)
+    }
+
+    /// Pins the production default: inside the unit-test host the warm-up is
+    /// gated off (its detached engine construction would race the suites into
+    /// a ggml-metal init wedge). The scheduling tests above opt back in via
+    /// the `warmUpEnabled` seam.
+    @Test("warm-up is suppressed by default in the unit-test host")
+    func warmUpDefaultsSuppressedInTestHost() async throws {
+        let log = CallLog()
+        let controller = SessionController(
+            live: LivePartialState(), latency: LatencyState(), translationQueue: TranslationQueue(),
+            makeEngine: { _, allowMock in
+                log.record("factory allowMock=\(allowMock)")
+                return nil
+            }
+        )
+
+        controller.warmUpIfNeeded(modelURL: warmUpModelURL)
+        controller.warmUpIfNeeded(modelURL: warmUpModelURL)
+        try await settle()
+
+        #expect(log.names.isEmpty)
     }
 
     // MARK: - stop() without a session
