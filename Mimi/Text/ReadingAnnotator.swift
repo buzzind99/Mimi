@@ -356,6 +356,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         // plain reading is lexical (六 + 歳/等/千).
         if !held.unresolved, !held.kana.isEmpty, let reading,
            !Self.rokuException(numberKana: held.kana, counterKana: reading),
+           !Self.voicedOnsetException(numberKana: held.kana, counterKana: reading),
            let stem = Self.geminationStem(of: held.kana), Self.isGeminable(reading)
         {
             pending = nil
@@ -403,6 +404,16 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// the fusion must not produce ろっさい.
     private static func rokuException(numberKana: String, counterKana: String) -> Bool {
         numberKana == "ろく" && ["さい", "とう", "せん"].contains { counterKana.hasPrefix($0) }
+    }
+
+    /// A ば行 onset keeps the plain reading except after はち: 一番/十番/六番/百番
+    /// never geminate (いちばん/じゅうばん/ろくばん/ひゃくばん), but 八番 → はっぱん
+    /// does. だ/が行 onsets can't geminate at all (`isGeminable`).
+    private static func voicedOnsetException(numberKana: String, counterKana: String) -> Bool {
+        guard let first = counterKana.first,
+              ["ば", "び", "ぶ", "べ", "ぼ"].contains(String(first))
+        else { return false }
+        return !numberKana.hasSuffix("はち")
     }
 
     /// The written form a counter takes after the geminating っ: a は/ば-row
