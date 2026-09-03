@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import ScreenCaptureKit
+import Synchronization
 
 /// Emitted mono 16 kHz chunk (160 ms = 2,560 samples). `samples` is a value
 /// type; safe to hand across queues.
@@ -35,7 +36,7 @@ enum CaptureError: LocalizedError {
 /// The capture surface `SessionController` drives. `SystemAudioCapture`
 /// conforms as-is; tests inject a scripted double so `begin()` and the
 /// chunk path run without ScreenCaptureKit.
-protocol AudioCapturing: AnyObject {
+protocol AudioCapturing: AnyObject, Sendable {
     var onChunk: ((AudioChunk) -> Void)? { get set }
     var onIOError: ((CaptureError) -> Void)? { get set }
     func start() async throws
@@ -49,7 +50,12 @@ protocol AudioCapturing: AnyObject {
 /// delegate downmixes/resamples when needed, slices 160 ms chunks, and calls
 /// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
 /// engine's job.
-final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCStreamOutput {
+///
+/// Sendable by locking contract: mutable state (`isRunning`, `stream`,
+/// `accumulated`, …) is guarded by `stateLock` — see the comment there.
+final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
+    SCStreamDelegate, SCStreamOutput
+{
     static let outputSampleRate: Double = 16000
     static let chunkSamples = Int(outputSampleRate * 0.16)
 
@@ -438,16 +444,22 @@ final class SystemAudioCapture: NSObject, AudioCapturing, SCStreamDelegate, SCSt
         }
         guard let outBuffer else { return nil }
 
-        var fed = false
+        // The converter's input block is @Sendable: capture the buffer by
+        // value and gate the single feed with a Mutex (the block is invoked
+        // serially, but the compiler can't see that). `nonisolated(unsafe)`
+        // suppresses the AVAudioPCMBuffer sendability diagnostic — the
+        // buffer only escapes into the converter, which serially drains it.
+        nonisolated(unsafe) let inputBuffer = inBuffer
+        let fed = Mutex(false)
         var conversionError: NSError?
         let status = converter.convert(to: outBuffer, error: &conversionError) { _, inputStatus in
-            if fed {
+            if fed.withLock({ $0 }) {
                 inputStatus.pointee = .endOfStream
                 return nil
             }
             inputStatus.pointee = .haveData
-            fed = true
-            return self.inBuffer
+            fed.withLock { $0 = true }
+            return inputBuffer
         }
         guard status != .error, conversionError == nil,
               let src = outBuffer.floatChannelData?[0]

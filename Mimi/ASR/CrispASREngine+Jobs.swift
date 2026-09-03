@@ -128,6 +128,24 @@ extension CrispASREngine {
         }
     }
 
+    /// One `crispasr_vad_slices` pass over `pcm` with the engine's tuning
+    /// knobs. Lock-free (the C library serializes access to the cached
+    /// model internally); nil when the dispatcher ABI is unavailable.
+    private func runVADPass(
+        pcm: [Float], modelPath: String
+    ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)? {
+        pcm.withUnsafeBufferPointer { buf in
+            lib.vadSlices(
+                modelPath: modelPath, pcm: Span(_unsafeElements: buf),
+                parameters: CrispASRVADParameters(
+                    sampleRate: Self.sampleRate, threshold: Self.vadThreshold,
+                    minSpeechMS: Self.vadMinSpeechMS, minSilenceMS: Self.vadMinSilenceMS,
+                    padMS: Self.vadPadMS
+                )
+            )
+        }
+    }
+
     /// Runs on `vadQueue`. One job at a time (guarded by `vadInFlight` and
     /// the serial queue). Updates speech state under `lock`; the
     /// `crispasr_vad_slices` call itself is lock-free (the C library
@@ -150,14 +168,7 @@ extension CrispASREngine {
         #if DEBUG
             let vadStart = ContinuousClock.now
         #endif
-        guard let slices = lib.vadSlices(
-            modelPath: vadModelPath, pcm: pcm,
-            parameters: CrispASRVADParameters(
-                sampleRate: Self.sampleRate, threshold: Self.vadThreshold,
-                minSpeechMS: Self.vadMinSpeechMS, minSilenceMS: Self.vadMinSilenceMS,
-                padMS: Self.vadPadMS
-            )
-        ) else { return }
+        guard let slices = runVADPass(pcm: pcm, modelPath: vadModelPath) else { return }
         let count = slices.count
         #if DEBUG
             print("[asr] vad: \(pcm.count) samples -> \(count) spans in \(ContinuousClock.now - vadStart)")
@@ -289,9 +300,12 @@ extension CrispASREngine {
             pcm.append(contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - pcm.count))
         }
 
-        guard let raw = lib.transcribeText(
-            session: sessionHandle, pcm: pcm, languageCode: languageCode
-        ) else {
+        guard let raw = pcm.withUnsafeBufferPointer({ buf in
+            lib.transcribeText(
+                session: sessionHandle, pcm: Span(_unsafeElements: buf),
+                languageCode: languageCode
+            )
+        }) else {
             reportDecodeFailure()
             if isFinal {
                 // A failed final must still close out the utterance: leaving

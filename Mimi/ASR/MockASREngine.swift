@@ -36,8 +36,8 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
         totalSamples
     }
 
-    func prepare() throws {}
-    func openStream() throws {}
+    func prepare() throws(ASREngineError) {}
+    func openStream() throws(ASREngineError) {}
 
     func push(_ samples: [Float]) {
         totalSamples += samples.count

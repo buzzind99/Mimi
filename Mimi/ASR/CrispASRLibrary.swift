@@ -19,10 +19,12 @@ protocol CrispASRLibraryAPI: AnyObject {
     func setGpuBackend(_ name: String)
     func openSession(modelPath: String, backend: String) -> OpaquePointer?
     func closeSession(_ session: OpaquePointer?)
-    func transcribeText(session: OpaquePointer?, pcm: [Float], languageCode: String) -> String?
+    func transcribeText(
+        session: OpaquePointer?, pcm: borrowing Span<Float>, languageCode: String
+    ) -> String?
     func vadSlices(
         modelPath: String,
-        pcm: [Float],
+        pcm: borrowing Span<Float>,
         parameters: CrispASRVADParameters
     ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)?
     func vadFree(_ spans: UnsafeMutablePointer<Float>?)
@@ -78,7 +80,9 @@ final class CrispASRLibrary {
     /// Process-global dlopen cache: the dylib is opened once per process, so
     /// re-creating engines (warm restarts, model swaps) never re-opens it.
     /// dlopen is refcounted internally — the handle stays valid forever.
-    private static let library: Result<UnsafeMutableRawPointer, ASREngineError> = {
+    /// `nonisolated(unsafe)`: the handle is process-immutable after this
+    /// one-time initialization and dlopen is internally refcounted.
+    private nonisolated(unsafe) static let library: Result<UnsafeMutableRawPointer, ASREngineError> = {
         do { return try .success(openLibrary()) } catch let error as ASREngineError {
             return .failure(error)
         } catch {
@@ -156,10 +160,12 @@ final class CrispASRLibrary {
 
     /// Decodes `pcm` on the session and returns the concatenated segment
     /// text (untrimmed), or nil when the C call failed.
-    func transcribeText(session: OpaquePointer?, pcm: [Float], languageCode: String) -> String? {
+    func transcribeText(
+        session: OpaquePointer?, pcm: borrowing Span<Float>, languageCode: String
+    ) -> String? {
         let result = pcm.withUnsafeBufferPointer { buf -> OpaquePointer? in
             languageCode.withCString { lang in
-                fnTranscribeLang(session, buf.baseAddress, Int32(pcm.count), lang)
+                fnTranscribeLang(session, buf.baseAddress, Int32(buf.count), lang)
             }
         }
         guard let result else { return nil }
@@ -178,7 +184,7 @@ final class CrispASRLibrary {
     /// malloc'd span pairs (free with `vadFree`), or nil on C failure.
     func vadSlices(
         modelPath: String,
-        pcm: [Float],
+        pcm: borrowing Span<Float>,
         parameters: CrispASRVADParameters
     ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)? {
         guard let fnVadSlices else { return nil }
@@ -186,7 +192,7 @@ final class CrispASRLibrary {
         let count = pcm.withUnsafeBufferPointer { buf -> Int32 in
             modelPath.withCString { path in
                 fnVadSlices(
-                    path, buf.baseAddress, Int32(pcm.count), Int32(parameters.sampleRate),
+                    path, buf.baseAddress, Int32(buf.count), Int32(parameters.sampleRate),
                     parameters.threshold, Int32(parameters.minSpeechMS),
                     Int32(parameters.minSilenceMS), Int32(parameters.padMS), 0, 0, &spansPtr
                 )

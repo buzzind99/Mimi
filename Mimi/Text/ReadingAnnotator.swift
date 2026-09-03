@@ -24,7 +24,9 @@ final class ReadingSegment {
 /// kana space so Arabic-digit counters read correctly (`600回` →
 /// "roppyakkai"). The dictionary may still be preparing on first launch;
 /// every failure degrades to plain text.
-final class ReadingAnnotator {
+/// Sendable by immutability contract: `cache` and `tokenize` are set in init
+/// and never mutated afterwards; `NSCache` is internally thread-safe.
+final class ReadingAnnotator: @unchecked Sendable {
     /// The process-wide annotator backing the static entry point.
     static let shared = ReadingAnnotator()
 

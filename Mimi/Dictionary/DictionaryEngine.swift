@@ -21,7 +21,11 @@ struct DictionaryToken: Codable, Equatable {
 /// never frees it during the app's lifetime (the CrispASR keep-warm stance).
 /// Every failure is fail-soft: `tokenize` returns nil and callers degrade to
 /// plain text rather than crash.
-final class DictionaryEngine {
+///
+/// Sendable by locking contract: `ffi` and `resolveDictionary` are set once in
+/// init and never mutated; the only mutable state (`handle`) is guarded by
+/// `lock` (see the comment there).
+final class DictionaryEngine: @unchecked Sendable {
     static let shared = DictionaryEngine()
 
     private static let decoder = JSONDecoder()
@@ -54,7 +58,7 @@ final class DictionaryEngine {
                     return nil
                 }
                 defer { ffi.freeString(pointer) }
-                return String(validatingUTF8: pointer).map { Data($0.utf8) }
+                return String(validatingCString: pointer).map { Data($0.utf8) }
             }
         }
         guard let payload else { return nil }

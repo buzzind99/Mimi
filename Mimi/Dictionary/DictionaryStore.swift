@@ -5,7 +5,10 @@ import Foundation
 /// bundle; on first launch it is decompressed once through the runtime's
 /// prepare FFI — no network, no build step. Once prepared it lives at
 /// `~/Library/Application Support/Mimi/dictionaries/ipadic.dic` forever.
-final class DictionaryStore {
+///
+/// Sendable by queue contract: `phase` is the only mutable state and every
+/// access happens on the serial `queue` (see the `Phase` comment below).
+final class DictionaryStore: @unchecked Sendable {
     static let shared = DictionaryStore()
 
     enum DictionaryStoreError: LocalizedError, Equatable {
@@ -123,7 +126,7 @@ final class DictionaryStore {
     /// decompression. `completion` runs on the main queue with the dictionary
     /// URL, or an error — callers silently degrade to plain text and may
     /// retry (next launch or a later call).
-    func prepare(completion: @escaping (Result<URL, Error>) -> Void) {
+    func prepare(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
         queue.async {
             if case let .done(url) = self.phase {
                 self.complete(completion, .success(url))
@@ -164,7 +167,7 @@ final class DictionaryStore {
     }
 
     private func complete(
-        _ completion: @escaping (Result<URL, Error>) -> Void, _ result: Result<URL, Error>
+        _ completion: @escaping @Sendable (Result<URL, Error>) -> Void, _ result: Result<URL, Error>
     ) {
         DispatchQueue.main.async { completion(result) }
     }
@@ -218,7 +221,7 @@ final class DictionaryStore {
             throw DictionaryStoreError.smokeTestFailed(reason: "tokenize returned null")
         }
         defer { ffi.freeString(jsonPointer) }
-        guard let json = String(validatingUTF8: jsonPointer),
+        guard let json = String(validatingCString: jsonPointer),
               let tokens = (try? JSONSerialization.jsonObject(with: Data(json.utf8)))
               as? [[String: Any]],
               tokens.contains(where: { entry in

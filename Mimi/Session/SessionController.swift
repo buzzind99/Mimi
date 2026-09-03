@@ -9,7 +9,7 @@ final class SessionController {
     private let live: LivePartialState
     private let latency: LatencyState
     private let translationQueue: TranslationQueue
-    private let makeEngine: (URL?, Bool) -> ASREngine?
+    private let makeEngine: @Sendable (URL?, Bool) -> ASREngine?
     private let makeCapture: () -> any AudioCapturing
     private let ensurePermission: () async -> Bool
     private let warmUpEnabled: () -> Bool
@@ -52,7 +52,7 @@ final class SessionController {
         live: LivePartialState,
         latency: LatencyState,
         translationQueue: TranslationQueue,
-        makeEngine: @escaping (URL?, Bool) -> ASREngine? = {
+        makeEngine: @escaping @Sendable (URL?, Bool) -> ASREngine? = {
             ASREngineFactory.makeEngine(modelURL: $0, allowMock: $1)
         },
         makeCapture: @escaping () -> any AudioCapturing = { SystemAudioCapture() },

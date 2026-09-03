@@ -4,9 +4,9 @@ import Foundation
 /// C ABI; the mock keeps the whole pipeline testable without the runtime.
 protocol ASREngine: AnyObject, Sendable {
     /// Prepare the recognizer (model load) before the stream opens.
-    func prepare() throws
+    func prepare() throws(ASREngineError)
     /// Open a streaming recognition session.
-    func openStream() throws
+    func openStream() throws(ASREngineError)
     /// Push one 16 kHz mono chunk into the stream.
     func push(_ samples: [Float])
     /// Poll for the next available result (partial or final); nil = need more audio.
@@ -26,7 +26,7 @@ protocol ASREngine: AnyObject, Sendable {
     var onEngineError: ((String) -> Void)? { get set }
 }
 
-enum ASREngineError: LocalizedError {
+enum ASREngineError: LocalizedError, Sendable {
     case runtimeNotFound(String)
     case modelNotFound(String)
     case createFailed(String)

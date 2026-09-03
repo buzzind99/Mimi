@@ -33,7 +33,7 @@ enum ASREvent: Sendable {
 /// A complete session row: sentence + its (possibly empty) translations.
 /// Display strings (timestamps, joined translations) are precomputed at
 /// mutation time so row rendering never re-joins or re-formats.
-struct SessionEntry: Identifiable, Equatable {
+struct SessionEntry: Identifiable, Equatable, Sendable {
     let sentence: Sentence
     var translations: [SentenceTranslation] = []
     /// Formatted once at init for cheap row rendering.

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Synchronization
 
 /// Pinned-digest verification for the ASR GGUF. Verdicts are cached per
 /// (path, size) so the ~200 MB re-hash only runs when the file actually
@@ -21,8 +22,8 @@ enum ModelVerifier {
         let size: Int64
     }
 
-    private static let lock = NSLock()
-    private static var verified: Set<CacheKey> = []
+    /// Verdicts are inserted only after `verify` succeeds.
+    private static let verified = Mutex<Set<CacheKey>>([])
 
     /// Returns true iff the file matches the pinned SHA-256.
     static func isVerified(_ file: URL) -> Bool {
@@ -31,7 +32,7 @@ enum ModelVerifier {
               let size = attrs[.size] as? Int64
         else { return false }
         let key = CacheKey(path: file.path, size: size)
-        if lock.withLock({ verified.contains(key) }) {
+        if verified.withLock({ $0.contains(key) }) {
             return true
         }
         do {

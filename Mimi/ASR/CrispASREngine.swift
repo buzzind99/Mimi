@@ -170,7 +170,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
 
     // MARK: - ASREngine
 
-    func prepare() throws {
+    func prepare() throws(ASREngineError) {
         guard FileManager.default.fileExists(atPath: modelPath) else {
             throw ASREngineError.modelNotFound(modelPath)
         }
@@ -206,7 +206,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         }
     }
 
-    func openStream() throws {
+    func openStream() throws(ASREngineError) {
         lock.withLock {
             totalSamples = 0
             window = []

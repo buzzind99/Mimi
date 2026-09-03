@@ -55,9 +55,12 @@ extension CrispASREngine {
                     contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - padded.count)
                 )
             }
-            if let raw = lib.transcribeText(
-                session: sessionHandle, pcm: padded, languageCode: languageCode
-            ) {
+            if let raw = padded.withUnsafeBufferPointer({ buf in
+                lib.transcribeText(
+                    session: sessionHandle, pcm: Span(_unsafeElements: buf),
+                    languageCode: languageCode
+                )
+            }) {
                 let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 #if DEBUG
                     print("[asr] flush decode: \(padded.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
