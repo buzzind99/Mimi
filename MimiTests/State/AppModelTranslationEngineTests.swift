@@ -2,7 +2,7 @@ import Foundation
 @testable import Mimi
 import Testing
 
-/// Tests `AppModel`'s T10 engine selection: an external provider spawns a
+/// Tests `AppModel`'s engine selection: an external provider spawns a
 /// worker task (config stays nil), an exhausted external engine latches the
 /// one-way Apple fallback per session, the latch survives manual retries,
 /// and an unconfigured selected provider degrades to Apple with a note.

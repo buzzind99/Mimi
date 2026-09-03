@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// The connection pill in the status-bar footer, derived purely from the
-/// translation status × active engine (mapping table in the T12 spec; its
-/// unit tests land with T17). The HUD stays clean — the pill lives in the
-/// main window footer only.
+/// translation status × active engine. The HUD stays clean — the pill lives
+/// in the main window footer only.
 struct TranslationPill: Equatable {
     enum Tone: Equatable {
         case green, yellow, red, neutral

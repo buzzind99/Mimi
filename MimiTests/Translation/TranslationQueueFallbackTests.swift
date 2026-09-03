@@ -2,7 +2,7 @@ import Foundation
 @testable import Mimi
 import Testing
 
-/// Queue-level tests for the T10/T11 failure ladder: fallback re-entry
+/// Queue-level tests for the failure ladder: fallback re-entry
 /// (a second `run(with:)` after a dead one) preserves `pending` + cache, the
 /// generation token retires a dead run without clobbering the live one,
 /// cancellation mid-batch re-queues, and `noteRetry` surfaces retry progress
@@ -104,7 +104,7 @@ struct TranslationQueueFallbackTests {
 
     // MARK: - Fallback re-entry preserves pending + cache
 
-    /// The T10 fallback flow at the queue level: a dead external run exits
+    /// The fallback flow at the queue level: a dead external run exits
     /// with `.unavailable` and its batch back in `pending`; the replacement
     /// (Apple) run replays it 1:1; the cache seeded by the replacement run
     /// serves repeats without touching the engine again.
