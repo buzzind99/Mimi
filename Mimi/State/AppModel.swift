@@ -14,6 +14,15 @@ enum SessionPhase: Equatable {
     case failed(String)
 }
 
+/// Which translation engine is currently attached to the queue. Derived
+/// state (status pill, Settings "Currently using" row) reads this, never the
+/// provider picker — a provider change applies on the next session start or
+/// manual retry.
+enum ActiveTranslationEngine: Equatable {
+    case apple
+    case external
+}
+
 /// Orchestrates capture → ASR → sentence buffering → translation, and owns
 /// the published UI state. All public state is @MainActor. The mechanics of
 /// a live session (engine, capture, buffering, timers) live in
@@ -62,6 +71,18 @@ final class AppModel: ObservableObject {
     /// external engine failed (the Settings "Currently using" row surfaces it).
     @Published var translationFallbackActive = false
 
+    /// The engine currently attached to the queue — Apple's via the hidden
+    /// `.translationTask` host, an external one via `translationWorker`.
+    @Published private(set) var activeTranslationEngine: ActiveTranslationEngine = .apple
+
+    /// The spawned external-engine worker (`queue.run(with:)`). Apple runs
+    /// belong to SwiftUI's `.translationTask` instead. Torn down on stop.
+    private var translationWorker: Task<Void, Never>?
+
+    /// Injectable HTTP transport for the external engines (tests); nil drives
+    /// the real per-provider `URLSession` transports.
+    let translationTransport: HTTPTranslationTransport?
+
     /// Internal (not private) so tests can drive the session callbacks.
     let sessionController: SessionController
 
@@ -69,13 +90,19 @@ final class AppModel: ObservableObject {
     /// stop flow over a scripted `SessionController` (no TCC prompt, no SCK,
     /// no native runtime); nil (the default) builds the real one — no
     /// behavior change.
+    /// Injectable so tests can quiesce the launch check (stub `resolve`):
+    /// the real locator SHA-256-verifies up to ~200 MB and its success feeds
+    /// the engine warm-up — real blocking work tests must never trigger.
     init(
         makeSessionController: (
             (LivePartialState, LatencyState, TranslationQueue) -> SessionController
         )? = nil,
-        translationSettings: TranslationSettings? = nil
+        translationSettings: TranslationSettings? = nil,
+        translationTransport: HTTPTranslationTransport? = nil,
+        initialModelResolve: @escaping @Sendable () -> URL? = { ModelLocator.resolve() }
     ) {
         self.translationSettings = translationSettings ?? TranslationSettings()
+        self.translationTransport = translationTransport
         if let makeSessionController {
             sessionController = makeSessionController(live, latency, translationQueue)
         } else {
@@ -89,10 +116,10 @@ final class AppModel: ObservableObject {
                 self?.applyTranslation(index: index, translation: translation)
             },
             status: { [weak self] status in
-                self?.translationStatus = status
+                self?.handleTranslationStatus(status)
             }
         )
-        initialModelCheck = Task { await refreshModelAvailability() }
+        initialModelCheck = Task { await refreshModelAvailability(resolve: initialModelResolve) }
         prepareDictionaryIfNeeded()
 
         NotificationCenter.default.addObserver(
@@ -107,6 +134,9 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             entries.removeAll()
             hudPinnedIndex = nil
+            // The Apple-fallback latch is per session: a fresh session
+            // re-attempts the configured provider from scratch.
+            translationFallbackActive = false
         }
         sessionController.onEngineChosen = { [weak self] isMock, url in
             self?.engineIsMock = isMock
@@ -229,13 +259,13 @@ final class AppModel: ObservableObject {
 
         phase = .running
 
-        // Activate translation: the hidden `.translationTask` host picks this
-        // up and hands a session to the queue (prompting for the language
-        // pack the first time). Invalidate first (mirroring retryTranslation)
-        // so SwiftUI reliably re-fires the task even if a config survived.
+        // Activate translation: an external provider's worker is spawned
+        // directly; Apple goes through the hidden `.translationTask` host
+        // (prompting for the language pack the first time). Invalidate the
+        // config first (mirroring retryTranslation) so SwiftUI reliably
+        // re-fires the task even if a config survived.
         translationQueue.resetForRetry()
-        translationConfig?.invalidate()
-        translationConfig = makeTranslationConfig()
+        activateTranslation()
 
         sessionController.startTimers()
     }
@@ -265,11 +295,112 @@ final class AppModel: ObservableObject {
     /// does not reliably re-fire on.
     private func performStop() async {
         await sessionController.stop()
+        // The external worker parks in the queue's wake loop after draining;
+        // once `sessionController.stop()` has drained (translations intact),
+        // tear it down. Apple runs are owned by SwiftUI and stay parked.
+        translationWorker?.cancel()
+        translationWorker = nil
         translationStatus = .idle
         phase = .idle
     }
 
+    /// Retry after a translation failure (status-bar button). Re-reads the
+    /// selected provider (and its key) and re-attaches an engine — so a
+    /// manual retry re-attempts the external engine even after the fallback
+    /// latched, in case the key or network was fixed. The latch itself is
+    /// one-way per session: a second external failure stays `.unavailable`
+    /// with this same button for recovery.
     func retryTranslation() {
+        // A stale note (e.g. "…has no API key") must not outlive the retry:
+        // `activateTranslation` re-sets it when still unconfigured.
+        errorMessage = nil
+        activateTranslation()
+    }
+
+    /// Attaches the selected provider's engine to the queue. Called on
+    /// session start and on `retryTranslation` — a provider change therefore
+    /// applies no later than the next session start.
+    ///
+    /// External path: build the engine (key read from the Keychain here, at
+    /// construction), spawn the worker task, park the Apple host by
+    /// invalidating any live config. Apple path: invalidate + recreate the
+    /// config so `.translationTask` reliably re-fires and hands an
+    /// `AppleSessionEngine` to `queue.run(with:)`.
+    private func activateTranslation() {
+        if let engine = makeExternalEngine() {
+            activeTranslationEngine = .external
+            translationConfig?.invalidate()
+            translationWorker?.cancel()
+            let queue = translationQueue
+            translationWorker = Task {
+                await queue.run(with: engine)
+            }
+        } else {
+            if translationSettings.selectedProvider.isExternal {
+                // Selected but unconfigured (key deleted): degrade to Apple
+                // with a status note instead of failing outright.
+                errorMessage =
+                    "\(translationSettings.selectedProvider.displayName) has no API key — using Apple on-device."
+            }
+            activeTranslationEngine = .apple
+            translationConfig?.invalidate()
+            translationConfig = makeTranslationConfig()
+        }
+    }
+
+    /// Builds the selected external provider's engine, or nil when Apple is
+    /// selected (or the external provider has no usable key — the unconfigured
+    /// edge falls back to Apple with a note in `activateTranslation`).
+    private func makeExternalEngine() -> (any TranslationEngine)? {
+        let provider = translationSettings.selectedProvider
+        guard provider.isExternal, let key = translationSettings.key(for: provider) else {
+            return nil
+        }
+        // The guard narrowed the domain to the external providers; Apple is
+        // served by the `.translationTask` host in `activateTranslation`.
+        var engine: any TranslationEngine
+        if provider == .google {
+            engine = GoogleTranslateEngine(apiKey: key, transport: translationTransport)
+        } else if provider == .deepl {
+            engine = DeepLEngine(apiKey: key, transport: translationTransport)
+        } else {
+            engine = OpenRouterEngine(
+                apiKey: key,
+                model: translationSettings.openRouterModel,
+                transport: translationTransport
+            )
+        }
+        let queue = translationQueue
+        engine.onRetry = { progress in
+            Task { @MainActor in queue.noteRetry(progress) }
+        }
+        return engine
+    }
+
+    /// Routes queue status updates to the published state and drives the
+    /// latched Apple fallback. When an external engine exhausts its retries
+    /// (`.unavailable`) and the fallback hasn't engaged this session,
+    /// invalidate + recreate `translationConfig` — the hidden
+    /// `TranslationSessionHost` fires, hands an `AppleSessionEngine` to
+    /// `queue.run(with:)`, the generation token retires the dead external
+    /// run, and the surviving `pending` replays onto Apple. Internal so tests
+    /// can drive the queue's status callback directly.
+    func handleTranslationStatus(_ status: TranslationStatus) {
+        translationStatus = status
+        guard case .unavailable = status,
+              activeTranslationEngine == .external,
+              !translationFallbackActive
+        else { return }
+        translationFallbackActive = true
+        fallBackToApple()
+    }
+
+    /// The one-way latch: once on Apple for the rest of the session (no
+    /// periodic re-probing). Publishes `.degraded` so the footer explains the
+    /// switch; the fresh Apple run publishes `.ready` over it once flowing.
+    private func fallBackToApple() {
+        activeTranslationEngine = .apple
+        translationStatus = .degraded("External translation failed — using Apple on-device")
         translationConfig?.invalidate()
         translationConfig = makeTranslationConfig()
     }

@@ -36,10 +36,19 @@ struct SettingsView: View {
     private var translationSection: some View {
         Section("Translation") {
             LabeledContent("Currently using") {
-                Text(settings.activeEngineDescription(fallbackActive: model.translationFallbackActive))
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // Truthful mid-fallback: the suffix shows only while the
+                // latched Apple engine is actually the active one — a manual
+                // retry that re-engaged the external engine hides it.
+                Text(
+                    settings.activeEngineDescription(
+                        fallbackActive:
+                        model.translationFallbackActive &&
+                            model.activeTranslationEngine == .apple
+                    )
+                )
+                .font(.caption.monospaced())
+                .lineLimit(1)
+                .truncationMode(.middle)
             }
             Picker("Provider", selection: providerBinding) {
                 ForEach(TranslationProvider.allCases) { provider in

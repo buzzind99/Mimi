@@ -6,6 +6,12 @@ enum TranslationStatus: Equatable {
     case idle
     case ready
     case translating
+    /// An external engine is retrying a transient failure; the payload is
+    /// the footer copy ("External translation failed, N retries left").
+    case retrying(String)
+    /// The external engine failed out for good and the session latched onto
+    /// Apple on-device; the payload is the footer copy explaining why.
+    case degraded(String)
     case unavailable(String)
 }
 
@@ -122,6 +128,11 @@ final class TranslationQueue {
                         } else {
                             setStatus(.unavailable(Self.describe(error)))
                         }
+                    } else {
+                        // A stale run re-queued work after a newer run
+                        // already pumped (and parked). The newer run owns
+                        // `wake` now — nudge it so the batch replays.
+                        wake?.yield(())
                     }
                     return false
                 }
@@ -157,6 +168,26 @@ final class TranslationQueue {
     /// replays the backlog.
     func resetForRetry() {
         setStatus(.idle)
+    }
+
+    /// Reports an external engine's transient-retry progress to the footer
+    /// (wired from the engine's `onRetry`, hopped to the main actor). The
+    /// retry hop is asynchronous, so a late report can land outside the
+    /// live batch window — only `.translating`/`.retrying` accept it. A
+    /// report arriving after the batch resolved is stale: it must not
+    /// clobber a post-batch `.ready`/`.idle`, a latched `.degraded`, or a
+    /// terminal `.unavailable`.
+    func noteRetry(_ progress: RetryProgress) {
+        switch status {
+        case .translating, .retrying:
+            setStatus(.retrying(Self.retryCopy(attemptsLeft: progress.attemptsLeft)))
+        case .idle, .ready, .unavailable, .degraded:
+            return
+        }
+    }
+
+    private static func retryCopy(attemptsLeft: Int) -> String {
+        "External translation failed, \(attemptsLeft) retries left"
     }
 
     /// Waits until `pending` is empty and no translation is in flight,

@@ -9,6 +9,8 @@ struct StatusBarView: View {
     var body: some View {
         HStack(spacing: 16) {
             statusBadge
+            translationPill
+            translationStatusMessage
             Spacer()
             Text("≈ \(latency.seconds.formatted(.number.precision(.fractionLength(1)))) s behind")
                 .font(.caption.monospacedDigit())
@@ -50,6 +52,32 @@ struct StatusBarView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
 
+        if let message = model.errorMessage {
+            Text(message).font(.caption).foregroundStyle(.red)
+        }
+    }
+
+    // MARK: - Translation connection pill + footer copy
+
+    /// Green/yellow/red connection pill, derived from (status × active
+    /// engine) by the tested `TranslationPill.map` function.
+    private var translationPill: some View {
+        let pill = TranslationPill.map(
+            status: model.translationStatus,
+            activeEngine: model.activeTranslationEngine
+        )
+        return Label(pill.label, systemImage: "translate")
+            .font(.caption)
+            .foregroundStyle(Self.toneColor(pill.tone))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Self.toneColor(pill.tone).opacity(0.15)))
+    }
+
+    /// Footer copy next to the pill: retry countdown, the latched-fallback
+    /// note (with retry + a jump into Settings), and failure/retry affordances.
+    @ViewBuilder
+    private var translationStatusMessage: some View {
         switch model.translationStatus {
         case let .unavailable(message):
             HStack(spacing: 6) {
@@ -58,14 +86,31 @@ struct StatusBarView: View {
                     .buttonStyle(.link)
                     .font(.caption)
             }
+        case let .retrying(message):
+            Text(message).font(.caption).foregroundStyle(.secondary)
+        case let .degraded(message):
+            HStack(spacing: 6) {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                Button("Retry") { model.retryTranslation() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                SettingsLink {
+                    Text("Settings").font(.caption)
+                }
+            }
         case .translating:
             Text("Translating…").font(.caption).foregroundStyle(.secondary)
-        default:
+        case .ready, .idle:
             EmptyView()
         }
+    }
 
-        if let message = model.errorMessage {
-            Text(message).font(.caption).foregroundStyle(.red)
+    private static func toneColor(_ tone: TranslationPill.Tone) -> Color {
+        switch tone {
+        case .green: .green
+        case .yellow: .yellow
+        case .red: .red
+        case .neutral: .secondary
         }
     }
 }
