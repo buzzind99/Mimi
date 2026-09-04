@@ -174,7 +174,8 @@ struct AppModelSessionTests {
             // Stub the launch check: the real locator hashes the dev GGUF and
             // the resolved URL feeds the warm-up. The scripted URL below
             // drives the same path over the injected doubles.
-            initialModelResolve: { _ in nil }
+            initialModelResolve: { _ in nil },
+            retireWarmEngine: { log.record("engine.retire") }
         )
         // Quiesce the launch-time model check, then force an idle start with
         // a synthetic model URL (model discovery is async now).
@@ -266,5 +267,58 @@ struct AppModelSessionTests {
         // Teardown must run (and beat the resumed begin, whose tail is a
         // no-op against a stopped session) in both interleavings.
         #expect(sut.log.contains(inOrder: ["capture.start", "capture.stop"]))
+    }
+
+    // MARK: - quit-time shutdown
+
+    @Test("shutdownForTermination during a running session stops it, then retires the warm engine")
+    func shutdownDuringRunningSessionStopsThenRetires() async {
+        let sut = await makeSUT()
+
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
+
+        await sut.model.shutdownForTermination()
+
+        #expect(sut.model.phase == .idle)
+        #expect(
+            sut.log.contains(inOrder: ["capture.stop", "engine.retire"]),
+            "the engine is only released after the session teardown drained"
+        )
+    }
+
+    @Test("shutdownForTermination while idle still retires the warm engine")
+    func shutdownWhileIdleStillRetires() async {
+        let sut = await makeSUT()
+
+        await sut.model.shutdownForTermination()
+
+        #expect(sut.model.phase == .idle)
+        #expect(sut.log.names.contains("engine.retire"))
+    }
+
+    @Test("shutdownForTermination after a manual stop awaits it and retires once")
+    func shutdownAfterManualStopRetiresOnce() async {
+        let sut = await makeSUT(poll: [.partial(text: "ライブ")])
+
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
+        sut.model.stop()
+        #expect(await pollUntil { sut.model.phase == .idle }, "the manual stop winds down to idle")
+
+        await sut.model.shutdownForTermination()
+
+        #expect(sut.log.names.filter { $0 == "engine.retire" } == ["engine.retire"])
+    }
+
+    @Test("start is refused once termination teardown has begun")
+    func startRefusedAfterTerminationBegins() async {
+        let sut = await makeSUT()
+
+        await sut.model.shutdownForTermination()
+        sut.model.start()
+
+        #expect(sut.model.phase == .idle, "a terminating model never begins a new session")
+        #expect(!sut.log.names.contains("capture.start"), "no capture came up after teardown")
     }
 }

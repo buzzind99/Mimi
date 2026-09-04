@@ -6,6 +6,10 @@ import Foundation
 /// export delegation stay in `AppModel`, which plugs in via the callbacks.
 @MainActor
 final class SessionController {
+    /// Upper bound for the translation-tail drain in `stop()`. Also part of
+    /// the quit-time watchdog budget in `AppDelegate`.
+    static let translationDrainTimeout: TimeInterval = 5
+
     private let live: LivePartialState
     private let latency: LatencyState
     private let translationQueue: TranslationQueue
@@ -191,7 +195,7 @@ final class SessionController {
         // below), then let the translation worker finish its tail.
         sentenceBuffer?.flush()
         sentenceBuffer = nil
-        _ = await translationQueue.drain(timeout: 5)
+        _ = await translationQueue.drain(timeout: Self.translationDrainTimeout)
         live.partial = ""
     }
 

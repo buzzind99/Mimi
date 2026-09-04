@@ -97,6 +97,19 @@ final class AppModel {
     /// belong to SwiftUI's `.translationTask` instead. Torn down on stop.
     private var translationWorker: Task<Void, Never>?
 
+    /// The in-flight teardown task from `stop()`. `shutdownForTermination`
+    /// awaits it so quit never runs a second teardown concurrently with a
+    /// user-initiated one.
+    private var stopTask: Task<Void, Never>?
+
+    /// Latched by `shutdownForTermination`: once quit-time teardown begins,
+    /// `start` is refused — a session begun during the `.terminateLater`
+    /// window would race the engine retirement that follows the drain.
+    private(set) var isTerminating = false
+    /// Injectable so tests can observe (and fake) the quit-time release of
+    /// the process-warm ASR engine; the default drives the real factory.
+    private let retireWarmEngine: @Sendable () -> Void
+
     /// Injectable HTTP transport for the external engines (tests); nil drives
     /// the real per-provider `URLSession` transports.
     let translationTransport: HTTPTranslationTransport?
@@ -120,12 +133,16 @@ final class AppModel {
         translationTransport: HTTPTranslationTransport? = nil,
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = {
             ModelLocator.resolve(for: $0)
+        },
+        retireWarmEngine: @escaping @Sendable () -> Void = {
+            ASREngineFactory.retireWarmEngine()
         }
     ) {
         self.translationSettings = translationSettings ?? TranslationSettings()
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         modelResolve = initialModelResolve
         self.translationTransport = translationTransport
+        self.retireWarmEngine = retireWarmEngine
         if let makeSessionController {
             sessionController = makeSessionController(live, latency, translationQueue)
         } else {
@@ -148,7 +165,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(
             forName: .mimiAppWillTerminate, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.stop() }
+            Task { @MainActor in await self?.shutdownForTermination() }
         }
     }
 
@@ -298,7 +315,7 @@ final class AppModel {
     // MARK: - Session control
 
     func start() {
-        guard case .idle = phase, !isCheckingModel else { return }
+        guard case .idle = phase, !isCheckingModel, !isTerminating else { return }
         phase = .starting
         errorMessage = nil
 
@@ -351,9 +368,33 @@ final class AppModel {
         guard phase == .starting || phase == .running || phase == .sourceLost else { return }
         phase = .stopping
 
-        Task { @MainActor in
+        stopTask = Task { @MainActor in
+            await performStop()
+            stopTask = nil
+        }
+    }
+
+    /// Quit-time teardown, invoked via `.mimiAppWillTerminate` (posted by
+    /// `AppDelegate.applicationShouldTerminate`, which returns
+    /// `.terminateLater` and waits for `.mimiTerminationTeardownComplete`).
+    ///
+    /// Winds a live session down exactly like a manual stop — flush decode +
+    /// translation tail stay exportable — then permanently releases the
+    /// process-warm ASR engine so the C library frees its session (and its
+    /// Metal contexts) before the process exits instead of leaving them alive
+    /// at device teardown. Completes with the teardown-complete notification
+    /// in all paths, including an idle model (the warm engine can exist with
+    /// no session ever started), latching `isTerminating` first.
+    func shutdownForTermination() async {
+        isTerminating = true
+        if let stopTask {
+            await stopTask.value
+        } else if phase == .starting || phase == .running || phase == .stopping || phase == .sourceLost {
+            phase = .stopping
             await performStop()
         }
+        retireWarmEngine()
+        NotificationCenter.default.post(name: .mimiTerminationTeardownComplete, object: nil)
     }
 
     /// Teardown via `SessionController` (capture, ASR, buffering, timers),

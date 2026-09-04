@@ -88,7 +88,14 @@ enum SessionClock {
 }
 
 extension Notification.Name {
-    /// Posted from `AppDelegate.applicationWillTerminate` so `AppModel` can
-    /// wind the live session down on quit.
+    /// Posted from `AppDelegate.applicationShouldTerminate` (which returns
+    /// `.terminateLater`) so `AppModel` can wind the live session down on quit.
     static let mimiAppWillTerminate = Notification.Name("MimiAppWillTerminate")
+
+    /// Posted by `AppModel` once quit-time teardown finished (session wound
+    /// down, warm ASR engine released). `AppDelegate` replies to
+    /// `applicationShouldTerminate` on receiving it — or when its watchdog
+    /// fires, whichever comes first.
+    static let mimiTerminationTeardownComplete =
+        Notification.Name("MimiTerminationTeardownComplete")
 }
