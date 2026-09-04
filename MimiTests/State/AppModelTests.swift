@@ -410,17 +410,20 @@ struct AppModelTests {
     func startWhileCheckingModelIsNoOp() async {
         let model = await makeSUT()
         model.phase = .idle
-        // Drive a check without awaiting it so `isCheckingModel` is live.
-        let check = Task { await model.refreshModelAvailability(resolve: { nil }) }
-        while !model.isCheckingModel {
-            await Task.yield()
-        }
+        // Park the check inside `resolve` so `isCheckingModel` stays live
+        // until the gate opens: the flag can never flip back to false
+        // between the wait and the `start()` assertion (a bare yield-spin
+        // raced the check's completion and could spin forever).
+        let gate = ModelCheckGate()
+        let check = Task { await model.refreshModelAvailability(resolve: gate.resolve) }
+        #expect(await pollUntil { model.isCheckingModel })
 
         model.start()
 
         #expect(model.phase == .idle)
-        check.cancel()
+        gate.open()
         await check.value
+        #expect(!model.isCheckingModel)
     }
 
     @Test("start is a no-op when not idle")
@@ -447,4 +450,23 @@ struct AppModelTests {
     }
 
     private static let willTerminateNotification = NSNotification.Name("MimiAppWillTerminate")
+
+    /// One-shot gate parked inside the model check's `resolve`: keeps the
+    /// check in flight (and `isCheckingModel` true) until the test opens it.
+    /// The wait is bounded so a regression surfaces as a failure, never a
+    /// wedge. Same pattern as `AppModelSessionTests.StartGate`.
+    private final class ModelCheckGate: @unchecked Sendable {
+        private let semaphore = DispatchSemaphore(value: 0)
+
+        /// Serves as the check's `resolve` (runs off-main in the detached
+        /// task): parks until `open()`, then reports no model found.
+        func resolve() -> URL? {
+            _ = semaphore.wait(timeout: .now() + 10)
+            return nil
+        }
+
+        func open() {
+            semaphore.signal()
+        }
+    }
 }
