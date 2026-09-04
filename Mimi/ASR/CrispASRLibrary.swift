@@ -237,42 +237,18 @@ final class CrispASRLibrary {
 
     // MARK: - Library binding
 
-    private static let dylibCandidates: [String?] = {
-        var candidates: [String?] = []
-        #if DEBUG
-            // Test/CI override (absolute path) — release builds resolve only
-            // via bundle/LC_RPATH paths, never the environment or the CWD.
-            candidates.append(ProcessInfo.processInfo.environment["MIMI_ASR_DYLIB"])
-        #endif
-        // Bare name: resolved via the app's LC_RPATH (covers the dev
-        // checkout via $(SRCROOT)/local/frameworks and the bundle via
-        // @executable_path/../Frameworks).
-        candidates.append("libcrispasr.dylib")
-        candidates.append(Bundle.main.privateFrameworksPath.map { $0 + "/libcrispasr.dylib" })
-        candidates.append(Bundle.main.path(forResource: "libcrispasr", ofType: "dylib"))
-        candidates.append(Bundle.main.path(
-            forResource: "libcrispasr", ofType: "dylib", inDirectory: "Frameworks"
-        ))
-        #if DEBUG
-            // Development fallback (repo checkout before bundling).
-            candidates.append(FileManager.default.currentDirectoryPath
-                + "/local/frameworks/crispasr/libcrispasr.dylib")
-        #endif
-        return candidates
-    }()
+    private static let dylibCandidates: [String?] = DylibLoader.candidates(
+        named: "libcrispasr.dylib",
+        debugEnvKey: "MIMI_ASR_DYLIB",
+        debugFallbackSubdirectory: "crispasr"
+    )
 
     private static func openLibrary() throws -> UnsafeMutableRawPointer {
-        var lastError = "no candidate paths"
-        for candidate in dylibCandidates {
-            guard let path = candidate else { continue }
-            if let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) {
-                return handle
-            }
-            if let err = dlerror() {
-                lastError = String(cString: err)
-            }
+        let result = DylibLoader.open(candidates: dylibCandidates)
+        guard let handle = result.handle else {
+            throw ASREngineError.runtimeNotFound(result.lastError ?? "no candidate paths")
         }
-        throw ASREngineError.runtimeNotFound(lastError)
+        return handle
     }
 
     private func bind(from handle: UnsafeMutableRawPointer) {

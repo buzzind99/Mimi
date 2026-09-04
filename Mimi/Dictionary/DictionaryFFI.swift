@@ -40,24 +40,7 @@ struct DictionaryFFI {
     /// Search paths for the staged dylib, tried in order. The bare name
     /// resolves via the app's LC_RPATH (dev checkout: $(SRCROOT)/local/
     /// frameworks; bundled app: @executable_path/../Frameworks).
-    private static let dylibCandidates: [String?] = {
-        var candidates: [String?] = [
-            "libdictionary.dylib",
-            Bundle.main.privateFrameworksPath.map { $0 + "/libdictionary.dylib" },
-            Bundle.main.path(forResource: "libdictionary", ofType: "dylib"),
-            Bundle.main.path(
-                forResource: "libdictionary", ofType: "dylib", inDirectory: "Frameworks"
-            )
-        ]
-        // Development fallback (repo checkout before bundling). Debug-only so
-        // release never depends on the working directory.
-        #if DEBUG
-            candidates.append(
-                FileManager.default.currentDirectoryPath + "/local/frameworks/libdictionary.dylib"
-            )
-        #endif
-        return candidates
-    }()
+    private static let dylibCandidates = DylibLoader.candidates(named: "libdictionary.dylib")
 
     /// Binds all required symbols from the first loadable candidate, or nil.
     /// Defaults are the real dlopen/dlsym; tests inject fakes to exercise
@@ -66,15 +49,9 @@ struct DictionaryFFI {
         openLibrary: (String) -> UnsafeMutableRawPointer? = { dlopen($0, RTLD_NOW | RTLD_LOCAL) },
         symbol: (UnsafeMutableRawPointer, String) -> UnsafeMutableRawPointer? = { dlsym($0, $1) }
     ) -> DictionaryFFI? {
-        var handle: UnsafeMutableRawPointer?
-        for candidate in dylibCandidates {
-            guard let path = candidate else { continue }
-            if let loaded = openLibrary(path) {
-                handle = loaded
-                break
-            }
-        }
-        guard let handle else { return nil }
+        guard let handle = DylibLoader.open(
+            candidates: dylibCandidates, open: openLibrary
+        ).handle else { return nil }
         guard let open = symbol(handle, "dictionary_open"),
               let free = symbol(handle, "dictionary_free"),
               let tokenizeJSON = symbol(handle, "dictionary_tokenize_json"),
