@@ -21,17 +21,6 @@ struct MainHeaderView: View {
             .toggleStyle(.checkbox)
             .help("Floating always-on-top subtitle overlay (click-through, resizable)")
 
-            Picker("Reading", selection: $readingAnnotation) {
-                ForEach(ReadingAnnotation.allCases) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .help(
-                "Reading annotation for the Japanese text — romaji and furigana are mutually exclusive"
-            )
-
             Spacer()
 
             if model.engineIsMock {
@@ -46,6 +35,27 @@ struct MainHeaderView: View {
             }
 
             exportMenu
+
+            SettingsLink {
+                Image(systemName: "gearshape")
+                    .frame(width: 16, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Settings")
+        }
+        .overlay {
+            Picker("Reading", selection: $readingAnnotation) {
+                ForEach(ReadingAnnotation.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help(
+                "Reading annotation for the Japanese text — romaji and furigana are mutually exclusive"
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
