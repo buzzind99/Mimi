@@ -206,16 +206,36 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["は", "wa", nil]])
     }
 
-    @Test("a sokuon token separated from the next by a gap stays stranded")
-    func sokuonAcrossGapDoesNotMerge() throws {
+    @Test("a sokuon merges across a whitespace gap (ASR word spacing)",
+          arguments: [
+              ([("言っ", "いっ"), ("て", "て")],
+               [["言っ て", "itte", "いって"]]),
+              ([("なかっ", nil), ("た", nil)],
+               [["なかっ た", "nakatta", nil]])
+          ])
+    func sokuonMergesAcrossWhitespaceGap(
+        pair: [(String, String?)], expected: [[String?]]
+    ) throws {
+        let annotator = makeAnnotator([
+            token(pair[0].0, start: 0, reading: pair[0].1),
+            token(pair[1].0, start: pair[0].0.unicodeScalars.count + 1, reading: pair[1].1)
+        ])
+
+        let segments = try #require(annotator.segments(for: pair[0].0 + " " + pair[1].0))
+
+        #expect(describe(segments) == expected)
+    }
+
+    @Test("a sokuon token separated from the next by a non-whitespace gap stays stranded")
+    func sokuonAcrossNonWhitespaceGapDoesNotMerge() throws {
         let annotator = makeAnnotator([
             token("言っ", start: 0, reading: "いっ"),
             token("て", start: 3, reading: "て")
         ])
 
-        let segments = try #require(annotator.segments(for: "言っ て"))
+        let segments = try #require(annotator.segments(for: "言っ、て"))
 
-        #expect(describe(segments) == [["言っ", "itsu", "いっ"], [" ", " ", nil], ["て", "te", nil]])
+        #expect(describe(segments) == [["言っ", "itsu", "いっ"], ["、", "、", nil], ["て", "te", nil]])
     }
 
     @Test("a trailing sokuon token has nothing to geminate with")

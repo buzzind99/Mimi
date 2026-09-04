@@ -91,11 +91,17 @@ final class ReadingAnnotator: @unchecked Sendable {
                 Self.accumulate(token, surface: surface, into: &pending)
                 i += 1
             } else if !fuse(&pending, with: token, surface: surface, into: &segments) {
-                let nextSurface = i + 1 < tokens.count
-                    ? Self.scalarSlice(tokens[i + 1], of: scalars) : nil
+                let nextToken = i + 1 < tokens.count ? tokens[i + 1] : nil
+                let nextSurface = nextToken.map { Self.scalarSlice($0, of: scalars) }
+                var gap = ""
+                if let nextToken, nextToken.start > token.end {
+                    let low = min(token.end, scalars.count)
+                    let high = min(nextToken.start, scalars.count)
+                    gap = String(String.UnicodeScalarView(scalars[low ..< high]))
+                }
                 if let merged = sokuonMergedSpan(
-                    token, surface: surface, next: i + 1 < tokens.count ? tokens[i + 1] : nil,
-                    nextSurface: nextSurface
+                    token, surface: surface, next: nextToken,
+                    nextSurface: nextSurface, gap: gap
                 ) {
                     appendToken(
                         DictionaryToken(
@@ -151,15 +157,22 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// Joins a sokuon-bearing token with the following one. IPADIC splits
     /// conjugated forms at the stem boundary (言って → 言っ/て), stranding the
     /// gemination target in the next token's reading; when the pair is
-    /// contiguous and the next reading begins with a geminable mora, the two
-    /// merge into one segment (surface 言って, reading イッテ) so `KanaRomaji`
-    /// derives "itte". Overridden particles (って + は) and numeral runs keep
+    /// adjacent — or separated only by whitespace, which ASR output inserts
+    /// between words (ちゃっ た) — and the next reading begins with a
+    /// geminable mora, the two merge into one segment (surface 言って,
+    /// reading イッテ) so `KanaRomaji` derives "itte". The intervening `gap`
+    /// ("" when adjacent) must be whitespace-only — any other uncovered span
+    /// blocks the merge — and folds into the merged surface so it isn't
+    /// dropped. Overridden particles (って + は) and numeral runs keep
     /// their own conversions; a genuinely stranded sokuon falls back to the
     /// spoken "tsu".
     private func sokuonMergedSpan(
-        _ token: DictionaryToken, surface: String, next: DictionaryToken?, nextSurface: String?
+        _ token: DictionaryToken, surface: String, next: DictionaryToken?, nextSurface: String?,
+        gap: String
     ) -> (surface: String, kana: String)? {
-        guard let next, let nextSurface, next.start == token.end else { return nil }
+        guard let next, let nextSurface, next.start >= token.end,
+              gap.unicodeScalars.allSatisfy({ $0.properties.isWhitespace })
+        else { return nil }
         guard let reading = token.reading ?? Self.selfReading(surface),
               reading.unicodeScalars.last.map(Self.isSokuon) == true
         else { return nil }
@@ -168,7 +181,7 @@ final class ReadingAnnotator: @unchecked Sendable {
               Self.particleRomaji[nextSurface] == nil,
               KanaRomaji.geminates(fromKana: nextReading)
         else { return nil }
-        return (surface: surface + nextSurface, kana: reading + nextReading)
+        return (surface: surface + gap + nextSurface, kana: reading + nextReading)
     }
 
     private static func isSokuon(_ scalar: Unicode.Scalar) -> Bool {
