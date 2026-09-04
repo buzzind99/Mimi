@@ -338,7 +338,9 @@ private struct ModelRow: View {
             } else {
                 ProgressView()
             }
-        case .done:
+        // Stale `.done` (file deleted externally after a completed download)
+        // must not read "Downloaded": fall through to the missing branch.
+        case .done where resolvedURL != nil:
             Label("Downloaded", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
