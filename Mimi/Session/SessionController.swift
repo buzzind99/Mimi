@@ -205,11 +205,7 @@ final class SessionController {
         private func logIngressEnergy(_ chunk: AudioChunk) {
             debugIngressChunks += 1
             guard debugIngressChunks % 50 == 0 else { return }
-            var energy: Float = 0
-            for s in chunk.samples {
-                energy += s * s
-            }
-            let rms = (energy / Float(max(1, chunk.samples.count))).squareRoot()
+            let rms = AudioLevels.rms(of: chunk.samples)
             print(
                 "[capture] chunk #\(debugIngressChunks) rms=\(String(format: "%.6f", rms)) " +
                     "t=\(SessionClock.timestamp(SessionClock.seconds(chunk.startSample)))"

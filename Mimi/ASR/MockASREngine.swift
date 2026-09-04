@@ -41,12 +41,7 @@ final class MockASREngine: ASREngine, @unchecked Sendable {
 
     func push(_ samples: [Float]) {
         totalSamples += samples.count
-        var energy: Float = 0
-        for s in samples {
-            energy += s * s
-        }
-        let rms = (energy / Float(max(1, samples.count))).squareRoot()
-        if rms > 1e-3 {
+        if AudioLevels.rms(of: samples) > 1e-3 {
             speechChunksSeen += 1
         }
         if pendingFinal == nil, speechChunksSeen >= nextSentenceAt {

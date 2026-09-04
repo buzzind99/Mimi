@@ -282,12 +282,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
             utterance.append(contentsOf: samples)
 
             // RMS backstop: track whether this buffer is not truly silent.
-            var energy: Float = 0
-            for s in samples {
-                energy += s * s
-            }
-            let rms = (energy / Float(max(1, samples.count))).squareRoot()
-            if rms > Self.speechRMS {
+            if AudioLevels.rms(of: samples) > Self.speechRMS {
                 utteranceHasLoudAudio = true
             }
 
