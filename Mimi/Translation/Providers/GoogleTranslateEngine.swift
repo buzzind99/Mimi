@@ -9,9 +9,7 @@ struct GoogleTranslateEngine: TranslationEngine {
 
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
-    private let apiKey: String
-    private let transport: HTTPTranslationTransport
-    private let ladder: TransientRetryLadder
+    private let client: BatchTranslateClient
 
     static let endpoint = URL(string: "https://translation.googleapis.com/language/translate/v2")!
 
@@ -20,34 +18,21 @@ struct GoogleTranslateEngine: TranslationEngine {
         transport: HTTPTranslationTransport? = nil,
         ladder: TransientRetryLadder = TransientRetryLadder()
     ) {
-        self.apiKey = apiKey
-        self.transport = transport ?? HTTPTranslationTransport(timeout: 15)
-        self.ladder = ladder
+        client = BatchTranslateClient(
+            endpoint: Self.endpoint,
+            headers: ["X-goog-api-key": apiKey],
+            transport: transport,
+            ladder: ladder
+        )
     }
 
     func translate(_ texts: [String]) async throws -> [String] {
         guard !texts.isEmpty else { return [] }
-
-        func makeRequest() throws -> URLRequest {
-            var request = URLRequest(url: Self.endpoint)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(apiKey, forHTTPHeaderField: "X-goog-api-key")
-            request.httpBody = try JSONEncoder().encode(
-                GoogleRequestBody(q: texts, format: "text", source: "ja", target: "en")
-            )
-            return request
-        }
-        let request = try makeRequest()
-
-        let data: Data
-        do {
-            data = try await ladder.run({
-                try await transport.send(request, classify: { Self.classify($0, $1) })
-            }, onRetry: onRetry)
-        } catch let failure as HTTPTranslationTransport.Failure {
-            throw failure.engineError
-        }
+        let data = try await client.send(
+            GoogleRequestBody(q: texts, format: "text", source: "ja", target: "en"),
+            classify: Self.classify,
+            onRetry: onRetry
+        )
         let decoded = try Self.decode(data, expectedCount: texts.count)
         return decoded.map(Self.decodingHTMLEntities)
     }
@@ -64,20 +49,9 @@ struct GoogleTranslateEngine: TranslationEngine {
     }
 
     private static func decode(_ data: Data, expectedCount: Int) throws -> [String] {
-        do {
-            let response = try JSONDecoder().decode(GoogleTranslateResponse.self, from: data)
-            let texts = response.data.translations.map { $0.translatedText }
-            guard texts.count == expectedCount else {
-                throw TranslationEngineError.badResponse(
-                    "Expected \(expectedCount) translations, got \(texts.count)"
-                )
-            }
-            return texts
-        } catch let error as TranslationEngineError {
-            throw error
-        } catch {
-            throw TranslationEngineError.badResponse("Unparseable response body")
-        }
+        try BatchTranslateClient.decodeTexts(
+            data, expectedCount: expectedCount, as: GoogleTranslateResponse.self
+        ) { $0.data.translations.map(\.translatedText) }
     }
 }
 

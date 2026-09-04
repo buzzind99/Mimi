@@ -9,10 +9,7 @@ struct DeepLEngine: TranslationEngine {
 
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
-    private let apiKey: String
-    private let endpoint: URL
-    private let transport: HTTPTranslationTransport
-    private let ladder: TransientRetryLadder
+    private let client: BatchTranslateClient
 
     static let proEndpoint = URL(string: "https://api.deepl.com/v2/translate")!
     static let freeEndpoint = URL(string: "https://api-free.deepl.com/v2/translate")!
@@ -31,39 +28,21 @@ struct DeepLEngine: TranslationEngine {
         transport: HTTPTranslationTransport? = nil,
         ladder: TransientRetryLadder = TransientRetryLadder()
     ) {
-        self.apiKey = apiKey
-        endpoint = Self.endpoint(for: apiKey)
-        self.transport = transport ?? HTTPTranslationTransport(timeout: 15)
-        self.ladder = ladder
+        client = BatchTranslateClient(
+            endpoint: Self.endpoint(for: apiKey),
+            headers: ["Authorization": "DeepL-Auth-Key \(apiKey)"],
+            transport: transport,
+            ladder: ladder
+        )
     }
 
     func translate(_ texts: [String]) async throws -> [String] {
         guard !texts.isEmpty else { return [] }
-
-        func makeRequest() throws -> URLRequest {
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("DeepL-Auth-Key \(apiKey)", forHTTPHeaderField: "Authorization")
-            request.httpBody = try JSONEncoder().encode(
-                DeepLRequestBody(
-                    text: texts,
-                    sourceLang: "JA",
-                    targetLang: "EN"
-                )
-            )
-            return request
-        }
-        let request = try makeRequest()
-
-        let data: Data
-        do {
-            data = try await ladder.run({
-                try await transport.send(request, classify: { Self.classify($0, $1) })
-            }, onRetry: onRetry)
-        } catch let failure as HTTPTranslationTransport.Failure {
-            throw failure.engineError
-        }
+        let data = try await client.send(
+            DeepLRequestBody(text: texts, sourceLang: "JA", targetLang: "EN"),
+            classify: Self.classify,
+            onRetry: onRetry
+        )
         return try Self.decode(data, expectedCount: texts.count)
     }
 
@@ -78,20 +57,9 @@ struct DeepLEngine: TranslationEngine {
     }
 
     private static func decode(_ data: Data, expectedCount: Int) throws -> [String] {
-        do {
-            let response = try JSONDecoder().decode(DeepLTranslateResponse.self, from: data)
-            let texts = response.translations.map { $0.text }
-            guard texts.count == expectedCount else {
-                throw TranslationEngineError.badResponse(
-                    "Expected \(expectedCount) translations, got \(texts.count)"
-                )
-            }
-            return texts
-        } catch let error as TranslationEngineError {
-            throw error
-        } catch {
-            throw TranslationEngineError.badResponse("Unparseable response body")
-        }
+        try BatchTranslateClient.decodeTexts(
+            data, expectedCount: expectedCount, as: DeepLTranslateResponse.self
+        ) { $0.translations.map(\.text) }
     }
 }
 
