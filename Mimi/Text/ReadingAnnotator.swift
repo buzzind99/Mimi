@@ -353,10 +353,11 @@ final class ReadingAnnotator: @unchecked Sendable {
         }
         // Generic fusion: the number keeps its geminating stem and the
         // counter takes a sokuon (ろく+かい → ろっかい), except where the
-        // plain reading is lexical (六 + 歳/等/千).
+        // plain reading is lexical (六 + 歳/等/千) or the counter's onset
+        // can't take a sokuon (ば行 keeps the plain reading, 一番 → いちばん).
         if !held.unresolved, !held.kana.isEmpty, let reading,
            !Self.rokuException(numberKana: held.kana, counterKana: reading),
-           !Self.voicedOnsetException(numberKana: held.kana, counterKana: reading),
+           !Self.voicedOnsetException(reading),
            let stem = Self.geminationStem(of: held.kana), Self.isGeminable(reading)
         {
             pending = nil
@@ -406,23 +407,21 @@ final class ReadingAnnotator: @unchecked Sendable {
         numberKana == "ろく" && ["さい", "とう", "せん"].contains { counterKana.hasPrefix($0) }
     }
 
-    /// A ば行 onset keeps the plain reading except after はち: 一番/十番/六番/百番
-    /// never geminate (いちばん/じゅうばん/ろくばん/ひゃくばん), but 八番 → はっぱん
-    /// does. だ/が行 onsets can't geminate at all (`isGeminable`).
-    private static func voicedOnsetException(numberKana: String, counterKana: String) -> Bool {
-        guard let first = counterKana.first,
-              ["ば", "び", "ぶ", "べ", "ぼ"].contains(String(first))
-        else { return false }
-        return !numberKana.hasSuffix("はち")
+    /// A ば行 onset keeps the plain reading for every numeral: 一番/六番/十番/
+    /// 八番/百番 all read without a sokuon (いちばん/ろくばん/じゅうばん/はちばん/
+    /// ひゃくばん). だ/が行 onsets can't geminate at all (`isGeminable`).
+    private static func voicedOnsetException(_ counterKana: String) -> Bool {
+        guard let first = counterKana.first else { return false }
+        return ["ば", "び", "ぶ", "べ", "ぼ"].contains(String(first))
     }
 
-    /// The written form a counter takes after the geminating っ: a は/ば-row
-    /// onset voices to the p-series (八+分 → はっぷん, 八+番 → はっぱん),
-    /// matching how `KanaRomaji` realizes the sound.
+    /// The written form a counter takes after the geminating っ: a は-row
+    /// onset voices to the p-series (八+分 → はっぷん), matching how
+    /// `KanaRomaji` realizes the sound. ば行 onsets never geminate
+    /// (`voicedOnsetException`), so they can't reach this.
     private static func postSokuonVoicing(_ kana: String) -> String {
         let voiced = [
-            "は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ",
-            "ば": "ぱ", "び": "ぴ", "ぶ": "ぷ", "べ": "ぺ", "ぼ": "ぽ"
+            "は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ"
         ]
         guard let first = kana.first, let p = voiced[String(first)] else {
             return kana

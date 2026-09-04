@@ -108,11 +108,12 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["六", "roku", "ろく"], ["等", "tou", "とう"]])
     }
 
-    @Test("keeps the plain reading before a ば行 counter except after はち (一番/十番/六番/八番)",
+    @Test("keeps the plain reading before a ば行 counter (一番/十番/六番/八番)",
           arguments: [
               (["一", "番"], ["いち", "ばん"], "一番", [["一", "ichi", "いち"], ["番", "ban", "ばん"]]),
               (["十", "番"], ["じゅう", "ばん"], "十番", [["十", "juu", "じゅう"], ["番", "ban", "ばん"]]),
-              (["六", "番"], ["ろく", "ばん"], "六番", [["六", "roku", "ろく"], ["番", "ban", "ばん"]])
+              (["六", "番"], ["ろく", "ばん"], "六番", [["六", "roku", "ろく"], ["番", "ban", "ばん"]]),
+              (["八", "番"], ["はち", "ばん"], "八番", [["八", "hachi", "はち"], ["番", "ban", "ばん"]])
           ])
     func voicedOnsetKeepsPlainReading(
         surfaces: [String], readings: [String], text: String, expected: [[String?]]
@@ -122,17 +123,6 @@ struct ReadingAnnotatorFusionTests {
         let segments = try #require(annotator.segments(for: text))
 
         #expect(describe(segments) == expected)
-    }
-
-    @Test("still geminates はち before a ば行 counter (八番 → happan)")
-    func hachiGeminateBeforeVoicedOnset() throws {
-        let annotator = makeAnnotator(tokens(
-            ["八", "番"], readings: ["はち", "ばん"]
-        ))
-
-        let segments = try #require(annotator.segments(for: "八番"))
-
-        #expect(describe(segments) == [["八番", "happan", "はっぱん"]])
     }
 
     @Test("reads the irregular people counter as one fused word (一人/二人/四人)",
