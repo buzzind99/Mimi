@@ -5,6 +5,7 @@ import SwiftUI
 struct LiveSubtitleView: View {
     var live: LivePartialState
     @ReadingAnnotationSetting private var readingAnnotation
+    @UIScaleSetting private var uiScale
     @State private var pulsing = false
 
     var body: some View {
@@ -22,7 +23,7 @@ struct LiveSubtitleView: View {
                     .opacity(live.partial.isEmpty ? 0.35 : (pulsing ? 0.45 : 1))
 
                 Text("live")
-                    .font(.caption.monospaced().bold())
+                    .font(ScaledFont.caption(uiScale.factor).monospaced().bold())
                     .foregroundStyle(.teal)
                     .opacity(live.partial.isEmpty ? 0.5 : 1)
             }
@@ -48,8 +49,11 @@ struct LiveSubtitleView: View {
     /// furigana, invisible in romaji/none), so the kanji sits at one vertical
     /// position across None↔Romaji↔Furigana toggles and empty↔filled
     /// transitions. Slot = annotation 14 + surface 22 + annotation 14 = 50,
-    /// sized to the tallest mode (romaji: line above + surface + romaji).
-    private static let slotHeight: CGFloat = 50
+    /// sized to the tallest mode (romaji: line above + surface + romaji);
+    /// every component scales with the UI scale, so the slot does too.
+    private var slotHeight: CGFloat {
+        50 * uiScale.factor
+    }
 
     /// All annotation modes hold the same total slot height so mode toggles
     /// never change the row height (which would resize the transcript
@@ -62,8 +66,8 @@ struct LiveSubtitleView: View {
                 RubyTextView(
                     text: live.partial,
                     annotation: readingAnnotation,
-                    surfaceFont: .system(size: 17, weight: .medium),
-                    annotationFont: .caption.monospaced(),
+                    surfaceFont: .system(size: 17 * uiScale.factor, weight: .medium),
+                    annotationFont: ScaledFont.caption(uiScale.factor).monospaced(),
                     annotationColor: .secondary.opacity(0.55),
                     surfaceItalic: true,
                     reservesAnnotationLine: true
@@ -71,7 +75,7 @@ struct LiveSubtitleView: View {
                 .foregroundStyle(.teal)
             }
         }
-        .frame(minHeight: Self.slotHeight, alignment: .topLeading)
+        .frame(minHeight: slotHeight, alignment: .topLeading)
     }
 
     /// None mode: surface only, at the same reserved-line offset as the
@@ -80,24 +84,24 @@ struct LiveSubtitleView: View {
     private var plainPartial: some View {
         if live.partial.isEmpty {
             placeholderAtSurface
-                .frame(height: Self.slotHeight, alignment: .topLeading)
+                .frame(height: slotHeight, alignment: .topLeading)
         } else {
             VStack(spacing: 0) {
                 reservedAnnotationLine
                 Text(live.partial)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: 17 * uiScale.factor, weight: .medium))
                     .italic()
                     .foregroundStyle(.teal)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
-            .frame(height: Self.slotHeight, alignment: .topLeading)
+            .frame(height: slotHeight, alignment: .topLeading)
         }
     }
 
     private var reservedAnnotationLine: some View {
         Text(verbatim: " ")
-            .font(.caption.monospaced())
+            .font(ScaledFont.caption(uiScale.factor).monospaced())
             .lineLimit(1)
     }
 
@@ -110,7 +114,7 @@ struct LiveSubtitleView: View {
 
     private var placeholder: some View {
         Text("…")
-            .font(.system(size: 17, weight: .medium))
+            .font(.system(size: 17 * uiScale.factor, weight: .medium))
             .italic()
             .foregroundStyle(.secondary.opacity(0.35))
     }

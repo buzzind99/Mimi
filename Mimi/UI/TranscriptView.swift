@@ -39,6 +39,7 @@ import SwiftUI
 struct TranscriptView: View {
     var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
+    @UIScaleSetting private var uiScale
     @State private var pinnedToBottom = true
     @State private var reAnchorScheduled = false
 
@@ -138,6 +139,10 @@ struct TranscriptView: View {
                 // Mode toggles resize every row; re-anchor if pinned.
                 reAnchor(proxy)
             }
+            .onChange(of: uiScale) { _, _ in
+                // Scaling resizes every row; re-anchor if pinned.
+                reAnchor(proxy)
+            }
         }
     }
 
@@ -186,10 +191,10 @@ struct TranscriptView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Text("No transcript yet")
-                .font(.title3)
+                .font(ScaledFont.title3(uiScale.factor))
                 .foregroundStyle(.secondary)
             Text("Play any Japanese audio on your Mac (e.g. a livestream in your browser) and press Start.")
-                .font(.callout)
+                .font(ScaledFont.callout(uiScale.factor))
                 .foregroundStyle(.secondary.opacity(0.7))
         }
         .frame(maxWidth: .infinity)

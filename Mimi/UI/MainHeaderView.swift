@@ -2,10 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Header row of the main window: session controls, reading-annotation
-/// picker, mock-ASR badge, and the export menu.
+/// picker, mock-ASR badge, UI-scale stepper, and the export menu.
 struct MainHeaderView: View {
     @Bindable var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
+    @UIScaleSetting private var uiScale
 
     @State private var exportPresented = false
     @State private var exportFormat: SessionExporter.Format = .txt
@@ -33,6 +34,8 @@ struct MainHeaderView: View {
                             + "exercise the pipeline. Build it with scripts/build_runtime.sh."
                     )
             }
+
+            scaleStepper
 
             exportMenu
 
@@ -114,6 +117,41 @@ struct MainHeaderView: View {
             Label("Export", systemImage: "square.and.arrow.up")
         }
         .disabled(!model.isExportable)
+    }
+
+    /// – / percentage / + control for the shared text scale. Steps the
+    /// persisted `UIScale` with the bounds disabled; scales content text in
+    /// the main window and the HUD, not header/status chrome.
+    private var scaleStepper: some View {
+        HStack(spacing: 4) {
+            Button {
+                uiScale = uiScale.step(-1)
+            } label: {
+                Image(systemName: "minus.magnifyingglass")
+                    .frame(width: 16, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(uiScale == .percent75)
+            .help("Decrease text size")
+
+            Text(uiScale.label)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36)
+                .help("Text size for the transcript and HUD")
+
+            Button {
+                uiScale = uiScale.step(1)
+            } label: {
+                Image(systemName: "plus.magnifyingglass")
+                    .frame(width: 16, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(uiScale == .percent200)
+            .help("Increase text size")
+        }
     }
 
     private func runExport(_ format: SessionExporter.Format) {

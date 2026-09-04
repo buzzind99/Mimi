@@ -7,6 +7,7 @@ struct HUDView: View {
     var live: LivePartialState
     @ObservedObject var panel: HUDPanel
     @ReadingAnnotationSetting private var readingAnnotation
+    @UIScaleSetting private var uiScale
 
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
@@ -69,8 +70,8 @@ struct HUDView: View {
                 RubyTextView(
                     text: live.partial,
                     annotation: readingAnnotation,
-                    surfaceFont: .system(size: 15),
-                    annotationFont: .system(size: 11, design: .monospaced),
+                    surfaceFont: .system(size: 15 * uiScale.factor),
+                    annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
                     annotationColor: .secondary,
                     reservesAnnotationLine: true
                 )
@@ -78,7 +79,7 @@ struct HUDView: View {
                 .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text("Listening…")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13 * uiScale.factor))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -96,7 +97,7 @@ struct HUDView: View {
             let entries = translatedEntries
             if entries.isEmpty {
                 Text("Waiting for the first sentence…")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13 * uiScale.factor))
                     .foregroundStyle(.tertiary)
             } else {
                 HStack(alignment: .top, spacing: 6) {
@@ -123,14 +124,14 @@ struct HUDView: View {
         VStack(alignment: .leading, spacing: 3) {
             if readingAnnotation != .none {
                 Text(SessionClock.timestamp(entry.sentence.startS))
-                    .font(.caption.monospacedDigit())
+                    .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
                     .foregroundStyle(.tertiary)
                 jpText(of: entry)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(SessionClock.timestamp(entry.sentence.startS))
-                        .font(.caption.monospacedDigit())
+                        .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
                         .foregroundStyle(.tertiary)
                     jpText(of: entry)
                         .fixedSize(horizontal: false, vertical: true)
@@ -138,7 +139,7 @@ struct HUDView: View {
             }
             if let en = entry.joinedTranslations {
                 Text(en)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13 * uiScale.factor))
                     .foregroundStyle(.teal)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -151,8 +152,8 @@ struct HUDView: View {
         RubyTextView(
             text: entry.sentence.text,
             annotation: readingAnnotation,
-            surfaceFont: .system(size: 14),
-            annotationFont: .system(size: 11, design: .monospaced),
+            surfaceFont: .system(size: 14 * uiScale.factor),
+            annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
             annotationColor: .secondary.opacity(0.8)
         )
         .foregroundStyle(.white)

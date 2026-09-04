@@ -6,11 +6,13 @@ import SwiftUI
 struct TranscriptRow: View, Equatable {
     let entry: SessionEntry
     @ReadingAnnotationSetting private var readingAnnotation
+    @UIScaleSetting private var uiScale
 
-    /// Ignores `readingAnnotation` on purpose: that value lives in
-    /// `@AppStorage` via `ReadingAnnotationSetting` (a `DynamicProperty`),
-    /// which invalidates this view directly when it changes, bypassing the
-    /// Equatable skip — so comparing entries alone is sufficient.
+    /// Ignores `readingAnnotation` and `uiScale` on purpose: those values
+    /// live in `@AppStorage` via `DynamicProperty` wrappers
+    /// (`ReadingAnnotationSetting`, `UIScaleSetting`), which invalidate this
+    /// view directly when they change, bypassing the Equatable skip — so
+    /// comparing entries alone is sufficient.
     nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
         lhs.entry == rhs.entry
     }
@@ -18,16 +20,18 @@ struct TranscriptRow: View, Equatable {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("\(entry.startTimestamp) – \(entry.endTimestamp)")
-                .font(.caption.monospacedDigit())
+                .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
                 .foregroundStyle(.secondary.opacity(0.6))
 
             if let joined = entry.joinedTranslations {
                 Text(joined)
+                    .font(ScaledFont.body(uiScale.factor))
                     .italic()
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             } else {
                 Text("…")
+                    .font(ScaledFont.body(uiScale.factor))
                     .italic()
                     .foregroundStyle(.secondary.opacity(0.3))
             }
@@ -37,8 +41,8 @@ struct TranscriptRow: View, Equatable {
             RubyTextView(
                 text: entry.sentence.text,
                 annotation: readingAnnotation,
-                surfaceFont: .system(size: 17, weight: .medium),
-                annotationFont: .caption.monospaced(),
+                surfaceFont: .system(size: 17 * uiScale.factor, weight: .medium),
+                annotationFont: ScaledFont.caption(uiScale.factor).monospaced(),
                 annotationColor: .secondary.opacity(0.55)
             )
             .textSelection(.enabled)
