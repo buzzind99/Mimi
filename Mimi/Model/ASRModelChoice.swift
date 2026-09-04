@@ -20,6 +20,14 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Underlying speech-model name (Settings row subtitle).
+    var modelName: String {
+        switch self {
+        case .lite: "SenseVoice-Small"
+        case .full: "FunASR-Nano-2512"
+        }
+    }
+
     /// GGUF file name inside the shared models directory (both choices live
     /// side-by-side, so switching never re-downloads).
     var ggufFileName: String {
@@ -67,7 +75,7 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
         case .lite:
             "SenseVoice-Small. Smaller download, fast startup — great default for everyday transcription."
         case .full:
-            "FunASR-Nano 2512. Larger download for potentially more accurate transcription."
+            "FunASR-Nano-2512. Larger download for potentially more accurate transcription."
         }
     }
 }

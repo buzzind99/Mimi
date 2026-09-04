@@ -345,11 +345,9 @@ private struct ModelRow: View {
                 .font(.caption)
                 .foregroundStyle(.green)
         default:
-            if let url = resolvedURL {
-                Text(url.path)
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            if resolvedURL != nil {
+                Text(choice.modelName)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 Text("Not downloaded")
