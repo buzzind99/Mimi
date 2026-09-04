@@ -15,6 +15,14 @@ import Testing
 @Suite("ASREngineFactory", .serialized)
 struct ASREngineFactoryTests {
 
+    /// Re-arms the factory's warm cache before every test: retirement
+    /// (`retireWarmEngine`) is process-sticky by design, and a previous
+    /// test's retire/defer cleanup must not leave the factory handing out
+    /// nils to the next one.
+    init() {
+        ASREngineFactory.rearmWarmCacheForTesting()
+    }
+
     // MARK: - Fixtures
 
     /// Unique per call: the factory's warm cache is keyed on the path string
@@ -109,5 +117,63 @@ struct ASREngineFactoryTests {
             ASREngineFactory.makeEngine(modelURL: secondURL, allowMock: true) === replacement,
             "the replacement becomes the warm engine for its path"
         )
+    }
+
+    // MARK: - retireWarmEngine (quit-time teardown)
+
+    @Test(
+        "retireWarmEngine releases the cached engine; the factory hands out nothing until re-armed",
+        .enabled(if: TestEnvironment.nativeASRDylibAvailable)
+    )
+    func retireWarmEngineForcesFreshEngine() {
+        defer { ASREngineFactory.retireWarmEngine() }
+        let url = uniqueModelURL()
+
+        let warm = ASREngineFactory.makeEngine(modelURL: url, allowMock: true)
+        ASREngineFactory.retireWarmEngine()
+
+        #expect(
+            ASREngineFactory.makeEngine(modelURL: url, allowMock: true) == nil,
+            "a retired factory hands out no engines — a warm-up racing the quit teardown must not load a new resident model"
+        )
+
+        ASREngineFactory.rearmWarmCacheForTesting()
+        #expect(
+            !(ASREngineFactory.makeEngine(modelURL: url, allowMock: true) === warm),
+            "re-arming clears the cache: the same path builds a fresh engine"
+        )
+    }
+
+    @Test(
+        "retireWarmEngine is a no-op with an empty cache",
+        .enabled(if: TestEnvironment.nativeASRDylibAvailable)
+    )
+    func retireWarmEngineWithEmptyCacheIsNoOp() {
+        defer { ASREngineFactory.retireWarmEngine() }
+        ASREngineFactory.retireWarmEngine()
+        ASREngineFactory.rearmWarmCacheForTesting()
+
+        let engine = ASREngineFactory.makeEngine(modelURL: uniqueModelURL(), allowMock: true)
+
+        #expect(engine?.isMock == false, "the factory still builds engines normally afterwards")
+    }
+
+    @Test(
+        "retireWarmEngine shuts down the runtime's process-cached models",
+        .enabled(if: TestEnvironment.nativeASRDylibAvailable)
+    )
+    func retireWarmEngineShutsDownRuntimeCaches() throws {
+        defer { ASREngineFactory.retireWarmEngine() }
+        let url = uniqueModelURL()
+
+        #expect(ASREngineFactory.makeEngine(modelURL: url, allowMock: true) != nil)
+        let library = try CrispASRLibrary.open()
+        #expect(
+            library.hasShutdownSymbol,
+            "the pinned runtime must expose the cached-model free (crispasr_shutdown or crispasr_vad_free_cache)"
+        )
+
+        ASREngineFactory.retireWarmEngine()
+        ASREngineFactory.retireWarmEngine() // empty cache → no C call, must stay safe
     }
 }

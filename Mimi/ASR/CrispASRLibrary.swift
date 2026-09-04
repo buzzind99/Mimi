@@ -32,12 +32,17 @@ protocol CrispASRLibraryAPI: AnyObject {
     /// header. Nil when the runtime lacks the symbol or the file can't be
     /// parsed — callers fall back to a known-good backend name.
     func detectBackend(modelPath: String) -> String?
+    /// Frees the runtime's process-cached models (FireRedVAD) at quit.
+    /// Default no-op: runtimes without the symbol degrade to OS reclaim.
+    func shutdown()
 }
 
 extension CrispASRLibraryAPI {
     func detectBackend(modelPath: String) -> String? {
         nil
     }
+
+    func shutdown() {}
 }
 
 extension CrispASRLibrary: CrispASRLibraryAPI {}
@@ -69,6 +74,14 @@ final class CrispASRLibrary {
         UnsafeMutablePointer<UnsafeMutablePointer<Float>?>?
     ) -> Int32
     private typealias FnVadFree = @convention(c) (UnsafeMutablePointer<Float>?) -> Void
+    /// Frees the runtime's process-cached models — the FireRedVAD GGUF is
+    /// loaded once per process and kept resident across sessions, which is
+    /// the second Metal residency set alive at quit. Bound from two optional
+    /// names: `crispasr_shutdown` (the C ABI a future runtime may export) or,
+    /// on the pinned runtime, the C++-mangled `crispasr_vad_free_cache()`
+    /// (`void()`, defined without `extern "C"`). Absent → the OS reclaims
+    /// the cache at exit; never bind a mismatching signature.
+    private typealias FnShutdown = @convention(c) () -> Void
     /// `crispasr_detect_backend_from_gguf`: >0 with the backend name written
     /// into `out_name`, negative on bad args / unparsable GGUF / missing key.
     private typealias FnDetectBackend = @convention(c) (
@@ -89,6 +102,7 @@ final class CrispASRLibrary {
     private var fnVadSlices: FnVadSlices?
     private var fnVadFree: FnVadFree?
     private var fnDetectBackend: FnDetectBackend?
+    private var fnShutdown: FnShutdown?
     /// Buffer for `crispasr_detect_backend_from_gguf` output — backend names
     /// ("whisper", "parakeet", "qwen3", …) are far below 64 bytes.
     private static let detectBackendBufferCap = 64
@@ -128,6 +142,12 @@ final class CrispASRLibrary {
     /// True when the runtime carries the optional VAD dispatcher ABI.
     var hasVADSymbols: Bool {
         fnVadSlices != nil && fnVadFree != nil
+    }
+
+    /// True when the runtime exposes a cached-model free (quit-time
+    /// `shutdown()` actually frees the VAD cache; otherwise OS reclaim).
+    var hasShutdownSymbol: Bool {
+        fnShutdown != nil
     }
 
     /// Absolute path of the bundled FireRedVAD model, or nil. Resolution
@@ -224,6 +244,13 @@ final class CrispASRLibrary {
         fnVadFree?(spans)
     }
 
+    /// Frees process-cached models (FireRedVAD). Quit-time only — a session
+    /// teardown must not evict the cache the next session reuses. No-op on
+    /// runtimes without the symbol.
+    func shutdown() {
+        fnShutdown?()
+    }
+
     func detectBackend(modelPath: String) -> String? {
         guard let fnDetectBackend else { return nil }
         let pathStorage = modelPath.utf8CString
@@ -270,6 +297,11 @@ final class CrispASRLibrary {
         // Optional: absent on pre-detection runtimes; the engine then opens
         // the session with its fallback backend name.
         fnDetectBackend = fn("crispasr_detect_backend_from_gguf", FnDetectBackend.self)
+        // Optional: quit-time release of process-cached models. Prefer the
+        // C ABI name; fall back to the C++-mangled `crispasr_vad_free_cache()`
+        // the pinned runtime exports (Itanium mangling of `void()`).
+        fnShutdown = fn("crispasr_shutdown", FnShutdown.self)
+            ?? fn("_Z23crispasr_vad_free_cachev", FnShutdown.self)
 
         guard fnSetGpuBackend != nil, fnOpenExplicit != nil, fnSessionClose != nil,
               fnTranscribeLang != nil, fnResultNSegments != nil, fnResultSegmentText != nil,
