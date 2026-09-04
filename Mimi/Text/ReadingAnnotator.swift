@@ -180,7 +180,7 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// still romaji-convert instead of rendering unannotated.
     private static func selfReading(_ surface: String) -> String? {
         guard !surface.isEmpty else { return nil }
-        return surface.unicodeScalars.allSatisfy(isKana) ? surface : nil
+        return surface.unicodeScalars.allSatisfy(KanaClassification.isKana) ? surface : nil
     }
 
     /// Furigana for kanji-bearing surfaces: the reading run aligned with the
@@ -190,14 +190,9 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// the whole-surface reading — shown, never hidden. Kana-only surfaces
     /// need none.
     private static func furigana(surface: String, reading: String) -> String? {
-        guard containsKanji(surface) else { return nil }
+        guard KanaClassification.containsKanji(surface) else { return nil }
         return ReadingAlignment.runs(surface: surface, reading: reading)?
             .map(\.kana).joined() ?? reading
-    }
-
-    private static func isKana(_ scalar: Unicode.Scalar) -> Bool {
-        (0x3041 ... 0x309F).contains(scalar.value)
-            || (0x30A1 ... 0x30FF).contains(scalar.value)
     }
 
     /// Emits a kana reading (from the dictionary, the digit table, or a
@@ -209,7 +204,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         segments.append(ReadingSegment(
             surface: surface,
             romaji: converted,
-            furigana: Self.containsKanji(surface) ? kana : nil
+            furigana: KanaClassification.containsKanji(surface) ? kana : nil
         ))
     }
 
@@ -480,13 +475,5 @@ final class ReadingAnnotator: @unchecked Sendable {
         let low = max(0, min(token.start, scalars.count))
         let high = max(low, min(token.end, scalars.count))
         return String(String.UnicodeScalarView(scalars[low ..< high]))
-    }
-
-    private static func containsKanji(_ text: String) -> Bool {
-        text.unicodeScalars.contains { scalar in
-            (0x4E00 ... 0x9FFF).contains(scalar.value)
-                || (0x3400 ... 0x4DBF).contains(scalar.value)
-                || scalar.value == 0x3005 // 々
-        }
     }
 }

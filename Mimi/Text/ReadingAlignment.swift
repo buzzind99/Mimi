@@ -32,7 +32,7 @@ enum ReadingAlignment {
         var readingIndex = 0
 
         for (index, scalar) in surfaceScalars.enumerated() {
-            if isKana(scalar) {
+            if KanaClassification.isKana(scalar) {
                 guard readingIndex < readingScalars.count,
                       fold(readingScalars[readingIndex]) == fold(scalar)
                 else { return nil }
@@ -41,10 +41,12 @@ enum ReadingAlignment {
                     matched: true, into: &chunks
                 )
                 readingIndex += 1
-            } else if isKanji(scalar) {
+            } else if KanaClassification.isKanji(scalar) {
                 // The kanji consumes the reading up to the next surface kana
                 // anchor; a trailing kanji consumes everything left.
-                if let anchor = surfaceScalars[(index + 1)...].firstIndex(where: isKana) {
+                if let anchor = surfaceScalars[(index + 1)...].firstIndex(
+                    where: KanaClassification.isKana
+                ) {
                     let target = fold(surfaceScalars[anchor])
                     guard
                         let match = readingScalars[readingIndex...].firstIndex(where: {
@@ -107,20 +109,7 @@ enum ReadingAlignment {
     private static func consumesKanaOnly<C: Collection>(
         _ scalars: C
     ) -> Bool where C.Element == Unicode.Scalar {
-        scalars.allSatisfy(isKana)
-    }
-
-    /// Hiragana and katakana, including the long-vowel mark and small kana.
-    private static func isKana(_ scalar: Unicode.Scalar) -> Bool {
-        (0x3041 ... 0x309F).contains(scalar.value)
-            || (0x30A1 ... 0x30FF).contains(scalar.value)
-    }
-
-    /// Kanji and the iteration mark 々, which may consume reading kana.
-    private static func isKanji(_ scalar: Unicode.Scalar) -> Bool {
-        (0x4E00 ... 0x9FFF).contains(scalar.value)
-            || (0x3400 ... 0x4DBF).contains(scalar.value)
-            || scalar.value == 0x3005
+        scalars.allSatisfy(KanaClassification.isKana)
     }
 
     /// Folds katakana onto its hiragana counterpart so katakana surfaces
