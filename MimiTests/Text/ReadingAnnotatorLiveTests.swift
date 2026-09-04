@@ -384,6 +384,13 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["そう", "sou", nil], ["言っ", "itsu", "いっ"]])
     }
 
+    @Test("geminate-chains whitespace-separated sokuon tokens into one segment (ASR word spacing: なっ ちゃっ てる)")
+    func whitespaceSokuonChain() throws {
+        let segments = try segments("なっ ちゃっ てる")
+
+        #expect(describe(segments) == [["なっ ちゃっ てる", "nacchatteru", nil]])
+    }
+
     // MARK: Latin and rare forms
 
     @Test("self-transcribes a Latin run as one unknown token (Hello; old suite split per character)")
@@ -429,7 +436,8 @@ struct ReadingAnnotatorLiveTests {
         "高かった", "田中さん", "A B", "𠮷野家", "そう言っ", "は", "を", "私達", "その方がいい",
         "こんにちは", "123", "お、母さん", "母、さん", "私の母です", "六等", "六歳", "七回",
         "2年", "八年", "十四日", "おっ、いいね", "言ってあげる", "こっちの方", "㐂", "𠮷", "Hello",
-        "一人", "二人", "四人", "一人前", "それでは", "ならでは"
+        "一人", "二人", "四人", "一人前", "それでは", "ならでは",
+        "なっ ちゃっ てる", "ドライブでてないかも なんか 新規の トライブ 作成 になっ ちゃっ てるなぁ。"
     ])
     func concatenateBack(text: String) throws {
         let segments = try segments(text)

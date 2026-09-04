@@ -226,6 +226,34 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == expected)
     }
 
+    @Test("a sokuon chain merges across whitespace gaps into one segment (ASR word spacing)")
+    func sokuonChainMergesAcrossWhitespaceGaps() throws {
+        let annotator = makeAnnotator([
+            token("なっ", start: 0, reading: "なっ"),
+            token("ちゃっ", start: 3, reading: "ちゃっ"),
+            token("てる", start: 7, reading: "てる")
+        ])
+
+        let segments = try #require(annotator.segments(for: "なっ ちゃっ てる"))
+
+        #expect(describe(segments) == [["なっ ちゃっ てる", "nacchatteru", nil]])
+    }
+
+    @Test("a sokuon chain stops at a token that cannot geminate")
+    func sokuonChainStopsAtNonGeminableToken() throws {
+        let annotator = makeAnnotator([
+            token("なっ", start: 0, reading: "なっ"),
+            token("ちゃっ", start: 3, reading: "ちゃっ"),
+            token("あ", start: 7, reading: "あ")
+        ])
+
+        let segments = try #require(annotator.segments(for: "なっ ちゃっ あ"))
+
+        #expect(describe(segments) == [
+            ["なっ ちゃっ", "nacchatsu", nil], [" ", " ", nil], ["あ", "a", nil]
+        ])
+    }
+
     @Test("a sokuon token separated from the next by a non-whitespace gap stays stranded")
     func sokuonAcrossNonWhitespaceGapDoesNotMerge() throws {
         let annotator = makeAnnotator([

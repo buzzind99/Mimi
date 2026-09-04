@@ -91,30 +91,21 @@ final class ReadingAnnotator: @unchecked Sendable {
                 Self.accumulate(token, surface: surface, into: &pending)
                 i += 1
             } else if !fuse(&pending, with: token, surface: surface, into: &segments) {
-                let nextToken = i + 1 < tokens.count ? tokens[i + 1] : nil
-                let nextSurface = nextToken.map { Self.scalarSlice($0, of: scalars) }
-                var gap = ""
-                if let nextToken, nextToken.start > token.end {
-                    let low = min(token.end, scalars.count)
-                    let high = min(nextToken.start, scalars.count)
-                    gap = String(String.UnicodeScalarView(scalars[low ..< high]))
-                }
                 if let merged = sokuonMergedSpan(
-                    token, surface: surface, next: nextToken,
-                    nextSurface: nextSurface, gap: gap
+                    at: i, surface: surface, tokens: tokens, scalars: scalars
                 ) {
                     appendToken(
                         DictionaryToken(
                             text: merged.surface,
                             start: token.start,
-                            end: tokens[i + 1].end,
+                            end: tokens[merged.end].end,
                             reading: merged.kana
                         ),
                         surface: merged.surface,
                         into: &segments
                     )
-                    cursor = tokens[i + 1].end
-                    i += 2
+                    cursor = tokens[merged.end].end
+                    i = merged.end + 1
                 } else {
                     appendToken(token, surface: surface, into: &segments)
                     i += 1
@@ -154,34 +145,62 @@ final class ReadingAnnotator: @unchecked Sendable {
         ))
     }
 
-    /// Joins a sokuon-bearing token with the following one. IPADIC splits
+    /// Joins a sokuon-bearing token with what follows. IPADIC splits
     /// conjugated forms at the stem boundary (言って → 言っ/て), stranding the
     /// gemination target in the next token's reading; when the pair is
     /// adjacent — or separated only by whitespace, which ASR output inserts
     /// between words (ちゃっ た) — and the next reading begins with a
     /// geminable mora, the two merge into one segment (surface 言って,
-    /// reading イッテ) so `KanaRomaji` derives "itte". The intervening `gap`
-    /// ("" when adjacent) must be whitespace-only — any other uncovered span
-    /// blocks the merge — and folds into the merged surface so it isn't
-    /// dropped. Overridden particles (って + は) and numeral runs keep
-    /// their own conversions; a genuinely stranded sokuon falls back to the
-    /// spoken "tsu".
+    /// reading イッテ) so `KanaRomaji` derives "itte". The merge chains: ASR
+    /// spacing can strand several sokuons in a row (なっ ちゃっ てる), so
+    /// tokens keep absorbing while the accumulated reading still ends in a
+    /// sokuon (なっちゃってる). The intervening `gap` ("" when adjacent) must
+    /// be whitespace-only — any other uncovered span blocks the merge — and
+    /// folds into the merged surface so it isn't dropped. Overridden
+    /// particles (って + は) and numeral runs keep their own conversions; a
+    /// genuinely stranded sokuon falls back to the spoken "tsu".
+    /// A completed sokuon chain merge: the folded surface, the accumulated
+    /// kana, and the index of the last absorbed token.
+    private struct SokuonMerge {
+        var surface: String
+        var kana: String
+        var end: Int
+    }
+
     private func sokuonMergedSpan(
-        _ token: DictionaryToken, surface: String, next: DictionaryToken?, nextSurface: String?,
-        gap: String
-    ) -> (surface: String, kana: String)? {
-        guard let next, let nextSurface, next.start >= token.end,
-              gap.unicodeScalars.allSatisfy({ $0.properties.isWhitespace })
+        at index: Int, surface: String,
+        tokens: [DictionaryToken], scalars: [Unicode.Scalar]
+    ) -> SokuonMerge? {
+        guard var kana = tokens[index].reading ?? Self.selfReading(surface),
+              kana.unicodeScalars.last.map(Self.isSokuon) == true
         else { return nil }
-        guard let reading = token.reading ?? Self.selfReading(surface),
-              reading.unicodeScalars.last.map(Self.isSokuon) == true
-        else { return nil }
-        guard let nextReading = next.reading ?? Self.selfReading(nextSurface),
-              !Self.isNumeralRun(nextSurface),
-              Self.particleRomaji[nextSurface] == nil,
-              KanaRomaji.geminates(fromKana: nextReading)
-        else { return nil }
-        return (surface: surface + gap + nextSurface, kana: reading + nextReading)
+
+        var mergedSurface = surface
+        var end = index
+        var previousEnd = tokens[index].end
+        while kana.unicodeScalars.last.map(Self.isSokuon) == true, end + 1 < tokens.count {
+            let next = tokens[end + 1]
+            let nextSurface = Self.scalarSlice(next, of: scalars)
+            var gap = ""
+            if next.start > previousEnd {
+                let low = min(previousEnd, scalars.count)
+                let high = min(next.start, scalars.count)
+                gap = String(String.UnicodeScalarView(scalars[low ..< high]))
+            }
+            guard next.start >= previousEnd,
+                  gap.unicodeScalars.allSatisfy({ $0.properties.isWhitespace }),
+                  let nextReading = next.reading ?? Self.selfReading(nextSurface),
+                  !Self.isNumeralRun(nextSurface),
+                  Self.particleRomaji[nextSurface] == nil,
+                  KanaRomaji.geminates(fromKana: nextReading)
+            else { break }
+            mergedSurface += gap + nextSurface
+            kana += nextReading
+            end += 1
+            previousEnd = next.end
+        }
+        guard end > index else { return nil }
+        return SokuonMerge(surface: mergedSurface, kana: kana, end: end)
     }
 
     private static func isSokuon(_ scalar: Unicode.Scalar) -> Bool {
