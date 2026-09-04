@@ -28,6 +28,16 @@ protocol CrispASRLibraryAPI: AnyObject {
         parameters: CrispASRVADParameters
     ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)?
     func vadFree(_ spans: UnsafeMutablePointer<Float>?)
+    /// Detects the CrispASR backend name from a GGUF's `general.architecture`
+    /// header. Nil when the runtime lacks the symbol or the file can't be
+    /// parsed — callers fall back to a known-good backend name.
+    func detectBackend(modelPath: String) -> String?
+}
+
+extension CrispASRLibraryAPI {
+    func detectBackend(modelPath: String) -> String? {
+        nil
+    }
 }
 
 extension CrispASRLibrary: CrispASRLibraryAPI {}
@@ -59,6 +69,11 @@ final class CrispASRLibrary {
         UnsafeMutablePointer<UnsafeMutablePointer<Float>?>?
     ) -> Int32
     private typealias FnVadFree = @convention(c) (UnsafeMutablePointer<Float>?) -> Void
+    /// `crispasr_detect_backend_from_gguf`: >0 with the backend name written
+    /// into `out_name`, negative on bad args / unparsable GGUF / missing key.
+    private typealias FnDetectBackend = @convention(c) (
+        UnsafePointer<CChar>?, UnsafeMutablePointer<CChar>?, Int32
+    ) -> Int32
 
     /// `n_threads` for `crispasr_session_open_explicit` — see the vendored
     /// ABI header `Mimi/native/include/crispasr/crispasr_session.h`.
@@ -73,6 +88,10 @@ final class CrispASRLibrary {
     private var fnResultFree: FnResultFree!
     private var fnVadSlices: FnVadSlices?
     private var fnVadFree: FnVadFree?
+    private var fnDetectBackend: FnDetectBackend?
+    /// Buffer for `crispasr_detect_backend_from_gguf` output — backend names
+    /// ("whisper", "parakeet", "qwen3", …) are far below 64 bytes.
+    private static let detectBackendBufferCap = 64
     /// Directory containing the loaded libcrispasr.dylib (from `dladdr`).
     /// Companion files (the VAD model) live next to it in every layout.
     private var dylibDirectory: String?
@@ -205,6 +224,17 @@ final class CrispASRLibrary {
         fnVadFree?(spans)
     }
 
+    func detectBackend(modelPath: String) -> String? {
+        guard let fnDetectBackend else { return nil }
+        let pathStorage = modelPath.utf8CString
+        var name = [CChar](repeating: 0, count: Self.detectBackendBufferCap)
+        let rc = pathStorage.withUnsafeBufferPointer { path in
+            fnDetectBackend(path.baseAddress, &name, Int32(name.count))
+        }
+        guard rc > 0 else { return nil }
+        return String(cString: name)
+    }
+
     // MARK: - Library binding
 
     private static let dylibCandidates: [String?] = {
@@ -261,6 +291,9 @@ final class CrispASRLibrary {
         // cap-only finalization instead of failing to launch.
         fnVadSlices = fn("crispasr_vad_slices", FnVadSlices.self)
         fnVadFree = fn("crispasr_vad_free", FnVadFree.self)
+        // Optional: absent on pre-detection runtimes; the engine then opens
+        // the session with its fallback backend name.
+        fnDetectBackend = fn("crispasr_detect_backend_from_gguf", FnDetectBackend.self)
 
         guard fnSetGpuBackend != nil, fnOpenExplicit != nil, fnSessionClose != nil,
               fnTranscribeLang != nil, fnResultNSegments != nil, fnResultSegmentText != nil,

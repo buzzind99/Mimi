@@ -322,7 +322,7 @@ extension CrispASREngine {
         #if DEBUG
             print("[asr] \(isFinal ? "final" : "partial") decode: \(pcm.count) samples in \(ContinuousClock.now - decodeStart)")
         #endif
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = Self.sanitizeDecodeText(raw)
         #if DEBUG
             if text.isEmpty {
                 print("[asr] \(isFinal ? "final" : "partial") decode returned no text (\(pcm.count) samples)")

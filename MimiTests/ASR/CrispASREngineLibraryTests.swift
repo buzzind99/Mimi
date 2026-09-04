@@ -94,7 +94,7 @@ struct CrispASREngineLibraryTests {
 
         engine.push(loudSecond)
         await waitUntil { library.transcribeCalls.count == 1 }
-        engine.push([Float](repeating: 0, count: 20000)) // 1.25 s closes the confirmed-silence endpoint
+        engine.push([Float](repeating: 0, count: 20000)) // 1.25 s clears the 1 s confirmed-silence endpoint
 
         let final = await pollFinal(engine)
         requireFinal(final, text: "こんにちは。", start: 0, end: 16000)
@@ -103,6 +103,37 @@ struct CrispASREngineLibraryTests {
             "partial = padded 1 s window, final = the whole 2.25 s utterance"
         )
         #expect(engine.poll() == nil, "the final must be the last event")
+    }
+
+    @Test("a decode that is only a non-speech tag finalizes the utterance but emits no final")
+    func silenceTagOnlyDecodeEmitsNoFinal() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])]
+        library.transcribeReplies = ["", "<sil>"] // window partial (no event), utterance final = tag only
+        let engine = try makePreparedEngine(library)
+
+        engine.push(loudSecond)
+        await waitUntil { library.transcribeCalls.count == 1 }
+        engine.push([Float](repeating: 0, count: 20000)) // 1.25 s clears the 1 s confirmed-silence endpoint
+
+        await waitUntil { library.transcribeCalls.count == 2 }
+        await waitUntil { self.state(engine) { engine.utterance.isEmpty } }
+        #expect(engine.poll() == nil, "a `<sil>`-only decode must not become a final")
+    }
+
+    @Test("non-speech tags are stripped from a decode that also contains speech")
+    func speechDecodeStripsNonSpeechTags() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])]
+        library.transcribeReplies = ["", "こんにちは <sil> です。"]
+        let engine = try makePreparedEngine(library)
+
+        engine.push(loudSecond)
+        await waitUntil { library.transcribeCalls.count == 1 }
+        engine.push([Float](repeating: 0, count: 20000))
+
+        let final = await pollFinal(engine)
+        requireFinal(final, text: "こんにちは です。", start: 0, end: 16000)
     }
 
     @Test("a zero-span VAD verdict discards the speechless utterance")
@@ -130,9 +161,9 @@ struct CrispASREngineLibraryTests {
     func finalTrimsWindow() async throws {
         let library = FakeCrispASRLibrary()
         library.vadReplies = [
-            .spans([(start: 0.0, end: 1.0)]), // VAD #1: 2 s span → first partial
-            .spans([(start: 0.0, end: 1.0)]), // VAD #2: closed span → endpoint final
-            .spans([(start: 0.0, end: 3.25)]) // VAD #3: open span at the buffer end → no endpoint
+            .spans([(start: 0.0, end: 1.5)]), // VAD #1: surplus 0.5 s < endpoint → first partial
+            .spans([(start: 0.0, end: 1.5)]), // VAD #2: closed span → endpoint final
+            .spans([(start: 0.0, end: 2.75)]) // VAD #3: open span at the buffer end → no endpoint
         ]
         library.transcribeReplies = ["", "ファイナル。", ""]
         let engine = try makePreparedEngine(library)
@@ -147,9 +178,9 @@ struct CrispASREngineLibraryTests {
         #expect(library.transcribeCalls.map(\.pcmCount) == [
             32000, // first partial: the 2 s window at the conv floor
             52000, // final: the whole 3.25 s utterance redecode
-            48800 // next partial: window minus the finalized span minus the kept tail
+            40800 // next partial: window minus the finalized span minus the kept tail
         ])
-        requireFinal(await pollFinal(engine), text: "ファイナル。", start: 0, end: 16000)
+        requireFinal(await pollFinal(engine), text: "ファイナル。", start: 0, end: 24000)
     }
 
     // MARK: - VAD failures

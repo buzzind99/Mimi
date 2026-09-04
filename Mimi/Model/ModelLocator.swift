@@ -4,8 +4,8 @@ import Foundation
 ///   1. Bundled: `Bundle.main` → `models/` (downloader skipped)
 ///   2. Downloaded: `~/Library/Application Support/Mimi/models/`
 enum ModelLocator {
-    static let modelName = "qwen3-asr-0.6b-q8_0.gguf"
-    static let modelID = "qwen3-asr-0.6b-GGUF"
+    static let modelName = "funasr-nano-2512-q8_0.gguf"
+    static let modelID = "funasr-nano-GGUF"
 
     static var modelsDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

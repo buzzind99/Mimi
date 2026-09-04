@@ -4,8 +4,10 @@ import Foundation
 /// runtime with dlopen/dlsym so the app builds and launches before the native
 /// runtime is installed).
 ///
-/// Runs the Qwen3-ASR backend (`qwen3`), which has no cache-aware streaming —
-/// the sliding window lives here instead of in the C library:
+/// Runs the CrispASR backend detected from the GGUF's architecture header
+/// (`crispasr_detect_backend_from_gguf` — currently `funasr`, which has no
+/// cache-aware streaming) — the sliding window lives here instead of in the
+/// C library:
 ///
 ///   - `push` appends 160 ms chunks to a rolling utterance buffer (bounded by
 ///     a forced-final cap) plus a 10 s window used for partial decodes.
@@ -25,7 +27,7 @@ import Foundation
 /// Threading: pushes land on the caller's audio thread but only take the
 /// state lock; actual decoding runs on a dedicated serial queue so the main
 /// thread's 60 ms `poll()` loop never blocks behind a multi-second decode.
-/// VAD analysis runs on its own serial queue: a qwen3 decode takes seconds,
+/// VAD analysis runs on its own serial queue: an AR decode takes seconds,
 /// and endpointing must never wait behind one (a starved VAD freezes both
 /// the partial gate and silence detection). The two job types interlock
 /// only through the state lock; the C library serializes VAD access to the
@@ -52,7 +54,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// How much confirmed silence after the last VAD speech span triggers a
     /// final. Must stay ≥ the VAD's `min_silence_ms` (below) — that is what
     /// makes a span end + this much analyzed audio a *confirmed* silence gap.
-    static let endpointSamples = 1250 * sampleRate / 1000
+    static let endpointSamples = 1000 * sampleRate / 1000
     /// Forced-final cap: safety net under VAD, and the only endpoint when the
     /// VAD model is unavailable (degraded mode).
     static let utteranceCapSamples = 12 * sampleRate
@@ -73,15 +75,43 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     // FireRedVAD (via the dispatcher-backed crispasr_vad_slices ABI; the
     // model is process-cached in the C library after the first call).
     static let vadCheckIntervalSamples = 500 * sampleRate / 1000
-    static let vadThreshold: Float = 0.5
-    static let vadMinSpeechMS = 250
+    static let vadThreshold: Float = 0.7
+    static let vadMinSpeechMS = 160
     /// Must equal `endpointSamples` — see the comment there.
-    static let vadMinSilenceMS = 1000
+    static let vadMinSilenceMS = 800
     static let vadPadMS = 30
     /// Don't discard a short speechless buffer on a single VAD pass — onsets
     /// can be missed on very short windows; wait until the buffer is at
     /// least this long before trusting a zero-span verdict.
     static let vadMinDiscardSamples = 2 * sampleRate
+
+    /// Backend name used when `crispasr_detect_backend_from_gguf` can't name
+    /// one (runtime without the symbol, unparsable GGUF). The shipped model
+    /// is a Fun-ASR Nano ("funasr" architecture) GGUF.
+    static let fallbackBackend = "funasr"
+
+    /// FunASR-family models tag non-speech audio in their decode output
+    /// (`<sil>`, `/sil`, …, optionally pipe-wrapped). Stripped before the
+    /// empty-text gates in `runDecode` so a silence-only decode emits no
+    /// event instead of a tag literal.
+    static let nonSpeechTagRegex = try? NSRegularExpression(
+        pattern: #"(?:<\|?|</|/)(?:sil|noise|music|bar|unk|laugh|breath)\|?>?"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Removes non-speech tags from a decode result and collapses the
+    /// whitespace they leave behind; "" when nothing spoken remains.
+    static func sanitizeDecodeText(_ raw: String) -> String {
+        guard let regex = nonSpeechTagRegex else {
+            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let stripped = regex.stringByReplacingMatches(
+            in: raw, options: [], range: NSRange(raw.startIndex..., in: raw), withTemplate: " "
+        )
+        return stripped
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// `library` is injectable so tests can drive the full state machine over
     /// a scripted fake without dlopen; nil (the default) binds the real dylib.
@@ -187,12 +217,15 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         }
         // TLS-backed GPU preference: must be set on the same thread that
         // opens the session (prepare runs once, before any decode starts).
+        let backend = lib.detectBackend(modelPath: modelPath) ?? Self.fallbackBackend
         #if DEBUG
-            print("[asr] prepare: opening C session (qwen3/metal)")
+            print("[asr] prepare: opening C session (\(backend)/metal)")
         #endif
         lib.setGpuBackend("metal")
-        guard let handle = lib.openSession(modelPath: modelPath, backend: "qwen3") else {
-            throw ASREngineError.createFailed("crispasr_session_open_explicit failed (backend qwen3)")
+        guard let handle = lib.openSession(modelPath: modelPath, backend: backend) else {
+            throw ASREngineError.createFailed(
+                "crispasr_session_open_explicit failed (backend \(backend))"
+            )
         }
         // Publish the handle under the state lock: `close()` nils it there,
         // and finish/runDecode snapshot it there.

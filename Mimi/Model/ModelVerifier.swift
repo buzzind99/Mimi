@@ -3,12 +3,12 @@ import Foundation
 import Synchronization
 
 /// Pinned-digest verification for the ASR GGUF. Verdicts are cached per
-/// (path, size) so the ~200 MB re-hash only runs when the file actually
+/// (path, size) so the ~600 MB re-hash only runs when the file actually
 /// changes (first resolve, re-download, or a dropped-in replacement).
 enum ModelVerifier {
     /// Pinned SHA-256 of the q8_0 GGUF (release-time integrity check).
     static let expectedSHA256 =
-        "f547589d5ca582e093b2d3312ad9ff13b609b43d413f972c0e92b823dde70a00"
+        "dac5e1b95659c0a95b2a1dc60083eb17740454a921ec39f9c24e50b930ca31ab"
 
     struct VerificationError: LocalizedError {
         let message: String

@@ -26,11 +26,13 @@ struct ASREngineErrorTests {
 
     @Test("createFailed's description includes the detail")
     func createFailedIncludesDetail() {
-        let error = ASREngineError.createFailed("crispasr_session_open_explicit failed (backend qwen3)")
+        let error = ASREngineError.createFailed(
+            "crispasr_session_open_explicit failed (backend parakeet)"
+        )
 
         #expect(
             error.errorDescription
-                == "Failed to create ASR recognizer: crispasr_session_open_explicit failed (backend qwen3)"
+                == "Failed to create ASR recognizer: crispasr_session_open_explicit failed (backend parakeet)"
         )
     }
 }

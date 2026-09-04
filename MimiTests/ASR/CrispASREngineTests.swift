@@ -140,4 +140,30 @@ struct CrispASREngineTests {
         #expect(engine.poll() == nil)
         #expect(engine.processedSamples == 0)
     }
+
+    // MARK: - decode-text sanitization
+
+    @Test("sanitizeDecodeText strips non-speech tags in every spelling")
+    func sanitizeStripsNonSpeechTags() {
+        #expect(CrispASREngine.sanitizeDecodeText("<sil>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("<SIL>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("<|sil|>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("</sil>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("/sil") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("/SIL") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("/noise") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("<noise>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("<|Music|>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("<unk>") == "")
+        #expect(CrispASREngine.sanitizeDecodeText(" <sil> <noise> ") == "")
+        #expect(CrispASREngine.sanitizeDecodeText("/sil /noise /sil") == "")
+    }
+
+    @Test("sanitizeDecodeText keeps speech and cleans up around stripped tags")
+    func sanitizeKeepsSpeech() {
+        #expect(CrispASREngine.sanitizeDecodeText("こんにちは。") == "こんにちは。")
+        #expect(CrispASREngine.sanitizeDecodeText("こんにちは <sil> です。") == "こんにちは です。")
+        #expect(CrispASREngine.sanitizeDecodeText("こんにちは /sil です。") == "こんにちは です。")
+        #expect(CrispASREngine.sanitizeDecodeText("  こんにちは。  ") == "こんにちは。")
+    }
 }
