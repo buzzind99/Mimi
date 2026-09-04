@@ -53,8 +53,9 @@ struct AppModelTranslationEngineTests {
     func externalProviderSpawnsWorkerWithoutConfig() async {
         let model = AppModel(
             translationSettings: makeSettings(provider: .openrouter),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
             translationTransport: constantStatusTransport(500),
-            initialModelResolve: { nil }
+            initialModelResolve: { _ in nil }
         )
 
         model.retryTranslation()
@@ -70,7 +71,11 @@ struct AppModelTranslationEngineTests {
     func unconfiguredProviderFallsBackToAppleWithNote() {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         settings.select(.openrouter)
-        let model = AppModel(translationSettings: settings, initialModelResolve: { nil })
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            initialModelResolve: { _ in nil }
+        )
 
         model.retryTranslation()
 
@@ -90,8 +95,9 @@ struct AppModelTranslationEngineTests {
         for provider in [TranslationProvider.google, .deepl] {
             let model = AppModel(
                 translationSettings: makeSettings(provider: provider),
+                asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
                 translationTransport: constantStatusTransport(401),
-                initialModelResolve: { nil }
+                initialModelResolve: { _ in nil }
             )
 
             model.retryTranslation()
@@ -113,8 +119,9 @@ struct AppModelTranslationEngineTests {
     func externalFailureLatchesAppleFallback() async {
         let model = AppModel(
             translationSettings: makeSettings(provider: .openrouter),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
             translationTransport: constantStatusTransport(401),
-            initialModelResolve: { nil }
+            initialModelResolve: { _ in nil }
         )
 
         model.retryTranslation()
@@ -138,8 +145,9 @@ struct AppModelTranslationEngineTests {
     func fallbackLatchSurvivesManualRetry() async {
         let model = AppModel(
             translationSettings: makeSettings(provider: .openrouter),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
             translationTransport: constantStatusTransport(401),
-            initialModelResolve: { nil }
+            initialModelResolve: { _ in nil }
         )
 
         // First failure: latches onto Apple.
@@ -200,8 +208,9 @@ struct AppModelTranslationEngineTests {
         }
         let model = AppModel(
             translationSettings: makeSettings(provider: .openrouter),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
             translationTransport: transport,
-            initialModelResolve: { nil }
+            initialModelResolve: { _ in nil }
         )
         let recorder = TextRecorder()
         var statuses: [TranslationStatus] = []

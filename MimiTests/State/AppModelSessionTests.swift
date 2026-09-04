@@ -170,15 +170,16 @@ struct AppModelSessionTests {
                 )
             },
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelSession"),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelSession"),
             // Stub the launch check: the real locator hashes the dev GGUF and
             // the resolved URL feeds the warm-up. The scripted URL below
             // drives the same path over the injected doubles.
-            initialModelResolve: { nil }
+            initialModelResolve: { _ in nil }
         )
         // Quiesce the launch-time model check, then force an idle start with
         // a synthetic model URL (model discovery is async now).
         await model.initialModelCheck?.value
-        await model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
+        await model.refreshModelAvailability(resolve: { _ in URL(fileURLWithPath: "/tmp/model.gguf") })
         return SUT(
             model: model, controller: model.sessionController,
             engine: engine, capture: capture, log: log

@@ -29,7 +29,8 @@ struct AppModelTranslationTests {
     private func makeModel() -> AppModel {
         AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelTranslation"),
-            initialModelResolve: { nil }
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelTranslation"),
+            initialModelResolve: { _ in nil }
         )
     }
 

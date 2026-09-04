@@ -49,7 +49,7 @@ final class AppModel {
     private(set) var isPreparingDictionary = false
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
-    /// verify hashes up to ~200 MB and must never run on the main thread.
+    /// verify hashes up to ~1.2 GB and must never run on the main thread.
     private(set) var isCheckingModel = true
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
@@ -60,6 +60,11 @@ final class AppModel {
     /// tests can await it before asserting on phase state.
     private(set) var initialModelCheck: Task<Void, Never>?
 
+    /// The model resolver driving every availability refresh (launch check,
+    /// selection re-resolve, Settings re-check). Injectable for tests; the
+    /// default drives the real locator.
+    private let modelResolve: @Sendable (ASRModelChoice) -> URL?
+
     let live = LivePartialState()
     let latency = LatencyState()
     let translationQueue = TranslationQueue()
@@ -67,6 +72,14 @@ final class AppModel {
     /// flags, OpenRouter model, test results). Keys stay in `SecureKeyStoring`
     /// and are read only when an engine is constructed.
     let translationSettings: TranslationSettings
+    /// Non-secret ASR model selection (Lite default, Full opt-in); persisted
+    /// across launches. Switching applies at the next session start.
+    let asrModelSettings: ASRModelSettings
+
+    /// Latest resolve result per choice (bundled → downloaded → dev, SHA-256
+    /// verified). The Settings Model section reads it to enable selection;
+    /// `modelURL` is the active choice's entry.
+    private(set) var modelAvailability: [ASRModelChoice: URL] = [:]
 
     /// True once this session has latched onto Apple on-device after an
     /// external engine failed (the Settings "Currently using" row surfaces it).
@@ -75,6 +88,10 @@ final class AppModel {
     /// The engine currently attached to the queue — Apple's via the hidden
     /// `.translationTask` host, an external one via `translationWorker`.
     private(set) var activeTranslationEngine: ActiveTranslationEngine = .apple
+
+    /// The refresh spawned by the most recent `selectModel` (tracked so
+    /// `adoptDownloadedModel` can await it instead of stacking passes).
+    private var modelSelectionRefresh: Task<Void, Never>?
 
     /// The spawned external-engine worker (`queue.run(with:)`). Apple runs
     /// belong to SwiftUI's `.translationTask` instead. Torn down on stop.
@@ -92,17 +109,22 @@ final class AppModel {
     /// no native runtime); nil (the default) builds the real one — no
     /// behavior change.
     /// Injectable so tests can quiesce the launch check (stub `resolve`):
-    /// the real locator SHA-256-verifies up to ~200 MB and its success feeds
+    /// the real locator SHA-256-verifies up to ~1.2 GB and its success feeds
     /// the engine warm-up — real blocking work tests must never trigger.
     init(
         makeSessionController: (
             (LivePartialState, LatencyState, TranslationQueue) -> SessionController
         )? = nil,
         translationSettings: TranslationSettings? = nil,
+        asrModelSettings: ASRModelSettings? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
-        initialModelResolve: @escaping @Sendable () -> URL? = { ModelLocator.resolve() }
+        initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = {
+            ModelLocator.resolve(for: $0)
+        }
     ) {
         self.translationSettings = translationSettings ?? TranslationSettings()
+        self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
+        modelResolve = initialModelResolve
         self.translationTransport = translationTransport
         if let makeSessionController {
             sessionController = makeSessionController(live, latency, translationQueue)
@@ -120,7 +142,7 @@ final class AppModel {
                 self?.handleTranslationStatus(status)
             }
         )
-        initialModelCheck = Task { await refreshModelAvailability(resolve: initialModelResolve) }
+        initialModelCheck = Task { await refreshModelAvailability() }
         prepareDictionaryIfNeeded()
 
         NotificationCenter.default.addObserver(
@@ -161,16 +183,37 @@ final class AppModel {
 
     // MARK: - Model / app discovery
 
-    /// Re-checks the model location and moves `idle`↔`needsModel` accordingly.
-    /// The resolve (existence + SHA-256 verify, hashing up to ~200 MB) runs
-    /// off-main and the result is hopped back here; `isCheckingModel` gates
-    /// Start while the check is in flight. `resolve` is injectable for tests;
-    /// the default drives the real locator.
+    /// Re-checks both model locations and moves `idle`↔`needsModel` by the
+    /// active choice's result. The resolve (existence + SHA-256 verify,
+    /// hashing up to ~1.2 GB) runs off-main and the result is hopped back
+    /// here; `isCheckingModel` gates Start while the check is in flight.
+    /// `resolve` overrides the stored resolver for tests; by default the
+    /// resolver injected at init drives the lookup. The active choice's URL
+    /// also lands in `modelURL` and every choice's result in
+    /// `modelAvailability` (Settings rows).
     func refreshModelAvailability(
-        resolve: @escaping @Sendable () -> URL? = { ModelLocator.resolve() }
+        resolve: (@Sendable (ASRModelChoice) -> URL?)? = nil
     ) async {
+        let resolve = resolve ?? modelResolve
         isCheckingModel = true
-        let url = await Task.detached(priority: .userInitiated) { resolve() }.value
+        let selected = asrModelSettings.selected
+        let resolved = await Task.detached(priority: .userInitiated) { () -> [ASRModelChoice: URL] in
+            // Both choices resolve concurrently: each verify hashes up to
+            // ~1.2 GB, and parallel keeps the wall time at the slower one
+            // instead of the sum.
+            await withTaskGroup(of: (ASRModelChoice, URL?).self) { group in
+                for choice in ASRModelChoice.allCases {
+                    group.addTask { (choice, resolve(choice)) }
+                }
+                var availability: [ASRModelChoice: URL] = [:]
+                for await(choice, url) in group {
+                    availability[choice] = url
+                }
+                return availability
+            }
+        }.value
+        modelAvailability = resolved
+        let url = resolved[selected]
         modelURL = url
         if url == nil, phase == .idle {
             phase = .needsModel
@@ -179,6 +222,34 @@ final class AppModel {
         }
         sessionController.warmUpIfNeeded(modelURL: url)
         isCheckingModel = false
+    }
+
+    // MARK: - Model selection
+
+    /// Switches the active ASR model. Only a downloaded + verified model can
+    /// be selected (its resolve result must be cached), and a running or
+    /// starting session must never be re-modelled mid-flight — the change
+    /// applies at the next session start, like the translation provider.
+    /// Persisting re-resolves (updating `modelURL` and `phase`) and re-warms
+    /// the new engine in the background (`warmUpIfNeeded` re-arms on the new
+    /// path).
+    func selectModel(_ choice: ASRModelChoice) {
+        guard phase != .running, phase != .starting else { return }
+        guard modelAvailability[choice] != nil else { return }
+        asrModelSettings.select(choice)
+        modelSelectionRefresh = Task { await refreshModelAvailability() }
+    }
+
+    /// Called after a Settings download of `choice` completes (the download
+    /// button is explicit intent): re-resolves availability so the new file
+    /// is hashed + verified, then auto-selects it.
+    func adoptDownloadedModel(_ choice: ASRModelChoice) async {
+        await refreshModelAvailability()
+        selectModel(choice)
+        // `selectModel` re-resolves in a tracked task; awaiting it here (one
+        // extra pass, never overlapping `refreshModelAvailability`) means the
+        // new model is live (modelURL + warm-up) before we return.
+        await modelSelectionRefresh?.value
     }
 
     // MARK: - Dictionary preparation
@@ -242,7 +313,9 @@ final class AppModel {
     }
 
     private func beginSession() async throws {
-        let started = try await sessionController.begin(modelURL: modelURL)
+        let started = try await sessionController.begin(
+            modelURL: modelURL, modelID: asrModelSettings.selected.modelID
+        )
         // The session may have been cancelled (or its capture lost) while
         // `begin()` was in flight. Tear down whatever begin() brought up so
         // a stopped session cannot come up anyway.

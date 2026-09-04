@@ -16,7 +16,8 @@ struct AppModelDictionaryTests {
     private func makeModel() -> AppModel {
         AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelDictionary"),
-            initialModelResolve: { nil }
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelDictionary"),
+            initialModelResolve: { _ in nil }
         )
     }
 

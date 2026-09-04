@@ -27,7 +27,8 @@ struct AppModelTests {
     private func makeSUT() async -> AppModel {
         let model = AppModel(
             translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
-            initialModelResolve: { nil }
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelControl"),
+            initialModelResolve: { _ in nil }
         )
         await model.initialModelCheck?.value
         return model
@@ -385,7 +386,7 @@ struct AppModelTests {
         let model = await makeSUT()
         model.phase = .needsModel
 
-        await model.refreshModelAvailability(resolve: { URL(fileURLWithPath: "/tmp/model.gguf") })
+        await model.refreshModelAvailability(resolve: { _ in URL(fileURLWithPath: "/tmp/model.gguf") })
 
         #expect(model.phase == .idle)
         #expect(!model.isCheckingModel)
@@ -396,7 +397,7 @@ struct AppModelTests {
         let model = await makeSUT()
         model.phase = .idle
 
-        await model.refreshModelAvailability(resolve: { nil })
+        await model.refreshModelAvailability(resolve: { _ in nil })
 
         #expect(model.phase == .needsModel)
         #expect(model.modelURL == nil)
@@ -446,22 +447,33 @@ struct AppModelTests {
 
     private static let willTerminateNotification = NSNotification.Name("MimiAppWillTerminate")
 
-    /// One-shot gate parked inside the model check's `resolve`: keeps the
-    /// check in flight (and `isCheckingModel` true) until the test opens it.
+    /// Gate parked inside the model check's `resolve`: keeps the check in
+    /// flight (and `isCheckingModel` true) until the test opens it. Releases
+    /// every waiter at once — the check fans `resolve` out over a task group
+    /// (one child per choice), so multiple resolves can park concurrently.
     /// The wait is bounded so a regression surfaces as a failure, never a
     /// wedge. Same pattern as `AppModelSessionTests.StartGate`.
     private final class ModelCheckGate: @unchecked Sendable {
-        private let semaphore = DispatchSemaphore(value: 0)
+        private let condition = NSCondition()
+        private var isOpen = false
 
         /// Serves as the check's `resolve` (runs off-main in the detached
-        /// task): parks until `open()`, then reports no model found.
-        func resolve() -> URL? {
-            _ = semaphore.wait(timeout: .now() + 10)
+        /// task group): parks until `open()`, then reports no model found.
+        func resolve(_ choice: ASRModelChoice) -> URL? {
+            condition.lock()
+            defer { condition.unlock() }
+            let deadline = Date().addingTimeInterval(10)
+            while !isOpen {
+                guard condition.wait(until: deadline) else { break }
+            }
             return nil
         }
 
         func open() {
-            semaphore.signal()
+            condition.lock()
+            isOpen = true
+            condition.broadcast()
+            condition.unlock()
         }
     }
 }

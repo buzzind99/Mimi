@@ -190,20 +190,15 @@ struct SettingsView: View {
 
     // MARK: - Model / session diagnostics
 
+    /// One row per ASR model choice: a downloaded + verified model can be
+    /// selected (unless a session is running/starting — the change applies
+    /// at the next session start, like the translation provider), and the
+    /// active one is marked "In use". Missing models get an inline download
+    /// (`arrow.down.circle`) with progress, cancel, and error + retry.
     private var modelSection: some View {
         Section("Model") {
-            LabeledContent("Status") {
-                if let url = model.modelURL {
-                    Text(url.path)
-                        .font(.caption.monospaced())
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } else {
-                    Text("Not downloaded").foregroundStyle(.orange)
-                }
-            }
-            LabeledContent("Model") {
-                Text(ModelLocator.modelID)
+            ForEach(ASRModelChoice.allCases) { choice in
+                ModelRow(choice: choice, model: model)
             }
             LabeledContent("Models folder") {
                 Text(ModelLocator.modelsDirectory.path)
@@ -221,7 +216,143 @@ struct SettingsView: View {
         Section("Session") {
             LabeledContent("Entries") { Text("\(model.entries.count)") }
             LabeledContent("Engine") {
-                Text(model.engineIsMock ? "Mock (runtime not installed)" : "CrispASR · Fun-ASR Nano 2512 (Metal)")
+                Text(
+                    model.engineIsMock
+                        ? "Mock (runtime not installed)"
+                        : "CrispASR · \(model.asrModelSettings.selected.displayName) (Metal)"
+                )
+            }
+        }
+    }
+}
+
+/// A single model row in the Settings Model section (see `modelSection`).
+/// Owns one `ModelDownloader` per choice so downloads run (and resume)
+/// independently; a completed Settings download auto-selects the model.
+@MainActor
+private struct ModelRow: View {
+    let choice: ASRModelChoice
+    var model: AppModel
+    @State private var downloader: ModelDownloader
+
+    init(choice: ASRModelChoice, model: AppModel) {
+        self.choice = choice
+        self.model = model
+        _downloader = State(initialValue: ModelDownloader(choice: choice))
+    }
+
+    private var resolvedURL: URL? {
+        model.modelAvailability[choice]
+    }
+
+    private var isInUse: Bool {
+        model.asrModelSettings.selected == choice
+    }
+
+    /// A selection change applies at the next session start; mid-session
+    /// (.running/.starting) it is disabled.
+    private var selectionDisabled: Bool {
+        resolvedURL == nil || model.phase == .running || model.phase == .starting
+    }
+
+    /// Selection and download live side by side (not nested): disabling the
+    /// row while a model is missing would otherwise also disable the very
+    /// download button meant to fix that.
+    var body: some View {
+        HStack {
+            selectionButton
+            Spacer()
+            downloadControls
+        }
+        .onChange(of: downloader.state) { _, state in
+            // A finished Settings download is explicit intent: verify the
+            // new file and auto-select it (see `adoptDownloadedModel`).
+            if case .done = state {
+                Task { await model.adoptDownloadedModel(choice) }
+            }
+        }
+    }
+
+    private var selectionButton: some View {
+        Button {
+            guard !selectionDisabled, !isInUse else { return }
+            model.selectModel(choice)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(choice.displayName)
+                    if isInUse {
+                        Label("In use", systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.teal)
+                    }
+                }
+                statusLine
+                if case let .failed(message) = downloader.state {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(selectionDisabled)
+    }
+
+    /// Download affordances for a missing model; these stay enabled even
+    /// while selection is disabled (mid-session or not-yet-downloaded).
+    @ViewBuilder
+    private var downloadControls: some View {
+        switch downloader.state {
+        case .downloading:
+            Button("Cancel") { downloader.cancel() }
+                .buttonStyle(.link)
+                .font(.caption)
+        case .failed:
+            Button("Retry") { downloader.start() }
+                .font(.caption)
+        default:
+            if resolvedURL == nil {
+                Button {
+                    downloader.start()
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Download \(choice.displayName) model (\(choice.approximateSize))")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        switch downloader.state {
+        case let .downloading(_, bytes, total):
+            if let total, total > 0 {
+                ProgressView(value: Double(bytes), total: Double(total))
+                Text(
+                    bytes.formatted(.byteCount(style: .memory)) + " / "
+                        + total.formatted(.byteCount(style: .memory))
+                )
+                .font(.caption.monospacedDigit())
+            } else {
+                ProgressView()
+            }
+        case .done:
+            Label("Downloaded", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        default:
+            if let url = resolvedURL {
+                Text(url.path)
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Not downloaded")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
         }
     }

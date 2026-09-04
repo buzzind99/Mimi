@@ -33,8 +33,12 @@ final class SessionController {
     private var sentenceBuffer: SentenceBuffer?
     private var pollTimer: Timer?
     private var tickTimer: Timer?
-    /// Guards the one-shot engine warm-up (app launch / model arrival).
-    private var warmUpScheduled = false
+    /// Path of the model the warm-up last loaded (nil = none yet). Keyed on
+    /// path so the warm-up re-arms when the user switches models: the new
+    /// GGUF gets prepared in the background instead of loading synchronously
+    /// inside the first `begin` after the switch. Repeat calls with the same
+    /// path are no-ops.
+    private var warmedModelPath: String?
     #if DEBUG
         private var debugIngressChunks = 0
     #endif
@@ -75,13 +79,13 @@ final class SessionController {
     // MARK: - Warm-up
 
     /// Loads the ASR model + compiles the Metal pipelines in the background
-    /// (at app launch, or once a model becomes available) so the first
-    /// session start is instant. Safe against racing `begin`: the engine's
-    /// `prepare` is serialized, and a second opener reuses the already-open
-    /// session.
+    /// (at app launch, when a model becomes available, or after a model
+    /// switch) so the first session start is instant. Safe against racing
+    /// `begin`: the engine's `prepare` is serialized, and a second opener
+    /// reuses the already-open session.
     func warmUpIfNeeded(modelURL: URL?) {
-        guard warmUpEnabled(), !warmUpScheduled, let url = modelURL else { return }
-        warmUpScheduled = true
+        guard warmUpEnabled(), let url = modelURL, warmedModelPath != url.path else { return }
+        warmedModelPath = url.path
         #if DEBUG
             print("[warmup] preparing ASR engine in background")
         #endif
@@ -98,8 +102,9 @@ final class SessionController {
     /// Brings up permission → engine → capture → buffer. Returns `false` when
     /// no model is available (caller maps that to `.needsModel`); throws when
     /// permission or capture setup fails. `modelURL` comes from the caller's
-    /// resolved state (single resolve, no second verify on the start path).
-    func begin(modelURL: URL?) async throws -> Bool {
+    /// resolved state (single resolve, no second verify on the start path);
+    /// `modelID` is the active choice's id for session metadata.
+    func begin(modelURL: URL?, modelID: String) async throws -> Bool {
         // Screen Recording permission (TCC) covers SCK system-audio capture.
         guard await ensurePermission() else {
             throw CaptureError.permissionDenied
@@ -152,7 +157,7 @@ final class SessionController {
             startedAt: Date(),
             sourceLang: "ja",
             targetLang: "en",
-            model: engine.isMock ? "mock" : ModelLocator.modelID,
+            model: engine.isMock ? "mock" : modelID,
             chunkMS: 160
         )
 

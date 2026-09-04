@@ -20,6 +20,7 @@ struct SessionControllerTests {
 
     private let pendingPartial = "認識中"
     private let warmUpModelURL = URL(fileURLWithPath: "/tmp/mimi-warmup.gguf")
+    private let sessionModelID = "test-model-GGUF"
     private let captureFailureDetail = "boom"
     private let engineFailureMessage = "decode failed"
     private let fullSentence = "こんにちは。"
@@ -125,6 +126,30 @@ struct SessionControllerTests {
         #expect(sut.controller.sessionMetadata == nil)
     }
 
+    /// A model switch must re-arm the warm-up (keyed on the warmed path), or
+    /// the first session start after the switch loads the new GGUF on the
+    /// main actor instead of reusing a background-prepared engine.
+    @Test("warm-up re-arms when the model path changes")
+    func warmUpRearmsForDifferentPath() async {
+        let sut = makeSUT()
+        let otherURL = URL(fileURLWithPath: "/tmp/mimi-warmup-other.gguf")
+
+        sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
+        #expect(
+            await pollUntil { sut.log.names == ["factory allowMock=false", "engine.prepare"] }
+        )
+
+        sut.controller.warmUpIfNeeded(modelURL: otherURL)
+        #expect(
+            await pollUntil {
+                sut.log.names == [
+                    "factory allowMock=false", "engine.prepare",
+                    "factory allowMock=false", "engine.prepare"
+                ]
+            }
+        )
+    }
+
     /// Pins the production default: inside the unit-test host the warm-up is
     /// gated off (its detached engine construction would race the suites into
     /// a ggml-metal init wedge). The scheduling tests above opt back in via
@@ -218,7 +243,9 @@ struct SessionControllerTests {
         sut.controller.onSessionBegin = { sessionBegan = true }
         sut.controller.onEngineChosen = { isMock, _ in chosenIsMock = isMock }
 
-        let started = try await sut.controller.begin(modelURL: warmUpModelURL)
+        let started = try await sut.controller.begin(
+            modelURL: warmUpModelURL, modelID: sessionModelID
+        )
 
         #expect(started)
         #expect(
@@ -235,7 +262,7 @@ struct SessionControllerTests {
     func beginCapturesMockMetadata() async throws {
         let sut = makeSUT()
 
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         let metadata = try #require(sut.controller.sessionMetadata)
         #expect(metadata.model == "mock")
@@ -244,11 +271,34 @@ struct SessionControllerTests {
         #expect(metadata.chunkMS == 160)
     }
 
+    @Test("begin records the passed modelID for a non-mock engine's metadata")
+    func beginCapturesNonMockModelID() async throws {
+        let live = LivePartialState()
+        let latency = LatencyState()
+        let log = CallLog()
+        let engine = ScriptedASREngine(log: log, isMock: false)
+        let capture = ScriptedCapture(log: log)
+        let controller = SessionController(
+            live: live, latency: latency, translationQueue: TranslationQueue(),
+            makeEngine: { _, _ in engine },
+            makeCapture: { capture },
+            ensurePermission: { true },
+            warmUpEnabled: { false }
+        )
+
+        _ = try await controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
+
+        let metadata = try #require(controller.sessionMetadata)
+        #expect(metadata.model == sessionModelID)
+    }
+
     @Test("begin reports needsModel when no engine resolves")
     func beginWithoutEngineReturnsFalse() async throws {
         let sut = makeSUT(resolveEngine: false)
 
-        let started = try await sut.controller.begin(modelURL: warmUpModelURL)
+        let started = try await sut.controller.begin(
+            modelURL: warmUpModelURL, modelID: sessionModelID
+        )
 
         #expect(!started)
         #expect(sut.log.names == ["factory allowMock=true"])
@@ -260,7 +310,7 @@ struct SessionControllerTests {
         let sut = makeSUT(permissionGranted: false)
 
         let thrown = await #expect(throws: CaptureError.self) {
-            try await sut.controller.begin(modelURL: warmUpModelURL)
+            try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         }
 
         #expect(thrown?.errorDescription == CaptureError.permissionDenied.errorDescription)
@@ -273,7 +323,7 @@ struct SessionControllerTests {
         let sut = makeSUT(captureStartError: CaptureError.streamSetupFailed(captureFailureDetail))
 
         let thrown = await #expect(throws: CaptureError.self) {
-            try await sut.controller.begin(modelURL: warmUpModelURL)
+            try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         }
 
         #expect(
@@ -288,7 +338,7 @@ struct SessionControllerTests {
     @Test("capture chunks are pushed into the engine")
     func captureChunksPushIntoEngine() async throws {
         let sut = makeSUT()
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.capture.onChunk?(AudioChunk(samples: [0.1, -0.2, 0.3], startSample: 0))
 
@@ -298,7 +348,7 @@ struct SessionControllerTests {
     @Test("capture chunks update the latency readback on the poll tick")
     func captureChunksUpdateLatency() async throws {
         let sut = makeSUT()
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.capture.onChunk?(AudioChunk(samples: [Float](repeating: 0.1, count: 2560), startSample: 0))
         sut.controller.startTimers()
@@ -314,7 +364,7 @@ struct SessionControllerTests {
     @Test("fifty chunks drive the ingress-energy debug path and accumulate latency")
     func fiftyChunksDriveIngressEnergyPath() async throws {
         let sut = makeSUT()
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         for index in 0 ..< 50 {
             sut.capture.onChunk?(
@@ -335,7 +385,7 @@ struct SessionControllerTests {
         let sut = makeSUT()
         var messages: [String] = []
         sut.controller.onCaptureError = { messages.append($0) }
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.capture.onIOError?(.streamSetupFailed(captureFailureDetail))
         #expect(await pollUntil { !messages.isEmpty }, "the capture error surfaces")
@@ -348,7 +398,7 @@ struct SessionControllerTests {
         let sut = makeSUT()
         var messages: [String] = []
         sut.controller.onEngineError = { messages.append($0) }
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         sut.engine.onEngineError?(engineFailureMessage)
         #expect(await pollUntil { !messages.isEmpty }, "the engine error surfaces")
@@ -361,7 +411,7 @@ struct SessionControllerTests {
     @Test("the poll timer surfaces a partial to the live state and stop clears it")
     func pollTimerSurfacesPartialAndStopClears() async throws {
         let sut = makeSUT(poll: [.partial(text: pendingPartial)])
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
         let surfaced = await pumpTimers(until: sut.live.partial == pendingPartial)
         #expect(surfaced, "the poll timer must surface the scripted partial")
@@ -383,7 +433,7 @@ struct SessionControllerTests {
         ])
         var sentences: [Sentence] = []
         sut.controller.onSentence = { sentences.append($0) }
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
         sut.controller.startTimers()
         let emitted = await pumpTimers(until: !sentences.isEmpty)
         await sut.controller.stop()
@@ -408,7 +458,7 @@ struct SessionControllerTests {
         ])
         var sentences: [Sentence] = []
         sut.controller.onSentence = { sentences.append($0) }
-        _ = try await sut.controller.begin(modelURL: warmUpModelURL)
+        _ = try await sut.controller.begin(modelURL: warmUpModelURL, modelID: sessionModelID)
 
         await sut.controller.stop()
 
@@ -450,7 +500,7 @@ private final class CallLog: @unchecked Sendable {
 }
 
 private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
-    let isMock = true
+    let isMock: Bool
     var onEngineError: ((String) -> Void)?
     var processedSamples = 0
 
@@ -461,8 +511,9 @@ private final class ScriptedASREngine: ASREngine, @unchecked Sendable {
     private var pushedChunks: [[Float]] = []
     private var pushedTotal = 0
 
-    init(log: CallLog, poll: [ASREvent] = [], finish: [ASREvent] = []) {
+    init(log: CallLog, poll: [ASREvent] = [], finish: [ASREvent] = [], isMock: Bool = true) {
         self.log = log
+        self.isMock = isMock
         pollQueue = poll
         finishQueue = finish
     }
