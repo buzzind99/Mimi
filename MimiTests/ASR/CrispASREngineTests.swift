@@ -141,6 +141,26 @@ struct CrispASREngineTests {
         #expect(engine.processedSamples == 0)
     }
 
+    // MARK: - fallbackBackend (detector-less name guess)
+
+    @Test("fallbackBackend guesses the family from the GGUF file name")
+    func fallbackBackendFollowsFileName() {
+        #expect(
+            CrispASREngine.fallbackBackend(modelPath: "/models/funasr-nano-2512-q8_0.gguf") == "funasr"
+        )
+        #expect(
+            CrispASREngine.fallbackBackend(modelPath: "/models/sensevoice-small-q8_0.gguf") == "sensevoice"
+        )
+        #expect(
+            CrispASREngine.fallbackBackend(modelPath: "/models/FUNASR-Nano.Q8_0.GGUF") == "funasr",
+            "the guess is case-insensitive"
+        )
+        #expect(
+            CrispASREngine.fallbackBackend(modelPath: "/tmp/mimi-crisp-missing.gguf") == "sensevoice",
+            "an unknown name keeps the Lite default"
+        )
+    }
+
     // MARK: - decode-text sanitization
 
     @Test("sanitizeDecodeText strips non-speech tags in every spelling")

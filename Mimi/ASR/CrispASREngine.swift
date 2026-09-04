@@ -5,9 +5,9 @@ import Foundation
 /// runtime is installed).
 ///
 /// Runs the CrispASR backend detected from the GGUF's architecture header
-/// (`crispasr_detect_backend_from_gguf` — currently `funasr`, which has no
-/// cache-aware streaming) — the sliding window lives here instead of in the
-/// C library:
+/// (`crispasr_detect_backend_from_gguf` — `sensevoice` for Lite, `funasr`
+/// for Full; neither has cache-aware streaming) — the sliding window lives
+/// here instead of in the C library:
 ///
 ///   - `push` appends 160 ms chunks to a rolling utterance buffer (bounded by
 ///     a forced-final cap) plus a 10 s window used for partial decodes.
@@ -86,9 +86,15 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     static let vadMinDiscardSamples = 2 * sampleRate
 
     /// Backend name used when `crispasr_detect_backend_from_gguf` can't name
-    /// one (runtime without the symbol, unparsable GGUF). The shipped model
-    /// is a Fun-ASR Nano ("funasr" architecture) GGUF.
-    static let fallbackBackend = "funasr"
+    /// one (runtime without the symbol, unparsable GGUF): the model family
+    /// guessed from the GGUF's file name — both shipped GGUFs are named
+    /// after their architecture (`funasr-nano-2512-q8_0.gguf`,
+    /// `sensevoice-small-q8_0.gguf`), so the guess follows the same naming
+    /// the detector would resolve.
+    static func fallbackBackend(modelPath: String) -> String {
+        let name = (modelPath as NSString).lastPathComponent.lowercased()
+        return name.contains("funasr") ? "funasr" : "sensevoice"
+    }
 
     /// FunASR-family models tag non-speech audio in their decode output
     /// (`<sil>`, `/sil`, …, optionally pipe-wrapped). Stripped before the
@@ -217,7 +223,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         }
         // TLS-backed GPU preference: must be set on the same thread that
         // opens the session (prepare runs once, before any decode starts).
-        let backend = lib.detectBackend(modelPath: modelPath) ?? Self.fallbackBackend
+        let backend = lib.detectBackend(modelPath: modelPath) ?? Self.fallbackBackend(modelPath: modelPath)
         #if DEBUG
             print("[asr] prepare: opening C session (\(backend)/metal)")
         #endif
