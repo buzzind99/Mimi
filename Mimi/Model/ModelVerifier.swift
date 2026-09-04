@@ -2,13 +2,15 @@ import CryptoKit
 import Foundation
 import Synchronization
 
-/// Pinned-digest verification for the ASR GGUF. Verdicts are cached per
-/// (path, size) so the ~600 MB re-hash only runs when the file actually
-/// changes (first resolve, re-download, or a dropped-in replacement).
+/// Pinned-digest verification for the ASR GGUFs. Verdicts are cached per
+/// (path, size) so the multi-hundred-MB re-hash only runs when a file
+/// actually changes (first resolve, re-download, or a dropped-in
+/// replacement); the cache keys on the path, so both choices can coexist.
 enum ModelVerifier {
-    /// Pinned SHA-256 of the q8_0 GGUF (release-time integrity check).
-    static let expectedSHA256 =
-        "dac5e1b95659c0a95b2a1dc60083eb17740454a921ec39f9c24e50b930ca31ab"
+    /// Pinned SHA-256 for the choice's GGUF (release-time integrity check).
+    static func expectedSHA256(for choice: ASRModelChoice) -> String {
+        choice.pinnedSHA256
+    }
 
     struct VerificationError: LocalizedError {
         let message: String
@@ -25,8 +27,8 @@ enum ModelVerifier {
     /// Verdicts are inserted only after `verify` succeeds.
     private static let verified = Mutex<Set<CacheKey>>([])
 
-    /// Returns true iff the file matches the pinned SHA-256.
-    static func isVerified(_ file: URL) -> Bool {
+    /// Returns true iff the file matches the choice's pinned SHA-256.
+    static func isVerified(_ file: URL, for choice: ASRModelChoice) -> Bool {
         let fm = FileManager.default
         guard let attrs = try? fm.attributesOfItem(atPath: file.path),
               let size = attrs[.size] as? Int64
@@ -36,7 +38,7 @@ enum ModelVerifier {
             return true
         }
         do {
-            try verify(file)
+            try verify(file, for: choice)
         } catch {
             return false
         }
@@ -44,7 +46,7 @@ enum ModelVerifier {
         return true
     }
 
-    static func verify(_ file: URL) throws(VerificationError) {
+    static func verify(_ file: URL, for choice: ASRModelChoice) throws(VerificationError) {
         let digest: SHA256Digest
         do {
             digest = try SHA256.digest(file: file)
@@ -56,7 +58,7 @@ enum ModelVerifier {
             )
         }
         let hex = digest.map { String(format: "%02x", $0) }.joined()
-        if hex != expectedSHA256.lowercased() {
+        if hex != expectedSHA256(for: choice).lowercased() {
             throw VerificationError(
                 message: "model file does not match Mimi's pinned checksum — "
                     + "delete it and re-download, or replace it with an authentic copy"

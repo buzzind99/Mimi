@@ -27,29 +27,36 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         Task { @MainActor in self.state = new }
     }
 
-    nonisolated static let downloadURL = URL(string:
-        "https://huggingface.co/cstr/\(ModelLocator.modelID)/resolve/main/\(ModelLocator.modelName)")!
+    nonisolated static func downloadURL(for choice: ASRModelChoice) -> URL {
+        choice.downloadURL
+    }
 
-    private let destination: URL
+    /// The choice whose URL, destination, and SHA-256 pin this downloader
+    /// works against.
+    private let choice: ASRModelChoice
+    /// Internal (not private) so tests can pin the choice-derived destination.
+    let destination: URL
     private let makeSession: (URLSessionDownloadDelegate) -> URLSession
     private let makeTask: (URLSession) -> URLSessionDownloadTask?
 
     /// Transport seams for tests: the destination and the session/task
-    /// factories default to the real model location and URL session; tests
-    /// inject a temp destination and a no-op or suspended transport so
+    /// factories default to the choice's model location and URL session;
+    /// tests inject a temp destination and a no-op or suspended transport so
     /// `begin()`'s file arms run without network.
     init(
-        destination: URL = ModelLocator.downloadedURL,
+        choice: ASRModelChoice = .lite,
+        destination: URL? = nil,
         makeSession: @escaping (URLSessionDownloadDelegate) -> URLSession = {
             URLSession(configuration: .default, delegate: $0, delegateQueue: nil)
         },
-        makeTask: @escaping (URLSession) -> URLSessionDownloadTask? = {
-            $0.downloadTask(with: ModelDownloader.downloadURL)
-        }
+        makeTask: ((URLSession) -> URLSessionDownloadTask?)? = nil
     ) {
-        self.destination = destination
+        self.choice = choice
+        self.destination = destination ?? ModelLocator.downloadedURL(for: choice)
         self.makeSession = makeSession
-        self.makeTask = makeTask
+        self.makeTask = makeTask ?? { session in
+            session.downloadTask(with: ModelDownloader.downloadURL(for: choice))
+        }
     }
 
     private var task: URLSessionDownloadTask?
@@ -59,7 +66,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
 
     /// Progress-publish throttle (main-actor confined): republish only on a
     /// ≥0.5% progress delta or ≥100 ms since the last publish — the delegate
-    /// fires many times per second for a 200 MB download. Terminal states
+    /// fires many times per second for a multi-hundred-MB download. Terminal states
     /// (`setState`) always publish.
     private static let progressDeltaThreshold = 0.005
     private static let progressIntervalThreshold: TimeInterval = 0.1
@@ -80,7 +87,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         try? fm.createDirectory(at: ModelLocator.modelsDirectory, withIntermediateDirectories: true)
 
         if fm.fileExists(atPath: destination.path) {
-            if ModelVerifier.isVerified(destination) {
+            if ModelVerifier.isVerified(destination, for: choice) {
                 setState(.done(destination))
                 return
             }
@@ -163,7 +170,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         let fm = FileManager.default
         var failure: Error?
         do {
-            try Self.verify(location)
+            try Self.verify(location, choice: choice)
             try? fm.removeItem(at: destination)
             try fm.moveItem(at: location, to: destination)
         } catch {
@@ -196,7 +203,9 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         }
     }
 
-    private nonisolated static func verify(_ file: URL) throws(ModelVerifier.VerificationError) {
-        try ModelVerifier.verify(file)
+    private nonisolated static func verify(_ file: URL, choice: ASRModelChoice)
+        throws(ModelVerifier.VerificationError)
+    {
+        try ModelVerifier.verify(file, for: choice)
     }
 }

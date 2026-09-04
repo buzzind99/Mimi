@@ -56,12 +56,30 @@ struct ModelDownloaderTests {
 
     // MARK: - start
 
+    /// The downloader derives its destination and download URL from the
+    /// choice it was constructed with, so both GGUFs target side-by-side
+    /// files in the shared models directory (switching never re-downloads).
+    @Test("destination and download URL derive from the choice")
+    func perChoiceURLDerivation() {
+        for choice in ASRModelChoice.allCases {
+            let downloader = ModelDownloader(choice: choice)
+
+            #expect(downloader.destination == ModelLocator.downloadedURL(for: choice))
+            #expect(ModelDownloader.downloadURL(for: choice) == choice.downloadURL)
+        }
+        // An injected destination (test seam) overrides the choice-derived one.
+        let injected = URL(fileURLWithPath: "/tmp/injected.gguf")
+        #expect(
+            ModelDownloader(choice: .full, destination: injected).destination == injected
+        )
+    }
+
     @Test(
         "start finishes done for an already-verified model and ignores further starts",
-        .enabled(if: ModelVerifier.isVerified(ModelLocator.downloadedURL))
+        .enabled(if: ModelVerifier.isVerified(ModelLocator.downloadedURL(for: .lite), for: .lite))
     )
     func startWhenVerifiedModelAlreadyPresent() async {
-        let destination = ModelLocator.downloadedURL
+        let destination = ModelLocator.downloadedURL(for: .lite)
         let downloader = ModelDownloader()
 
         downloader.start()
@@ -106,7 +124,7 @@ struct ModelDownloaderTests {
 
     @Test("start removes an unverified file at the destination before downloading")
     func startRemovesUnverifiedDestination() async throws {
-        let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: ModelLocator.modelName)
+        let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: ASRModelChoice.lite.ggufFileName)
         let downloader = makeOfflineTransport(destination: file)
 
         downloader.start()
@@ -229,7 +247,7 @@ struct ModelDownloaderTests {
         let downloader = ModelDownloader()
         let tempFile = try temporary.write(Data([0x01, 0x02, 0x03]), named: "bad-digest.gguf")
         let task = try makeDownloadTask()
-        let destination = ModelLocator.downloadedURL
+        let destination = ModelLocator.downloadedURL(for: .lite)
         let destinationExisted = FileManager.default.fileExists(atPath: destination.path)
 
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
@@ -257,7 +275,7 @@ struct ModelDownloaderTests {
         let tempFile = try #require(try ModelTestFixtures.cloneRepoModel())
         let downloader = ModelDownloader()
         let task = try makeDownloadTask()
-        let destination = ModelLocator.downloadedURL
+        let destination = ModelLocator.downloadedURL(for: .lite)
 
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
         #expect(
@@ -318,5 +336,12 @@ struct ModelDownloaderTests {
                     )
             }
         )
+    }
+
+    @Test("default construction derives the destination from the choice")
+    func defaultConstruction() {
+        let downloader = ModelDownloader(choice: .full)
+
+        #expect(downloader.destination == ModelLocator.downloadedURL(for: .full))
     }
 }

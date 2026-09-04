@@ -22,15 +22,40 @@ struct ModelVerifierTests {
     func missingFileIsUnverified() {
         let url = temporary.fileURL("missing-\(UUID().uuidString).gguf")
 
-        #expect(!ModelVerifier.isVerified(url))
+        #expect(!ModelVerifier.isVerified(url, for: .lite))
+    }
+
+    @Test("verify on a missing file reports a read failure with the cause")
+    func verifyMissingFileThrowsReadFailure() throws {
+        let url = temporary.fileURL("missing-verify-\(UUID().uuidString).gguf")
+
+        let error = #expect(throws: ModelVerifier.VerificationError.self) {
+            try ModelVerifier.verify(url, for: .lite)
+        }
+
+        #expect(try #require(error).message.contains("could not be read"))
     }
 
     @Test("a file that mismatches the pinned digest is not verified")
     func mismatchedDigestIsUnverified() throws {
         let file = try temporary.write(Data([0x00, 0x01, 0x02]), named: "mismatch.gguf")
 
-        #expect(!ModelVerifier.isVerified(file))
-        #expect(!ModelVerifier.isVerified(file))
+        #expect(!ModelVerifier.isVerified(file, for: .lite))
+        #expect(!ModelVerifier.isVerified(file, for: .lite))
+    }
+
+    @Test("each choice pins its own digest")
+    func perChoicePins() {
+        #expect(
+            ModelVerifier.expectedSHA256(for: .lite) == ASRModelChoice.lite.pinnedSHA256
+        )
+        #expect(
+            ModelVerifier.expectedSHA256(for: .full) == ASRModelChoice.full.pinnedSHA256
+        )
+        #expect(
+            ModelVerifier.expectedSHA256(for: .lite) != ModelVerifier.expectedSHA256(for: .full)
+        )
+        #expect(ASRModelChoice.full.pinnedSHA256.count == 64)
     }
 
     /// The verdict cache only stores positives, so a cache hit is observable
@@ -42,18 +67,18 @@ struct ModelVerifierTests {
     )
     func cachesVerdictUntilSizeChanges() throws {
         let file = try #require(try ModelTestFixtures.cloneRepoModel())
-        #expect(ModelVerifier.isVerified(file), "first call hashes and caches the verdict")
+        #expect(ModelVerifier.isVerified(file, for: .lite), "first call hashes and caches the verdict")
 
         let handle = try FileHandle(forWritingTo: file)
         defer { try? handle.close() }
         try handle.write(contentsOf: Data([0x5A])) // mutate content, same size
 
-        #expect(ModelVerifier.isVerified(file), "second call must skip hashing (cache hit)")
+        #expect(ModelVerifier.isVerified(file, for: .lite), "second call must skip hashing (cache hit)")
 
         try handle.seekToEnd()
         try handle.write(contentsOf: Data([0x5B])) // size change invalidates the cache key
 
-        #expect(!ModelVerifier.isVerified(file), "size change forces a re-hash")
+        #expect(!ModelVerifier.isVerified(file, for: .lite), "size change forces a re-hash")
     }
 
     // MARK: - verify
@@ -63,7 +88,7 @@ struct ModelVerifierTests {
         let file = try temporary.write(Data([0xFF]), named: "mismatch-verify.gguf")
 
         let error = #expect(throws: ModelVerifier.VerificationError.self) {
-            try ModelVerifier.verify(file)
+            try ModelVerifier.verify(file, for: .lite)
         }
         let failure = try #require(error)
 
@@ -79,6 +104,6 @@ struct ModelVerifierTests {
     func verifyAcceptsMatch() throws {
         let file = try #require(try ModelTestFixtures.cloneRepoModel())
 
-        try ModelVerifier.verify(file)
+        try ModelVerifier.verify(file, for: .lite)
     }
 }
