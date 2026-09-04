@@ -29,29 +29,6 @@ struct ModelDownloaderTests {
         return URLSession.shared.downloadTask(with: url)
     }
 
-    /// Lets the unstructured `Task { @MainActor }` hops spawned by the
-    /// delegate callbacks run before state assertions.
-    private func settle() async {
-        for _ in 0 ..< 20 {
-            await Task.yield()
-        }
-    }
-
-    private func waitFor(
-        _ downloader: ModelDownloader,
-        timeout: TimeInterval,
-        _ predicate: (ModelDownloader.State) -> Bool
-    ) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if predicate(downloader.state) {
-                return true
-            }
-            await Task.yield()
-        }
-        return false
-    }
-
     /// A transport whose task factory is never called: `begin()` runs its
     /// file-side effects and stops before any network work.
     private func makeOfflineTransport(destination: URL) -> ModelDownloader {
@@ -71,7 +48,7 @@ struct ModelDownloaderTests {
 
         downloader.cancel()
         downloader.cancel()
-        await settle()
+        await flushObservations()
 
         #expect(downloader.state == .idle)
         #expect(emissions.values.isEmpty, "idle cancel must not republish .idle")
@@ -88,18 +65,20 @@ struct ModelDownloaderTests {
         let downloader = ModelDownloader()
 
         downloader.start()
-        let done = await waitFor(downloader, timeout: 30) { state in
-            if case .done = state {
-                return true
-            }
-            return false
-        }
-        #expect(done, "state should reach .done via the already-verified-model arm")
+        #expect(
+            await pollUntil(timeout: 30) {
+                if case .done = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "state should reach .done via the already-verified-model arm"
+        )
         #expect(downloader.state == .done(destination))
 
         let emissions = ObservedValuesRecorder(read: { downloader.state })
         downloader.start()
-        await settle()
+        await flushObservations()
 
         #expect(emissions.values.isEmpty, "start() once .done must be a no-op")
     }
@@ -113,14 +92,15 @@ struct ModelDownloaderTests {
         let downloader = makeOfflineTransport(destination: file)
 
         downloader.start()
-        let done = await waitFor(downloader, timeout: 30) { state in
-            if case .done = state {
-                return true
-            }
-            return false
-        }
-
-        #expect(done, "state should reach .done via the already-verified-model arm")
+        #expect(
+            await pollUntil(timeout: 30) {
+                if case .done = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "state should reach .done via the already-verified-model arm"
+        )
         #expect(downloader.state == .done(file))
     }
 
@@ -130,19 +110,21 @@ struct ModelDownloaderTests {
         let downloader = makeOfflineTransport(destination: file)
 
         downloader.start()
-        let downloading = await waitFor(downloader, timeout: 5) { state in
-            if case .downloading = state {
-                return true
-            }
-            return false
-        }
-        #expect(downloading, "state should reach .downloading after clearing the bad file")
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .downloading = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "state should reach .downloading after clearing the bad file"
+        )
         #expect(downloader.state == .downloading(progress: 0, bytes: 0, total: nil))
         #expect(!FileManager.default.fileExists(atPath: file.path), "an unverifiable destination is removed")
 
         let emissions = ObservedValuesRecorder(read: { downloader.state })
         downloader.start()
-        await settle()
+        await flushObservations()
 
         #expect(emissions.values.isEmpty, "a second start while already downloading is a no-op")
     }
@@ -167,26 +149,27 @@ struct ModelDownloaderTests {
         let emissions = ObservedValuesRecorder(read: { downloader.state })
 
         downloader.start()
-        _ = await waitFor(downloader, timeout: 5) { state in
-            if case .downloading = state {
-                return true
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .downloading = downloader.state {
+                    return true
+                }
+                return false
             }
-            return false
-        }
+        )
         downloader.cancel()
-        let idle = await waitFor(downloader, timeout: 5) { state in
-            if case .idle = state {
-                return true
-            }
-            return false
-        }
-        // The .idle emission is recorded via a main-actor hop; let it land
-        // before reading the recorder.
-        await settle()
-
-        #expect(idle, "cancel() publishes the idle state")
+        #expect(
+            await pollUntil(timeout: 5) {
+                if case .idle = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "cancel() publishes the idle state"
+        )
         #expect(downloader.state == .idle)
-        #expect(emissions.values.last == .idle)
+        // The .idle emission is recorded via a main-actor hop; gate on it.
+        #expect(await pollUntil { emissions.values.last == .idle })
     }
 
     // MARK: - didWriteData
@@ -200,9 +183,9 @@ struct ModelDownloaderTests {
             .shared, downloadTask: task,
             didWriteData: 250, totalBytesWritten: 250, totalBytesExpectedToWrite: 1000
         )
-        await settle()
-
-        #expect(downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000))
+        #expect(
+            await pollUntil { downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000) }
+        )
     }
 
     @Test("didWriteData publishes zero progress and nil total for an unknown total")
@@ -214,9 +197,9 @@ struct ModelDownloaderTests {
             .shared, downloadTask: task,
             didWriteData: 100, totalBytesWritten: 300, totalBytesExpectedToWrite: 0
         )
-        await settle()
-
-        #expect(downloader.state == .downloading(progress: 0, bytes: 300, total: nil))
+        #expect(
+            await pollUntil { downloader.state == .downloading(progress: 0, bytes: 300, total: nil) }
+        )
     }
 
     @Test("didWriteData throttles a sub-0.5% progress delta within the publish interval")
@@ -234,9 +217,9 @@ struct ModelDownloaderTests {
             .shared, downloadTask: task,
             didWriteData: 1, totalBytesWritten: 251, totalBytesExpectedToWrite: 1000
         )
-        await settle()
-
-        #expect(downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000))
+        #expect(
+            await pollUntil { downloader.state == .downloading(progress: 0.25, bytes: 250, total: 1000) }
+        )
     }
 
     // MARK: - didFinishDownloadingTo
@@ -250,14 +233,14 @@ struct ModelDownloaderTests {
         let destinationExisted = FileManager.default.fileExists(atPath: destination.path)
 
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
-        await settle()
-
         #expect(
-            downloader.state ==
-                .failed(
-                    "Verification failed: model file does not match Mimi's pinned checksum — "
-                        + "delete it and re-download, or replace it with an authentic copy"
-                )
+            await pollUntil {
+                downloader.state ==
+                    .failed(
+                        "Verification failed: model file does not match Mimi's pinned checksum — "
+                            + "delete it and re-download, or replace it with an authentic copy"
+                    )
+            }
         )
         #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file must be removed")
         #expect(
@@ -277,13 +260,15 @@ struct ModelDownloaderTests {
         let destination = ModelLocator.downloadedURL
 
         downloader.urlSession(.shared, downloadTask: task, didFinishDownloadingTo: tempFile)
-        let done = await waitFor(downloader, timeout: 30) { state in
-            if case .done = state {
-                return true
-            }
-            return false
-        }
-        #expect(done, "state should reach .done after verification and move")
+        #expect(
+            await pollUntil(timeout: 30) {
+                if case .done = downloader.state {
+                    return true
+                }
+                return false
+            },
+            "state should reach .done after verification and move"
+        )
         #expect(downloader.state == .done(destination))
         #expect(FileManager.default.fileExists(atPath: destination.path))
         #expect(!FileManager.default.fileExists(atPath: tempFile.path), "temp file is consumed by the move")
@@ -297,7 +282,7 @@ struct ModelDownloaderTests {
         let task = try makeDownloadTask()
 
         downloader.urlSession(.shared, task: task, didCompleteWithError: nil)
-        await settle()
+        await flushObservations()
 
         #expect(downloader.state == .idle, "success is handled by didFinishDownloadingTo")
     }
@@ -309,7 +294,7 @@ struct ModelDownloaderTests {
         let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
 
         downloader.urlSession(.shared, task: task, didCompleteWithError: error)
-        await settle()
+        await flushObservations()
 
         #expect(downloader.state == .idle, "cancel() already published the idle state")
     }
@@ -324,14 +309,14 @@ struct ModelDownloaderTests {
         )
 
         downloader.urlSession(.shared, task: task, didCompleteWithError: error)
-        await settle()
-
         #expect(
-            downloader.state ==
-                .failed(
-                    "Download failed: offline. Retry, or drop the GGUF into "
-                        + "\(ModelLocator.modelsDirectory.path) manually."
-                )
+            await pollUntil {
+                downloader.state ==
+                    .failed(
+                        "Download failed: offline. Retry, or drop the GGUF into "
+                            + "\(ModelLocator.modelsDirectory.path) manually."
+                    )
+            }
         )
     }
 }

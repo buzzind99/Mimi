@@ -38,10 +38,7 @@ struct TranslationQueueErrorCopyTests {
         queue.setHandlers(result: { _, _ in }, status: { _ in })
         queue.enqueue(Sentence(index: 0, startS: 0, endS: 1, lang: "ja", text: "テスト"))
         let worker = Task { await queue.run(with: engine) }
-        let deadline = Date().addingTimeInterval(resultTimeout)
-        while !isUnavailable(queue.status), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
+        await pollUntil(timeout: resultTimeout) { isUnavailable(queue.status) }
         worker.cancel()
 
         guard case let .unavailable(message) = queue.status else {

@@ -14,13 +14,6 @@ struct LivePartialStateTests {
         return (sut, observed)
     }
 
-    /// Lets the recorder's post-mutation read hops run before assertions.
-    private func settle() async {
-        for _ in 0 ..< 20 {
-            await Task.yield()
-        }
-    }
-
     // MARK: - Observed partial
 
     @Test("setting the partial fires the new value")
@@ -28,22 +21,20 @@ struct LivePartialStateTests {
         let (sut, observed) = makeSUT()
 
         sut.partial = "こんにちは"
-        await settle()
 
         #expect(sut.partial == "こんにちは")
-        #expect(observed.values == ["こんにちは"])
+        #expect(await pollUntil { observed.values == ["こんにちは"] }, "the recorder fires the new partial")
     }
 
     @Test("clearing the partial fires an empty string")
     func clearFiresEmptyString() async {
         let (sut, observed) = makeSUT()
         sut.partial = "こんにちは"
-        await settle()
+        #expect(await pollUntil { observed.values == ["こんにちは"] })
 
         sut.partial = ""
-        await settle()
+        #expect(await pollUntil { observed.values == ["こんにちは", ""] })
 
         #expect(sut.partial == "")
-        #expect(observed.values == ["こんにちは", ""])
     }
 }

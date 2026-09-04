@@ -16,13 +16,6 @@ struct LatencyStateTests {
         return (sut, observed)
     }
 
-    /// Lets the recorder's post-mutation read hops run before assertions.
-    private func settle() async {
-        for _ in 0 ..< 20 {
-            await Task.yield()
-        }
-    }
-
     // MARK: - update(_:)
 
     @Test("rounds a sub-tenth value to the tenth of a second")
@@ -30,10 +23,9 @@ struct LatencyStateTests {
         let (sut, observed) = makeSUT()
 
         sut.update(0.14)
-        await settle()
 
         #expect(sut.seconds == 0.1)
-        #expect(observed.values == [0.1])
+        #expect(await pollUntil { observed.values == [0.1] }, "the recorder fires the rounded value")
     }
 
     @Test("rounds a value above the boundary up to the next tenth")
@@ -68,11 +60,11 @@ struct LatencyStateTests {
         let (sut, observed) = makeSUT()
 
         sut.update(0.3)
-        await settle()
+        #expect(await pollUntil { observed.values == [0.3] })
         sut.update(0.31)
-        await settle()
+        await flushObservations()
 
-        #expect(observed.values == [0.3])
+        #expect(observed.values == [0.3], "an unchanged rounded value must not re-fire")
         #expect(sut.seconds == 0.3)
     }
 
@@ -82,13 +74,12 @@ struct LatencyStateTests {
     func resetFiresZero() async {
         let (sut, observed) = makeSUT()
         sut.update(0.42)
-        await settle()
+        #expect(await pollUntil { observed.values == [0.4] })
 
         sut.reset()
-        await settle()
+        #expect(await pollUntil { observed.values == [0.4, 0.0] })
 
         #expect(sut.seconds == 0.0)
-        #expect(observed.values == [0.4, 0.0])
     }
 
     @Test("reset is a no-op at zero and fires nothing")
@@ -96,7 +87,7 @@ struct LatencyStateTests {
         let (sut, observed) = makeSUT()
 
         sut.reset()
-        await settle()
+        await flushObservations()
 
         #expect(sut.seconds == 0.0)
         #expect(observed.values.isEmpty)

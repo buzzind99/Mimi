@@ -21,13 +21,6 @@ struct CrispASREngineLiveTests {
 
     // MARK: - Helpers
 
-    private func waitUntil(timeout: TimeInterval = 30, _ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-    }
-
     private func session(_ engine: CrispASREngine) -> OpaquePointer? {
         engine.lock.withLock { engine.session }
     }
@@ -142,7 +135,7 @@ struct CrispASREngineLiveTests {
             pushed += chunk
         }
 
-        await waitUntil { engine.processedSamples >= cap }
+        await pollUntilOffMain(timeout: 30) { engine.processedSamples >= cap }
 
         #expect(engine.processedSamples == cap, "the cap final must decode the whole utterance")
         let drained = engine.finish()

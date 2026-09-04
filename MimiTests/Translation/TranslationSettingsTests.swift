@@ -143,36 +143,27 @@ struct TranslationSettingsTests {
 
     /// Locks in that `hasKey`/`keyHints`/`testResults` mutations are observed
     /// by tracking readers: views must update on `setTestResult`/`removeKey`.
-    /// Each recorder pins the dictionary property the UI actually reads.
-    /// The recorder's read hops to the main actor post-mutation, so each
-    /// mutation is followed by a settle.
+    /// Each recorder pins the dictionary property the UI actually reads, and
+    /// each mutation's gate is the recorded value it must produce.
     @Test("mutating keys and test results is observed by tracking readers")
     func mutationsAreObserved() async throws {
         let (settings, _) = makeSUT()
         let hasKeyRecorder = ObservedValuesRecorder(read: { settings.hasKey[.google] ?? false })
         let keyHintsRecorder = ObservedValuesRecorder(read: { settings.keyHints[.google] })
         let testResultsRecorder = ObservedValuesRecorder(read: { settings.testResult(for: .google) })
-        func settle() async {
-            for _ in 0 ..< 20 {
-                await Task.yield()
-            }
-        }
 
         settings.setTestResult(.success, for: .google)
-        await settle()
-        #expect(testResultsRecorder.values == [.success])
+        #expect(await pollUntil { testResultsRecorder.values == [.success] })
         #expect(hasKeyRecorder.values.isEmpty)
         #expect(keyHintsRecorder.values.isEmpty)
 
         try settings.saveKey("sk-google-1234", for: .google)
-        await settle()
-        #expect(hasKeyRecorder.values == [true])
-        #expect(keyHintsRecorder.values == ["1234"])
+        #expect(await pollUntil { hasKeyRecorder.values == [true] })
+        #expect(await pollUntil { keyHintsRecorder.values == ["1234"] })
 
         settings.removeKey(for: .google)
-        await settle()
-        #expect(hasKeyRecorder.values == [true, false])
-        #expect(keyHintsRecorder.values == ["1234", nil])
+        #expect(await pollUntil { hasKeyRecorder.values == [true, false] })
+        #expect(await pollUntil { keyHintsRecorder.values == ["1234", nil] })
     }
 
     // MARK: - Selection persistence

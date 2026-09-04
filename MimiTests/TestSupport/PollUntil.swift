@@ -20,3 +20,22 @@ func pollUntil(
     }
     return true
 }
+
+/// Off-main-actor counterpart for suites that are not `@MainActor` (e.g. the
+/// CrispASR engine suites): same bounded-poll semantics, but the condition
+/// runs wherever the caller is isolated, so it may read lock-guarded state
+/// that must not hop to the main actor. The default timeout is larger than
+/// the main-actor gate's — off-main waits cover real dispatch-queue work,
+/// not near-instant observation hops.
+@discardableResult
+func pollUntilOffMain(
+    timeout: TimeInterval = 5,
+    _ condition: () -> Bool
+) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !condition() {
+        guard Date() < deadline else { return false }
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+    return true
+}

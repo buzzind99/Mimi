@@ -46,15 +46,6 @@ struct AppModelTranslationTests {
         )
     }
 
-    /// Bounded poll for a condition; gives up after `timeout` so a stalled
-    /// pipeline fails the assertions instead of hanging the suite.
-    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-    }
-
     // MARK: - Delivery
 
     @Test("a sentence flows through the queue into the transcript with its translation")
@@ -66,9 +57,12 @@ struct AppModelTranslationTests {
 
         model.sessionController.onSentence?(makeSentence(index: 0, text: sentenceText))
 
-        await waitUntil(timeout: resultTimeout) {
-            !(model.entries.first?.translations.isEmpty ?? true)
-        }
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                !(model.entries.first?.translations.isEmpty ?? true)
+            },
+            "the translation lands in the transcript"
+        )
         let translation = try #require(model.entries.first?.translations.first)
         #expect(translation.lang == "en")
         #expect(!translation.text.isEmpty)
@@ -88,9 +82,12 @@ struct AppModelTranslationTests {
         defer { worker.cancel() }
 
         model.sessionController.onSentence?(makeSentence(index: 0, text: sentenceText))
-        await waitUntil(timeout: resultTimeout) {
-            !(model.entries.first?.translations.isEmpty ?? true)
-        }
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                !(model.entries.first?.translations.isEmpty ?? true)
+            },
+            "the first translation lands before the repeat"
+        )
 
         model.sessionController.onSentence?(makeSentence(index: 1, text: sentenceText))
 

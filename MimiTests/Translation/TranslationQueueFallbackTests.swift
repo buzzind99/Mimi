@@ -9,7 +9,7 @@ import Testing
 /// without clobbering terminal or post-batch states.
 ///
 /// Swift Testing confirmations have no timeout, so every wait inside a
-/// confirmation scope is bounded by `waitUntil(timeout:)`.
+/// confirmation scope is bounded by `pollUntil(timeout:)`.
 @MainActor
 @Suite("TranslationQueue fallback ladder")
 struct TranslationQueueFallbackTests {
@@ -21,15 +21,6 @@ struct TranslationQueueFallbackTests {
 
     private func makeSentence(index: Int, text: String) -> Sentence {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
-    private func waitUntil(
-        timeout: TimeInterval = 5, _ condition: () -> Bool
-    ) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     /// Deterministic prefixing mock that records each batch (mirrors the
@@ -123,7 +114,7 @@ struct TranslationQueueFallbackTests {
         queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
 
         _ = Task { await queue.run(with: dead) }
-        await waitUntil {
+        await pollUntil(timeout: 5) {
             if case .unavailable = queue.status {
                 return true
             }
@@ -132,7 +123,7 @@ struct TranslationQueueFallbackTests {
         #expect(sink.results.isEmpty, "the dead run must not deliver")
 
         let replacementWorker = Task { await queue.run(with: replacement) }
-        await waitUntil { sink.results.count == 2 }
+        await pollUntil(timeout: 5) { sink.results.count == 2 }
 
         #expect(sink.results == [0, 1], "the surviving pending must replay in order")
         #expect(queue.status == .ready)
@@ -170,7 +161,7 @@ struct TranslationQueueFallbackTests {
             return "unreachable"
         }
         let worker = Task { await queue.run(with: sleeper) }
-        await waitUntil { queue.status == .translating }
+        await pollUntil(timeout: 5) { queue.status == .translating }
 
         worker.cancel()
         await worker.value
@@ -183,7 +174,7 @@ struct TranslationQueueFallbackTests {
         // The replay: a fresh run translates the surviving batch.
         let replacement = EchoEngine()
         let replacementWorker = Task { await queue.run(with: replacement) }
-        await waitUntil { sink.results.count == 1 }
+        await pollUntil(timeout: 5) { sink.results.count == 1 }
         #expect(sink.results == [0])
 
         replacementWorker.cancel()
@@ -208,7 +199,7 @@ struct TranslationQueueFallbackTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         let worker = Task { await queue.run(with: engine) }
-        await waitUntil { sink.results.count == 1 }
+        await pollUntil(timeout: 5) { sink.results.count == 1 }
         worker.cancel()
 
         #expect(sink.results == [0])
@@ -225,7 +216,7 @@ struct TranslationQueueFallbackTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         let worker = Task { await queue.run(with: engine) }
-        await waitUntil {
+        await pollUntil(timeout: 5) {
             if case .unavailable = queue.status {
                 return true
             }
@@ -256,7 +247,7 @@ struct TranslationQueueFallbackTests {
 
         queue.enqueue(makeSentence(index: 0, text: sentenceText))
         let worker = Task { await queue.run(with: engine) }
-        await waitUntil { sink.results.count == 1 }
+        await pollUntil(timeout: 5) { sink.results.count == 1 }
         #expect(queue.status == .ready)
         worker.cancel()
 

@@ -194,18 +194,16 @@ struct AppModelSessionTests {
         sut.model.start()
 
         #expect(sut.model.phase == .starting)
-        await pollUntil { sut.model.phase == .running }
-        #expect(sut.model.phase == .running)
+        #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
         #expect(sut.model.translationConfig != nil)
         #expect(sut.model.errorMessage == nil)
         #expect(sut.controller.sessionMetadata != nil)
-        await pollUntil { sut.model.live.partial == "ライブ" }
+        #expect(await pollUntil { sut.model.live.partial == "ライブ" }, "the scripted partial surfaces")
         #expect(sut.model.live.partial == "ライブ")
 
         sut.model.stop()
         #expect(sut.model.phase == .stopping)
-        await pollUntil { sut.model.phase == .idle }
-        #expect(sut.model.phase == .idle)
+        #expect(await pollUntil { sut.model.phase == .idle }, "stop winds down to idle")
         #expect(sut.model.live.partial == "")
         #expect(sut.model.translationStatus == .idle)
         #expect(
@@ -226,8 +224,7 @@ struct AppModelSessionTests {
 
         sut.model.start()
 
-        await pollUntil { sut.model.phase == .needsModel }
-        #expect(sut.model.phase == .needsModel)
+        #expect(await pollUntil { sut.model.phase == .needsModel }, "start lands in needsModel")
         #expect(sut.model.translationConfig == nil)
         #expect(sut.controller.sessionMetadata == nil)
         #expect(!sut.log.names.contains("capture.start"))
@@ -239,8 +236,7 @@ struct AppModelSessionTests {
 
         sut.model.start()
 
-        await pollUntil { sut.model.phase == .failed("boom") }
-        #expect(sut.model.phase == .failed("boom"))
+        #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the capture failure fails the start")
         #expect(sut.log.names.contains("capture.start"))
         #expect(sut.controller.sessionMetadata == nil)
         #expect(sut.model.translationConfig == nil)
@@ -254,7 +250,7 @@ struct AppModelSessionTests {
         let sut = await makeSUT(startGate: gate)
 
         sut.model.start()
-        await pollUntil { sut.log.names.contains("capture.start") }
+        #expect(await pollUntil { sut.log.names.contains("capture.start") }, "capture starts before the stop")
         #expect(sut.model.phase == .starting)
 
         sut.model.stop()
@@ -263,9 +259,8 @@ struct AppModelSessionTests {
         gate.open()
         // Teardown runs through a detached engine finish and the queue drain
         // (5 s bound) — give it the same headroom.
-        await pollUntil(timeout: 5) { sut.model.phase == .idle }
+        #expect(await pollUntil(timeout: 5) { sut.model.phase == .idle }, "the stop winds down to idle")
 
-        #expect(sut.model.phase == .idle)
         #expect(sut.model.live.partial == "")
         // Teardown must run (and beat the resumed begin, whose tail is a
         // no-op against a stopped session) in both interleavings.

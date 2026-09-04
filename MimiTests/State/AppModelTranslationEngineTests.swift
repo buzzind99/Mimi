@@ -39,21 +39,12 @@ struct AppModelTranslationEngineTests {
         }
     }
 
-    private func waitUntil(
-        timeout: TimeInterval = 5, _ condition: () -> Bool
-    ) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-    }
-
     /// Tears the model's translation worker down (stop requires a session
     /// phase; the queue worker is what actually needs cancelling).
     private func stopTranslation(_ model: AppModel) async {
         model.phase = .running
         model.stop()
-        await waitUntil { model.phase == .idle }
+        #expect(await pollUntil(timeout: 5) { model.phase == .idle }, "stop() winds the phase down to idle")
     }
 
     // MARK: - Engine selection
@@ -67,7 +58,7 @@ struct AppModelTranslationEngineTests {
         )
 
         model.retryTranslation()
-        await waitUntil { model.translationStatus == .ready }
+        #expect(await pollUntil { model.translationStatus == .ready }, "retryTranslation publishes .ready")
 
         #expect(model.activeTranslationEngine == .external)
         #expect(model.translationConfig == nil)
@@ -104,7 +95,10 @@ struct AppModelTranslationEngineTests {
             )
 
             model.retryTranslation()
-            await waitUntil { model.translationStatus == .ready }
+            #expect(
+                await pollUntil { model.translationStatus == .ready },
+                "retryTranslation publishes .ready (\(provider))"
+            )
 
             #expect(model.activeTranslationEngine == .external, "\(provider)")
             #expect(model.translationConfig == nil, "\(provider)")
@@ -127,7 +121,7 @@ struct AppModelTranslationEngineTests {
         #expect(model.activeTranslationEngine == .external)
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
 
-        await waitUntil { model.translationFallbackActive }
+        #expect(await pollUntil { model.translationFallbackActive }, "the exhausted engine latches the Apple fallback")
 
         #expect(model.translationFallbackActive)
         #expect(model.activeTranslationEngine == .apple)
@@ -151,7 +145,7 @@ struct AppModelTranslationEngineTests {
         // First failure: latches onto Apple.
         model.retryTranslation()
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
-        await waitUntil { model.translationFallbackActive }
+        #expect(await pollUntil { model.translationFallbackActive }, "the first failure latches the Apple fallback")
 
         // Manual retry re-attempts the external engine (key may be fixed).
         model.retryTranslation()
@@ -160,12 +154,15 @@ struct AppModelTranslationEngineTests {
         // A second failure must NOT re-enter the fallback: the latch is
         // one-way, so the dead external run stays surfaced for the button.
         model.translationQueue.enqueue(makeSentence(index: 1, text: "こんにちは"))
-        await waitUntil(timeout: resultTimeout) {
-            if case .unavailable = model.translationStatus {
-                return true
-            }
-            return false
-        }
+        #expect(
+            await pollUntil(timeout: resultTimeout) {
+                if case .unavailable = model.translationStatus {
+                    return true
+                }
+                return false
+            },
+            "the second failure surfaces .unavailable"
+        )
 
         #expect(model.translationFallbackActive, "the latch stays engaged")
         #expect(model.activeTranslationEngine == .external, "no second auto-fallback")
@@ -222,7 +219,7 @@ struct AppModelTranslationEngineTests {
         model.retryTranslation()
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
 
-        await waitUntil { !recorder.texts.isEmpty }
+        #expect(await pollUntil { !recorder.texts.isEmpty }, "the retried attempt delivers")
 
         #expect(recorder.texts == ["hello"])
         #expect(

@@ -79,8 +79,7 @@ struct AppModelTests {
         model.stop()
 
         #expect(model.phase == .stopping)
-        await pollUntil { model.phase == .idle }
-        #expect(model.phase == .idle)
+        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
     }
 
     @Test("stop from running winds down to idle and resets translation status")
@@ -91,8 +90,7 @@ struct AppModelTests {
         model.stop()
 
         #expect(model.phase == .stopping)
-        await pollUntil { model.phase == .idle }
-        #expect(model.phase == .idle)
+        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
         #expect(model.translationStatus == .idle)
     }
 
@@ -104,8 +102,7 @@ struct AppModelTests {
         model.stop()
 
         #expect(model.phase == .stopping)
-        await pollUntil { model.phase == .idle }
-        #expect(model.phase == .idle)
+        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
     }
 
     // MARK: - retryTranslation()
@@ -444,9 +441,7 @@ struct AppModelTests {
         model.phase = .running
 
         NotificationCenter.default.post(name: Self.willTerminateNotification, object: nil)
-        await pollUntil { model.phase == .idle }
-
-        #expect(model.phase == .idle)
+        #expect(await pollUntil { model.phase == .idle }, "the terminate notification stops the session")
     }
 
     private static let willTerminateNotification = NSNotification.Name("MimiAppWillTerminate")

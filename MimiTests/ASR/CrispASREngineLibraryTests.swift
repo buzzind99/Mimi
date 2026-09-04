@@ -13,7 +13,7 @@ import Testing
 /// Runs on every machine — no dlopen, no model, no Metal: the fake bypasses
 /// the library seam and the vad/decode queues are per-engine instance state,
 /// so the suite is NOT `.serialized`. Timelines converge through bounded
-/// `waitUntil` polls on the fake's recorded calls and the engine's
+/// `pollUntilOffMain` polls on the fake's recorded calls and the engine's
 /// lock-guarded state, never bare sleeps.
 @Suite("CrispASREngine (fake library)")
 struct CrispASREngineLibraryTests {
@@ -45,13 +45,6 @@ struct CrispASREngineLibraryTests {
         return engine
     }
 
-    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-    }
-
     /// Reads engine state under its lock — jobs mutate it on their queues.
     private func state<T>(_ engine: CrispASREngine, _ read: () -> T) -> T {
         engine.lock.withLock { read() }
@@ -61,7 +54,7 @@ struct CrispASREngineLibraryTests {
     /// on timeout.
     private func pollFinal(_ engine: CrispASREngine) async -> ASREvent? {
         var final: ASREvent?
-        await waitUntil {
+        await pollUntilOffMain {
             guard let event = engine.poll() else { return false }
             if case .final = event {
                 final = event
@@ -93,7 +86,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await waitUntil { library.transcribeCalls.count == 1 }
+        await pollUntilOffMain { library.transcribeCalls.count == 1 }
         engine.push([Float](repeating: 0, count: 20000)) // 1.25 s clears the 1 s confirmed-silence endpoint
 
         let final = await pollFinal(engine)
@@ -113,11 +106,11 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await waitUntil { library.transcribeCalls.count == 1 }
+        await pollUntilOffMain { library.transcribeCalls.count == 1 }
         engine.push([Float](repeating: 0, count: 20000)) // 1.25 s clears the 1 s confirmed-silence endpoint
 
-        await waitUntil { library.transcribeCalls.count == 2 }
-        await waitUntil { self.state(engine) { engine.utterance.isEmpty } }
+        await pollUntilOffMain { library.transcribeCalls.count == 2 }
+        await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } }
         #expect(engine.poll() == nil, "a `<sil>`-only decode must not become a final")
     }
 
@@ -129,7 +122,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await waitUntil { library.transcribeCalls.count == 1 }
+        await pollUntilOffMain { library.transcribeCalls.count == 1 }
         engine.push([Float](repeating: 0, count: 20000))
 
         let final = await pollFinal(engine)
@@ -143,10 +136,10 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push([Float](repeating: 0.1, count: 48000)) // 3 s, past the discard floor
-        await waitUntil { self.state(engine) { engine.utterance.isEmpty } } // discard observed
+        await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } } // discard observed
 
         engine.push(loudSecond)
-        await waitUntil { library.vadCalls.count == 2 }
+        await pollUntilOffMain { library.vadCalls.count == 2 }
 
         #expect(
             library.vadCalls[1].count == 16000,
@@ -169,11 +162,11 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push([Float](repeating: 0.1, count: 2 * CrispASREngine.sampleRate))
-        await waitUntil { library.transcribeCalls.count == 1 }
+        await pollUntilOffMain { library.transcribeCalls.count == 1 }
         engine.push([Float](repeating: 0, count: 20000))
-        await waitUntil { library.transcribeCalls.count == 2 }
+        await pollUntilOffMain { library.transcribeCalls.count == 2 }
         engine.push(loudSecond) // speech resumes on the trimmed window
-        await waitUntil { library.transcribeCalls.count == 3 }
+        await pollUntilOffMain { library.transcribeCalls.count == 3 }
 
         #expect(library.transcribeCalls.map(\.pcmCount) == [
             32000, // first partial: the 2 s window at the conv floor
@@ -195,7 +188,7 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(loudSecond) // VAD #1 → immediate degrade
-        await waitUntil { !errors.all.isEmpty }
+        await pollUntilOffMain { !errors.all.isEmpty }
         #expect(errors.all == ["VAD failed (-3) — falling back to cap-only finalization"])
         #expect(state(engine) { engine.vadEnabled } == false)
 
@@ -215,7 +208,7 @@ struct CrispASREngineLibraryTests {
 
         for failure in 1 ... 3 {
             engine.push(loudSecond)
-            await waitUntil { self.state(engine) { engine.consecutiveVADFailures } == failure }
+            await pollUntilOffMain { self.state(engine) { engine.consecutiveVADFailures } == failure }
         }
 
         #expect(state(engine) { engine.vadEnabled } == false)
@@ -232,10 +225,10 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(silentSecond) // VAD #1 → degrade; utterance stays silent
-        await waitUntil { !errors.all.isEmpty }
+        await pollUntilOffMain { !errors.all.isEmpty }
 
         engine.push([Float](repeating: 0, count: 12 * CrispASREngine.sampleRate)) // silent cap
-        await waitUntil { self.state(engine) { engine.utterance.isEmpty } }
+        await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } }
 
         #expect(library.transcribeCalls.isEmpty, "the RMS backstop must block the cap decode")
         #expect(engine.poll() == nil)
@@ -254,13 +247,13 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(silentSecond) // VAD #1 → degrade (no decode: silent, short)
-        await waitUntil { !errors.all.isEmpty }
+        await pollUntilOffMain { !errors.all.isEmpty }
 
         let cap = CrispASREngine.utteranceCapSamples
         for push in 0 ..< 32 {
             engine.push([Float](repeating: 0.1, count: cap))
             let expected = library.transcribeCalls.count + 1
-            await waitUntil { library.transcribeCalls.count >= expected }
+            await pollUntilOffMain { library.transcribeCalls.count >= expected }
             #expect(library.transcribeCalls.count == push + 1)
         }
 
@@ -286,7 +279,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await waitUntil { library.transcribeCalls.count == 1 }
+        await pollUntilOffMain { library.transcribeCalls.count == 1 }
 
         #expect(library.transcribeCalls[0].pcmCount == 2 * CrispASREngine.sampleRate)
         #expect(Array(library.transcribeCalls[0].pcm.prefix(16000)) == loudSecond)
@@ -296,11 +289,11 @@ struct CrispASREngineLibraryTests {
         )
 
         engine.push([Float](repeating: 0.1, count: 8000)) // 0.5 s more speech
-        await waitUntil { self.state(engine) { engine.vadAnalyzedThroughSample } == 24000 }
+        await pollUntilOffMain { self.state(engine) { engine.vadAnalyzedThroughSample } == 24000 }
         #expect(library.transcribeCalls.count == 1, "0.5 s of confirmed new speech is below the cadence")
 
         engine.push([Float](repeating: 0.1, count: 8000)) // crosses 1 s since the last decode
-        await waitUntil { library.transcribeCalls.count == 2 }
+        await pollUntilOffMain { library.transcribeCalls.count == 2 }
         #expect(library.transcribeCalls[1].pcmCount == 32000, "a 2 s window needs no padding")
     }
 
@@ -314,19 +307,19 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond) // VAD #1 dispatched, held inside the fake
-        await waitUntil { library.vadCalls.count == 1 && library.vadEntered }
+        await pollUntilOffMain { library.vadCalls.count == 1 && library.vadEntered }
 
         engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // cap final decode
         // The fake blocks before recording the call, so only entry is
         // observable while held — waiting on the count here would always
         // burn the full timeout.
-        await waitUntil { library.transcribeEntered }
+        await pollUntilOffMain { library.transcribeEntered }
 
         library.transcribeHoldSemaphore?.signal() // the decode closes generation 1
-        await waitUntil { self.state(engine) { engine.utteranceGeneration } == 2 }
+        await pollUntilOffMain { self.state(engine) { engine.utteranceGeneration } == 2 }
 
         library.vadHoldSemaphore?.signal() // VAD #1 resumes into a stale generation
-        await waitUntil { library.vadFreeCount == 1 }
+        await pollUntilOffMain { library.vadFreeCount == 1 }
 
         #expect(state(engine) { engine.vadAnalyzedThroughSample } == 0)
         #expect(state(engine) { engine.utteranceHasSpeech } == false)
@@ -345,7 +338,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await waitUntil { library.transcribeCalls.count == 1 } // speech confirmed
+        await pollUntilOffMain { library.transcribeCalls.count == 1 } // speech confirmed
 
         let drained = engine.finish()
 
@@ -367,7 +360,7 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(silentSecond) // VAD #1 → degrade; utterance silent and short
-        await waitUntil { !errors.all.isEmpty }
+        await pollUntilOffMain { !errors.all.isEmpty }
 
         let drained = engine.finish()
 

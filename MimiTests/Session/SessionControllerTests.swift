@@ -117,11 +117,10 @@ struct SessionControllerTests {
 
         sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
         sut.controller.warmUpIfNeeded(modelURL: warmUpModelURL)
-        await pollUntil {
-            sut.log.names == ["factory allowMock=false", "engine.prepare"]
-        }
+        #expect(
+            await pollUntil { sut.log.names == ["factory allowMock=false", "engine.prepare"] }
+        )
 
-        #expect(sut.log.names == ["factory allowMock=false", "engine.prepare"])
         #expect(sut.live.partial == "")
         #expect(sut.controller.sessionMetadata == nil)
     }
@@ -339,7 +338,7 @@ struct SessionControllerTests {
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.capture.onIOError?(.streamSetupFailed(captureFailureDetail))
-        await pollUntil { !messages.isEmpty }
+        #expect(await pollUntil { !messages.isEmpty }, "the capture error surfaces")
 
         #expect(messages.first == CaptureError.streamSetupFailed(captureFailureDetail).errorDescription)
     }
@@ -352,7 +351,7 @@ struct SessionControllerTests {
         _ = try await sut.controller.begin(modelURL: warmUpModelURL)
 
         sut.engine.onEngineError?(engineFailureMessage)
-        await pollUntil { !messages.isEmpty }
+        #expect(await pollUntil { !messages.isEmpty }, "the engine error surfaces")
 
         #expect(messages == [engineFailureMessage])
     }

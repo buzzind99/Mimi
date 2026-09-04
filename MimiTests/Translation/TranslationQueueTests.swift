@@ -9,7 +9,7 @@ import Testing
 /// pack through `AppleSessionEngine` to keep the adapter honest.
 ///
 /// Swift Testing confirmations have no timeout, so every wait inside a
-/// confirmation scope is bounded by `waitUntil(timeout:)` — on timeout the
+/// confirmation scope is bounded by `pollUntil(timeout:)` — on timeout the
 /// scope exits un-confirmed and the confirmation records the issue instead
 /// of hanging.
 @MainActor
@@ -32,16 +32,6 @@ struct TranslationQueueTests {
 
     private func makeSentence(index: Int, text: String) -> Sentence {
         Sentence(index: index, startS: 0, endS: 1, lang: "ja", text: text)
-    }
-
-    /// Bounded poll for a condition. Confirmation scopes rely on this for
-    /// termination: it gives up after `timeout`, leaving the confirmation
-    /// un-fulfilled so the scope exit records the issue.
-    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
     }
 
     /// Deterministic mock: prefixes every input, recording each batch. Lock
@@ -125,7 +115,7 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
         }
 
         let delivery = try #require(sink.results.first)
@@ -161,14 +151,14 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
             // Wait for the worker to publish .ready again (batch done), so the
             // second enqueue lands on an idle worker and must wake it.
-            await waitUntil(timeout: resultTimeout) { queue.status == .ready }
+            await pollUntil(timeout: resultTimeout) { queue.status == .ready }
             #expect(queue.status == .ready)
 
             queue.enqueue(makeSentence(index: 1, text: otherSentenceText))
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 2 }
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 2 }
         }
 
         let second = try #require(sink.results.last)
@@ -200,7 +190,7 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 1 }
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 1 }
             let seed = try #require(sink.results.first).translation
 
             queue.enqueue(makeSentence(index: 5, text: sentenceText))
@@ -260,7 +250,7 @@ struct TranslationQueueTests {
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
             queue.enqueue(makeSentence(index: 1, text: "   "))
             queue.enqueue(makeSentence(index: 2, text: otherSentenceText))
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 2 }
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 2 }
         }
 
         #expect(sink.results.map { $0.index } == [0, 2])
@@ -290,7 +280,7 @@ struct TranslationQueueTests {
             for index in 0 ..< 3 {
                 queue.enqueue(makeSentence(index: index, text: "\(sentenceText)\(index)"))
             }
-            await waitUntil(timeout: resultTimeout) { sink.results.count == 3 }
+            await pollUntil(timeout: resultTimeout) { sink.results.count == 3 }
         }
 
         #expect(engine.recordedBatches.map { $0.count } == [2, 1])
@@ -351,7 +341,7 @@ struct TranslationQueueTests {
             defer { worker.cancel() }
 
             queue.enqueue(makeSentence(index: 0, text: sentenceText))
-            await waitUntil(timeout: resultTimeout) {
+            await pollUntil(timeout: resultTimeout) {
                 if case .unavailable = queue.status {
                     return true
                 }
