@@ -228,18 +228,24 @@ extension CrispASREngine {
         utteranceHasSpeech = true
     }
 
+    /// Caller holds `lock`. Resets everything endpointing tracks for the
+    /// current utterance; callers keep the utterance/window-specific bits.
+    func resetEndpointStateLocked() {
+        utteranceGeneration += 1
+        utteranceHasSpeech = false
+        lastPartialSpeechEndSample = 0
+        vadLastSpeechEndSample = nil
+        vadAnalyzedThroughSample = 0
+        vadFirstSpeechStartSample = nil
+    }
+
     /// Caller holds `lock`. Drops the current utterance (speechless audio)
     /// and shrinks the window so stale audio can't leak into later decodes.
     func discardUtteranceLocked() {
         utterance = []
         utteranceStartSample = 0
-        utteranceGeneration += 1
-        utteranceHasSpeech = false
+        resetEndpointStateLocked()
         utteranceHasLoudAudio = false
-        lastPartialSpeechEndSample = 0
-        vadLastSpeechEndSample = nil
-        vadAnalyzedThroughSample = 0
-        vadFirstSpeechStartSample = nil
         trimWindowLocked(throughSample: totalSamples)
     }
 
@@ -256,18 +262,47 @@ extension CrispASREngine {
         let n = consecutiveVADFailures
         lock.unlock()
 
-        if shouldDisable && !alreadyDisabled {
-            let message = "VAD failed (\(code)) — falling back to cap-only finalization"
-            #if DEBUG
-                print("[asr] \(message)")
-            #endif
-            onEngineError?(message)
-        } else if n == 1 || n % 32 == 0 {
-            let message = "VAD pass failed (×\(n))"
-            #if DEBUG
-                print("[asr] \(message)")
-            #endif
+        if shouldDisable, !alreadyDisabled {
+            reportEngineError(
+                "VAD failed (\(code)) — falling back to cap-only finalization",
+                notify: true
+            )
+        } else if Self.shouldReportFailure(n) {
+            reportEngineError("VAD pass failed (×\(n))", notify: false)
         }
+    }
+
+    /// One `transcribeText` pass over `pcm`, zero-padded first when shorter
+    /// than the encoder's conv-kernel floor (`minDecodeSamples` — backends
+    /// with convolutional encoders reject audio shorter than the first
+    /// kernel, ~2 s at 16 kHz). Nil on library failure.
+    func decode(pcm: [Float], session: OpaquePointer?) -> String? {
+        var pcm = pcm
+        if pcm.count < Self.minDecodeSamples {
+            pcm.append(contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - pcm.count))
+        }
+        return pcm.withUnsafeBufferPointer { buf in
+            lib.transcribeText(
+                session: session, pcm: Span(_unsafeElements: buf),
+                languageCode: languageCode
+            )
+        }
+    }
+
+    /// Logs a decode/VAD failure message; `notify` forwards it to the
+    /// `onEngineError` consumer.
+    private func reportEngineError(_ message: String, notify: Bool) {
+        #if DEBUG
+            print("[asr] \(message)")
+        #endif
+        if notify {
+            onEngineError?(message)
+        }
+    }
+
+    /// Report the first failure, then every 32nd consecutive one.
+    static func shouldReportFailure(_ n: Int) -> Bool {
+        n == 1 || n % 32 == 0
     }
 
     /// Runs on `decodeQueue`. One decode at a time (guarded by `decodeInFlight`
@@ -293,19 +328,7 @@ extension CrispASREngine {
         lock.unlock()
         guard let sessionHandle else { return }
 
-        // Backends with convolutional encoders reject audio shorter than the
-        // first conv kernel (~2 s at 16 kHz); zero-pad short spans.
-        var pcm = pcm
-        if pcm.count < Self.minDecodeSamples {
-            pcm.append(contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - pcm.count))
-        }
-
-        guard let raw = pcm.withUnsafeBufferPointer({ buf in
-            lib.transcribeText(
-                session: sessionHandle, pcm: Span(_unsafeElements: buf),
-                languageCode: languageCode
-            )
-        }) else {
+        guard let raw = decode(pcm: pcm, session: sessionHandle) else {
             reportDecodeFailure()
             if isFinal {
                 // A failed final must still close out the utterance: leaving
@@ -361,12 +384,7 @@ extension CrispASREngine {
             utterance = []
             utteranceStartSample = 0
         }
-        utteranceGeneration += 1
-        utteranceHasSpeech = false
-        lastPartialSpeechEndSample = 0
-        vadLastSpeechEndSample = nil
-        vadAnalyzedThroughSample = 0
-        vadFirstSpeechStartSample = nil
+        resetEndpointStateLocked()
         trimWindowLocked(throughSample: end)
     }
 
@@ -387,11 +405,7 @@ extension CrispASREngine {
         consecutiveDecodeFailures += 1
         let n = consecutiveDecodeFailures
         lock.unlock()
-        guard n == 1 || n % 32 == 0 else { return }
-        let message = "ASR decode failed (×\(n))"
-        #if DEBUG
-            print("[asr] \(message)")
-        #endif
-        onEngineError?(message)
+        guard Self.shouldReportFailure(n) else { return }
+        reportEngineError("ASR decode failed (×\(n))", notify: true)
     }
 }

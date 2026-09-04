@@ -49,21 +49,10 @@ extension CrispASREngine {
         lock.unlock()
 
         if hadSpeech, let sessionHandle {
-            var padded = pcm
-            if padded.count < Self.minDecodeSamples {
-                padded.append(
-                    contentsOf: [Float](repeating: 0, count: Self.minDecodeSamples - padded.count)
-                )
-            }
-            if let raw = padded.withUnsafeBufferPointer({ buf in
-                lib.transcribeText(
-                    session: sessionHandle, pcm: Span(_unsafeElements: buf),
-                    languageCode: languageCode
-                )
-            }) {
+            if let raw = decode(pcm: pcm, session: sessionHandle) {
                 let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 #if DEBUG
-                    print("[asr] flush decode: \(padded.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
+                    print("[asr] flush decode: \(pcm.count) samples -> \(text.isEmpty ? "no text" : "\(text.count) chars")")
                 #endif
                 if !text.isEmpty {
                     inbox.append(.final(
