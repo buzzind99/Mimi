@@ -94,6 +94,23 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == [["抹茶", "matcha", "まっちゃ"]])
     }
 
+    /// Single dictionary entries carrying an etymological particle は still
+    /// read it as the particle "wa" (segmented で+は contexts hit the
+    /// bare-particle override instead).
+    @Test("reads the fused particle in single-token conjunctions as wa",
+          arguments: [
+              ("それでは", "soredewa"),
+              ("では", "dewa"),
+              ("または", "matawa")
+          ])
+    func fusedConjunctionParticles(input: String, expected: String) throws {
+        let annotator = makeAnnotator([token(input, start: 0, reading: input)])
+
+        let segments = try #require(annotator.segments(for: input))
+
+        #expect(describe(segments) == [[input, expected, nil]])
+    }
+
     @Test("self-transcribes entry-less non-kana tokens unannotated",
           arguments: [("𠮷", "𠮷"), ("。", "。"), ("H", "H"), ("亜かな", "亜かな")])
     func readingLessSelfTranscribed(surface: String, romaji: String) throws {

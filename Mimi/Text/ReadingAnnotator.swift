@@ -461,9 +461,13 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// Established spellings the kana conversion can't produce: the
     /// greetings' fused particle (は → "ha" mechanically, "wa" by
     /// convention; keyed by reading so the fused kanji forms 今日は and
-    /// 今晩は inherit it) and 抹茶's maccha → matcha.
+    /// 今晩は inherit it) and 抹茶's maccha → matcha. The conjunctions
+    /// では/それでは/または are single dictionary entries carrying their
+    /// etymological は, which is still spoken as the particle "wa" —
+    /// segmented で+は contexts reach the bare-particle override instead.
     private static let lexicalRomaji = [
-        "こんにちは": "konnichiwa", "こんばんは": "konbanwa", "まっちゃ": "matcha"
+        "こんにちは": "konnichiwa", "こんばんは": "konbanwa", "まっちゃ": "matcha",
+        "それでは": "soredewa", "では": "dewa", "または": "matawa"
     ]
 
     // MARK: - Text helpers

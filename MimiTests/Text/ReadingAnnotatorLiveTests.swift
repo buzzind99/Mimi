@@ -75,6 +75,9 @@ struct ReadingAnnotatorLiveTests {
         ("抹茶", "matcha", "まっちゃ"),
         ("こんにちは", "konnichiwa", nil),
         ("こんばんは", "konbanwa", nil),
+        ("それでは", "soredewa", nil),
+        ("では", "dewa", nil),
+        ("または", "matawa", nil),
         ("かんな", "kanna", nil),
         ("めっちゃ", "meccha", nil),
         ("ヴァイオリン", "vaiorin", nil)
@@ -111,6 +114,13 @@ struct ReadingAnnotatorLiveTests {
             ["動画", "douga", "どうが"], ["を", "o", nil],
             ["見", "mi", "み"], ["ます", "masu", nil], ["。", "。", nil]
         ])
+    }
+
+    @Test("reads the segmented で+は context through the particle override (ならでは)")
+    func segmentedDewaContext() throws {
+        let segments = try segments("ならでは")
+
+        #expect(describe(segments) == [["なら", "nara", nil], ["では", "dewa", nil]])
     }
 
     // MARK: counters
@@ -419,7 +429,7 @@ struct ReadingAnnotatorLiveTests {
         "高かった", "田中さん", "A B", "𠮷野家", "そう言っ", "は", "を", "私達", "その方がいい",
         "こんにちは", "123", "お、母さん", "母、さん", "私の母です", "六等", "六歳", "七回",
         "2年", "八年", "十四日", "おっ、いいね", "言ってあげる", "こっちの方", "㐂", "𠮷", "Hello",
-        "一人", "二人", "四人", "一人前"
+        "一人", "二人", "四人", "一人前", "それでは", "ならでは"
     ])
     func concatenateBack(text: String) throws {
         let segments = try segments(text)
