@@ -20,7 +20,7 @@ struct SidebarView: View {
 
             sessionButton
 
-            sectionLabel("READING AIDS")
+            sectionLabel("ANNOTATION")
             readingPicker
                 .padding(.bottom, 22)
 
