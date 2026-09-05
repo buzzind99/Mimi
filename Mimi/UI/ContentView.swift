@@ -16,11 +16,15 @@ struct TranslationSessionHost: View {
     }
 }
 
-/// Root view: onboarding until the model resolves, then the main panes.
+/// Root view: onboarding until the model resolves, then the Sakura Studio
+/// shell — sidebar | 1pt divider | transcript pane with the live strip and
+/// the toast stack overlaid top-trailing.
 struct ContentView: View {
     var model: AppModel
     var live: LivePartialState
     var latency: LatencyState
+
+    @AppearanceSetting private var appearance
 
     var body: some View {
         Group {
@@ -30,6 +34,7 @@ struct ContentView: View {
                 mainContent
             }
         }
+        .preferredColorScheme(appearance.resolvedColorScheme)
         .background(TranslationSessionHost(model: model))
         .frame(minWidth: 860, minHeight: 600)
         .onAppear {
@@ -38,15 +43,19 @@ struct ContentView: View {
     }
 
     private var mainContent: some View {
-        VStack(spacing: 0) {
-            MainHeaderView(model: model)
-            Divider()
-            TranscriptView(model: model)
-            Divider()
-            LiveSubtitleView(live: live)
+        HStack(spacing: 0) {
+            SidebarView(model: model)
+            Rectangle()
+                .fill(Theme.divider)
+                .frame(width: 1)
+            VStack(spacing: 0) {
+                TranscriptView(model: model)
+                LiveStripView(live: live)
+            }
+            .overlay(alignment: .topTrailing) {
+                ToastStackView(center: model.toasts)
+            }
         }
-        .safeAreaInset(edge: .bottom) {
-            StatusBarView(model: model, latency: latency)
-        }
+        .background(Theme.window)
     }
 }
