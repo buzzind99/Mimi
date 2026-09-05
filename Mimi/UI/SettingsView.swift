@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     var model: AppModel
     @Bindable private var settings: TranslationSettings
+    @AppearanceSetting private var appearance
     @State private var keyDraft = ""
     @State private var keySaveFailed = false
     @State private var isTestingConnection = false
@@ -19,15 +20,29 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            appearanceSection
             translationSection
             modelSection
             sessionSection
         }
         .formStyle(.grouped)
         .frame(width: 480, height: 480)
+        .preferredColorScheme(appearance.resolvedColorScheme)
         .onChange(of: settings.selectedProvider) {
             keyDraft = ""
             keySaveFailed = false
+        }
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceSection: some View {
+        Section("Appearance") {
+            Picker("Theme", selection: $appearance) {
+                ForEach(Appearance.allCases) { appearance in
+                    Text(appearance.label).tag(appearance)
+                }
+            }
         }
     }
 

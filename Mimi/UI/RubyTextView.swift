@@ -127,6 +127,10 @@ struct RubyTextView: View, Equatable {
     var annotation: ReadingAnnotation = .romaji
     var surfaceFont: Font
     var annotationFont: Font
+    /// Overrides `annotationFont` for the kana reading shown above the
+    /// surface in furigana mode; romaji keeps `annotationFont`. Falls back
+    /// to `annotationFont` when unset.
+    var furiganaFont: Font?
     var annotationColor: Color
     var surfaceItalic = false
     /// Opt-in for hosts whose slot must hold a fixed geometry: when set, every
@@ -176,7 +180,7 @@ struct RubyTextView: View, Equatable {
     /// change child structure, the fonts change child sizes, the text changes
     /// surfaces. Colors paint only, so they are excluded.
     private var fingerprint: String {
-        "\(annotation)-\(surfaceItalic)-\(surfaceFont.hashValue)-\(annotationFont.hashValue)-\(text)"
+        "\(annotation)-\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
     }
 
     /// Segments folded for rendering: consecutive runs without a distinct
@@ -203,11 +207,17 @@ struct RubyTextView: View, Equatable {
         annotation == .furigana ? segment.furigana : segment.romaji
     }
 
+    /// The annotation's font per mode: furigana honors `furiganaFont`, the
+    /// other modes use `annotationFont`.
+    private var noteFont: Font {
+        annotation == .furigana ? (furiganaFont ?? annotationFont) : annotationFont
+    }
+
     /// Invisible spacer matching one annotation line; reserves the furigana
     /// slot so surfaces across modes and units share one vertical position.
     private var reservedAnnotationLine: some View {
         Text(verbatim: " ")
-            .font(annotationFont)
+            .font(noteFont)
             .lineLimit(1)
     }
 
@@ -226,7 +236,7 @@ struct RubyTextView: View, Equatable {
                 }
                 if annotation == .furigana {
                     Text(verbatim: note)
-                        .font(annotationFont)
+                        .font(noteFont)
                         .foregroundStyle(annotationColor)
                         .lineLimit(1)
                     Text(verbatim: surface)
@@ -237,7 +247,7 @@ struct RubyTextView: View, Equatable {
                         .font(surfaceFont)
                         .italic(surfaceItalic)
                     Text(verbatim: note)
-                        .font(annotationFont)
+                        .font(noteFont)
                         .foregroundStyle(annotationColor)
                         .lineLimit(1)
                 }

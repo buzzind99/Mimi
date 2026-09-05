@@ -31,8 +31,12 @@ struct TranscriptView: View {
     @UIScaleSetting private var uiScale
     @State private var pinnedToBottom = true
     @State private var reAnchorScheduled = false
+    /// Latest geometry tick, driving the jump buttons' visibility off the
+    /// same ticks the pin logic consumes (no extra observers).
+    @State private var scrollSnapshot: ScrollSnapshot?
 
     private static let bottomAnchorID = "transcript-bottom-anchor"
+    private static let topAnchorID = "transcript-top-anchor"
     /// Distance from the viewport bottom within which the user counts as
     /// "at the bottom": dragging up past this unpins, scrolling down into
     /// it re-pins. Small by design — the re-anchor chase lands flush, so
@@ -45,6 +49,12 @@ struct TranscriptView: View {
     var body: some View {
         ScrollViewReader { proxy in
             List {
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.topAnchorID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 if model.entries.isEmpty {
                     emptyState
                         .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
@@ -52,22 +62,16 @@ struct TranscriptView: View {
                         .listRowBackground(Color.clear)
                 }
                 ForEach(model.entries) { entry in
-                    // One row per entry: List flattens each builder child
-                    // into its own row, so the divider must stay grouped
-                    // with the row it belongs to.
-                    VStack(spacing: 0) {
-                        TranscriptRow(
-                            entry: entry,
-                            annotation: readingAnnotation,
-                            scale: uiScale
-                        )
-                        // Opacity only: a .move transition animates
-                        // relative to the viewport, which displaces
-                        // neighboring rows while the re-anchor chase is
-                        // also repositioning content.
-                        .transition(.opacity)
-                        Divider().opacity(0.15)
-                    }
+                    TranscriptRow(
+                        entry: entry,
+                        annotation: readingAnnotation,
+                        scale: uiScale
+                    )
+                    // Opacity only: a .move transition animates
+                    // relative to the viewport, which displaces
+                    // neighboring rows while the re-anchor chase is
+                    // also repositioning content.
+                    .transition(.opacity)
                     .id(entry.id)
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                     .listRowSeparator(.hidden)
@@ -83,6 +87,10 @@ struct TranscriptView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // Circular jump buttons, stacked bottom-trailing (clears the
+            // toast zone at the top-trailing corner where the toast stack
+            // mounts).
+            .overlay(alignment: .bottomTrailing) { jumpButtons(proxy) }
             // The bottom marker row is 1pt tall; without this List enforces
             // a minimum row height that would keep it from sitting flush.
             .environment(\.defaultMinListRowHeight, 1)
@@ -95,9 +103,11 @@ struct TranscriptView: View {
                     offsetY: geometry.contentOffset.y,
                     contentHeight: geometry.contentSize.height,
                     containerHeight: geometry.containerSize.height,
+                    insetTop: geometry.contentInsets.top,
                     insetBottom: geometry.contentInsets.bottom
                 )
             } action: { old, new in
+                scrollSnapshot = new
                 if new.offsetY > old.offsetY {
                     // The offset moved toward the bottom: our own re-anchor
                     // landing (which can come up short of flush), or the
@@ -178,6 +188,70 @@ struct TranscriptView: View {
         }
     }
 
+    /// Scrolls to the top marker immediately (no chase: the pin is off, so
+    /// nothing re-fires until the user scrolls back down).
+    private func scrollToTop(_ proxy: ScrollViewProxy) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            proxy.scrollTo(Self.topAnchorID, anchor: .top)
+        }
+    }
+
+    // MARK: - Jump buttons
+
+    /// Down: repin + chase when the user has scrolled away from the bottom.
+    /// Up: release the pin and jump to the oldest sentence. Each hides at
+    /// its extreme; visibility comes from the pin flag and the same
+    /// geometry ticks that drive it.
+    private var showDownButton: Bool {
+        !pinnedToBottom
+    }
+
+    private var showUpButton: Bool {
+        guard let snapshot = scrollSnapshot else { return false }
+        return snapshot.distanceToTop > Self.pinTolerance
+    }
+
+    private func jumpButtons(_ proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: 10) {
+            jumpButton("chevron.up", visible: showUpButton) {
+                pinnedToBottom = false
+                scrollToTop(proxy)
+            }
+            jumpButton("chevron.down", visible: showDownButton) {
+                pinnedToBottom = true
+                reAnchor(proxy)
+            }
+        }
+        .padding(.trailing, 24)
+        .padding(.bottom, 20)
+    }
+
+    private func jumpButton(
+        _ systemImage: String,
+        visible: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.annotationPink)
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(Theme.jumpButtonBackground)
+                        .overlay(Circle().stroke(Theme.jumpButtonStroke))
+                        .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
+        .animation(.easeOut(duration: 0.18), value: visible)
+    }
+
     /// The scroll values that separate offset movement (the pin is
     /// re-evaluated) from stationary content or viewport growth (the pin
     /// re-anchors).
@@ -185,10 +259,17 @@ struct TranscriptView: View {
         var offsetY: CGFloat
         var contentHeight: CGFloat
         var containerHeight: CGFloat
+        var insetTop: CGFloat
         var insetBottom: CGFloat
 
         var distanceToBottom: CGFloat {
             contentHeight + insetBottom - (offsetY + containerHeight)
+        }
+
+        /// Distance from the viewport top to the content top; zero when
+        /// scrolled flush to the oldest sentence.
+        var distanceToTop: CGFloat {
+            offsetY + insetTop
         }
 
         /// Everything that changes `distanceToBottom` except the offset:
@@ -204,10 +285,10 @@ struct TranscriptView: View {
         VStack(spacing: 8) {
             Text("No transcript yet")
                 .font(ScaledFont.title3(uiScale.factor))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.secondaryText)
             Text("Play any Japanese audio on your Mac (e.g. a livestream in your browser) and press Start.")
                 .font(ScaledFont.callout(uiScale.factor))
-                .foregroundStyle(.secondary.opacity(0.7))
+                .foregroundStyle(Theme.secondaryText.opacity(0.7))
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 80)

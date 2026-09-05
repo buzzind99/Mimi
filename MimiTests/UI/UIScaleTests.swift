@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// Tests `UIScale` stepping/clamping and the stable storage contract the
-/// header stepper relies on (per `UNIT_TEST_NEW.md`).
+/// header stepper relies on.
 @Suite("UIScale")
 struct UIScaleTests {
 
