@@ -42,14 +42,16 @@ fi
 
 echo "==> xcodebuild test (output → $BUILD_LOG)"
 set +e
+# `${arr[@]+"${arr[@]}"}` expands to nothing (not an error) when the array is
+# empty — plain `"${arr[@]}"` trips zsh's `set -u` on empty arrays.
 xcodebuild test \
   -project Mimi.xcodeproj \
   -scheme Mimi \
   -destination 'platform=macOS,arch=arm64' \
-  "${coverage_args[@]}" \
+  ${coverage_args[@]+"${coverage_args[@]}"} \
   -resultBundlePath "$RESULT_BUNDLE" \
   -quiet \
-  "${args[@]}" > "$BUILD_LOG" 2>&1
+  ${args[@]+"${args[@]}"} > "$BUILD_LOG" 2>&1
 build_status=$?
 set -e
 
