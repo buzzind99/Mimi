@@ -15,6 +15,9 @@ extension AppModel {
     /// `.unavailable` forever.
     func retryTranslation() {
         translationFallbackActive = false
+        // A latched degraded card carries this action; clear it up front so
+        // the re-engaged engine's statuses reconcile from a clean stack.
+        toasts.dismiss(key: ToastKey.translationFallback)
         activateTranslation()
     }
 
@@ -100,10 +103,14 @@ extension AppModel {
 
     /// Posts/clears the translation toasts on state change (post on entry,
     /// dismiss on exit): retry progress is transient; degraded/unavailable
-    /// are persistent cards carrying Retry; both clear when the status moves
-    /// on (`.ready` for the fallback latch, leaving `.unavailable` for the
-    /// red card).
+    /// are persistent cards carrying Retry. The fallback card stays for the
+    /// session while the latch is active — the fresh Apple run's `.ready`
+    /// must not clear it (it would flash for under a second); it clears on
+    /// manual retry (latch reset) or session stop. `.unavailable` always
+    /// dismisses the fallback card, and both clear when the status genuinely
+    /// moves on (external engine flowing again).
     private func reconcileTranslationToasts(_ status: TranslationStatus) {
+        let latched = translationFallbackActive && activeTranslationEngine == .apple
         switch status {
         case let .retrying(message):
             toasts.post(
@@ -125,8 +132,10 @@ extension AppModel {
                 action: retryAction
             )
         case .ready:
-            toasts.dismiss(key: ToastKey.translationFallback)
             toasts.dismiss(key: ToastKey.translationUnavailable)
+            if !latched {
+                toasts.dismiss(key: ToastKey.translationFallback)
+            }
         case .translating, .idle:
             toasts.dismiss(key: ToastKey.translationUnavailable)
         }

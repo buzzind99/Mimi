@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The connection pill in the status-bar footer, derived purely from the
-/// translation status × active engine. The HUD stays clean — the pill lives
-/// in the main window footer only.
+/// translation status × active engine × fallback latch. The HUD stays clean —
+/// the pill lives in the main window footer only.
 struct TranslationPill: Equatable {
     enum Tone: Equatable {
         case green, yellow, red, neutral
@@ -14,11 +14,16 @@ struct TranslationPill: Equatable {
 
     static func map(
         status: TranslationStatus,
-        activeEngine: ActiveTranslationEngine
+        activeEngine: ActiveTranslationEngine,
+        fallbackActive: Bool = false
     ) -> TranslationPill {
         switch status {
         case .ready, .translating:
-            TranslationPill(tone: .green, label: engineLabel(activeEngine))
+            // Latched on Apple after an external failure: degraded, not healthy.
+            TranslationPill(
+                tone: fallbackActive ? .yellow : .green,
+                label: engineLabel(activeEngine)
+            )
         case .retrying:
             // Retries only happen on external engines.
             TranslationPill(tone: .yellow, label: "External")

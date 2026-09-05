@@ -211,6 +211,13 @@ extension SidebarView {
         }
     }
 
+    /// The latched Apple fallback stays visible after the fresh Apple run
+    /// publishes `.ready` — otherwise "On-device (fallback)" would flash for
+    /// under a second and the card would read as healthy green.
+    private var translationFallbackLatched: Bool {
+        model.translationFallbackActive && model.activeTranslationEngine == .apple
+    }
+
     private var translationEngineName: String {
         guard model.activeTranslationEngine == .external else { return "Apple" }
         return switch model.translationSettings.selectedProvider {
@@ -222,7 +229,10 @@ extension SidebarView {
     }
 
     private var translationDetail: String {
-        switch model.translationStatus {
+        if translationFallbackLatched {
+            return "On-device (fallback)"
+        }
+        return switch model.translationStatus {
         case .degraded: "On-device (fallback)"
         case .unavailable: "Unavailable"
         case .ready, .translating, .retrying, .idle:
@@ -232,7 +242,9 @@ extension SidebarView {
 
     private var translationDotColor: Color {
         switch TranslationPill.map(
-            status: model.translationStatus, activeEngine: model.activeTranslationEngine
+            status: model.translationStatus,
+            activeEngine: model.activeTranslationEngine,
+            fallbackActive: translationFallbackLatched
         ).tone {
         case .green: Theme.dotGreen
         case .yellow: Theme.dotYellow

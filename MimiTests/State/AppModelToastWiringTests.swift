@@ -4,7 +4,8 @@ import Testing
 
 /// Tests `AppModel`'s toast wiring for the translation-status rows of the
 /// toast table, driven through `handleTranslationStatus`: post on entry,
-/// dismiss on exit (`.ready` clears both cards, `.translating` clears only
+/// dismiss on exit (`.ready` clears both cards when the fallback latch is
+/// off; while latched it keeps the degraded card, `.translating` clears only
 /// the unavailable one). The session-state cards (`capture.lost`,
 /// `session.failed`, `asr.warning`, stop clearing) live in `AppModelTests`
 /// and `AppModelSessionTests`.
@@ -71,10 +72,9 @@ struct AppModelToastWiringTests {
 
     // MARK: - Dismiss on exit
 
-    @Test("a ready status clears the degraded and unavailable cards")
-    func readyStatusClearsBothCards() async {
+    @Test("a ready status clears the degraded and unavailable cards when not latched")
+    func readyStatusClearsBothCardsWhenNotLatched() async {
         let model = await makeSUT()
-        model.translationFallbackActive = true
         model.handleTranslationStatus(
             .degraded("External translation failed — using Apple on-device", .permanent)
         )
@@ -85,6 +85,26 @@ struct AppModelToastWiringTests {
         model.handleTranslationStatus(.ready)
 
         #expect(model.toasts.toasts.isEmpty)
+    }
+
+    /// The exact auto-fallback race: the fresh Apple run publishes `.ready`
+    /// immediately at run start, but while the fallback latch is active the
+    /// degraded card must survive — otherwise the Retry action flashes for
+    /// under a second and never shows.
+    @Test("a ready status keeps the fallback card while latched")
+    func readyStatusKeepsFallbackCardWhileLatched() async {
+        let model = await makeSUT()
+        model.translationFallbackActive = true
+        model.handleTranslationStatus(
+            .degraded("External translation failed — using Apple on-device", .permanent)
+        )
+
+        model.handleTranslationStatus(.ready)
+
+        let toast = model.toasts.toasts.first { $0.key == ToastKey.translationFallback }
+        #expect(toast?.style == .yellowPersistent)
+        #expect(toast?.action?.label == "Retry")
+        #expect(!model.toasts.toasts.contains { $0.key == ToastKey.translationUnavailable })
     }
 
     /// The fallback card survives a mid-session status move: posting
