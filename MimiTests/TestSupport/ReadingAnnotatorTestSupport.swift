@@ -28,6 +28,18 @@ func tokens(
     }
 }
 
+/// Tokens laid out across space-separated surfaces — ASR output spaces out
+/// words, and the contiguous `tokens` helper can't express those gaps.
+func spacedTokens(
+    _ surfaces: [String], readings: [String?]
+) -> [DictionaryToken] {
+    var start = 0
+    return zip(surfaces, readings).map { surface, reading in
+        defer { start += surface.unicodeScalars.count + 1 }
+        return token(surface, start: start, reading: reading)
+    }
+}
+
 /// An annotator that replays canned tokens, independent of the runtime.
 func makeAnnotator(_ canned: [DictionaryToken]) -> ReadingAnnotator {
     ReadingAnnotator(tokenize: { _ in canned })

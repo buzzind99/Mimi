@@ -79,10 +79,20 @@ final class ReadingAnnotator: @unchecked Sendable {
         while i < tokens.count {
             let token = tokens[i]
             if token.start > cursor {
-                // A held-back number never fuses across an uncovered span
-                // (三、四本): flush it, then emit the span as a plain run.
-                flush(&pending, into: &segments)
-                appendSpan(from: cursor, to: token.start, of: scalars, into: &segments)
+                let low = max(0, min(cursor, scalars.count))
+                let high = max(low, min(token.start, scalars.count))
+                let span = String(String.UnicodeScalarView(scalars[low ..< high]))
+                // Whitespace between a held-back number and what follows
+                // rides along in the pending run ("2 人" still fuses —
+                // ASR output spaces out words); any other uncovered span
+                // (三、四本) flushes it, then emits the span as a plain run.
+                if pending != nil, span.unicodeScalars.allSatisfy({ $0.properties.isWhitespace }) {
+                    pending?.gap = span
+                    cursor = token.start
+                } else {
+                    flush(&pending, into: &segments)
+                    appendSpan(from: cursor, to: token.start, of: scalars, into: &segments)
+                }
             }
             let surface = Self.scalarSlice(token, of: scalars)
             cursor = token.end
@@ -128,10 +138,11 @@ final class ReadingAnnotator: @unchecked Sendable {
     private func appendToken(
         _ token: DictionaryToken, surface: String, into segments: inout [ReadingSegment]
     ) {
-        guard let reading = token.reading ?? Self.selfReading(surface) else {
+        guard var reading = token.reading ?? Self.selfReading(surface) else {
             segments.append(ReadingSegment(surface: surface, romaji: surface, furigana: nil))
             return
         }
+        reading = Self.lexicalKana[reading] ?? reading
         var romaji = KanaRomaji.romaji(fromKana: reading) ?? surface
         if let lexical = Self.lexicalRomaji[reading] {
             romaji = lexical
@@ -227,43 +238,6 @@ final class ReadingAnnotator: @unchecked Sendable {
             .map(\.kana).joined() ?? reading
     }
 
-    /// Emits a kana reading (from the dictionary, the digit table, or a
-    /// fusion) as a segment, romaji derived with `KanaRomaji`.
-    private func append(
-        surface: String, kana: String, romaji: String? = nil, into segments: inout [ReadingSegment]
-    ) {
-        let converted = romaji ?? KanaRomaji.romaji(fromKana: kana) ?? surface
-        segments.append(ReadingSegment(
-            surface: surface,
-            romaji: converted,
-            furigana: KanaClassification.containsKanji(surface) ? kana : nil
-        ))
-    }
-
-    /// Emits a held-back numeral run as its own segment. Digit runs without
-    /// a table reading (123, 2026) stay unannotated.
-    private func appendNumber(
-        _ pending: PendingNumber, into segments: inout [ReadingSegment]
-    ) {
-        var held = pending
-        Self.resolveDigits(into: &held)
-        guard !held.unresolved, !held.kana.isEmpty else {
-            segments.append(ReadingSegment(
-                surface: held.surface, romaji: held.surface, furigana: nil
-            ))
-            return
-        }
-        append(surface: held.surface, kana: held.kana, into: &segments)
-    }
-
-    private func flush(
-        _ pending: inout PendingNumber?, into segments: inout [ReadingSegment]
-    ) {
-        guard let held = pending else { return }
-        pending = nil
-        appendNumber(held, into: &segments)
-    }
-
     /// Uncovered spans (the tokenizer should cover everything, but a gap may
     /// appear on engine hiccups) stay plain runs so surfaces concatenate back.
     private func appendSpan(
@@ -273,210 +247,6 @@ final class ReadingAnnotator: @unchecked Sendable {
         guard start < end else { return }
         let gap = String(String.UnicodeScalarView(scalars[start ..< end]))
         segments.append(ReadingSegment(surface: gap, romaji: gap, furigana: nil))
-    }
-
-    // MARK: - Numeral → counter fusion
-
-    /// A numeral run held back for counter fusion: the consumed surface plus
-    /// its kana reading so far. Digits accumulate as a normalized run and
-    /// resolve through the digit table when the run completes.
-    private struct PendingNumber {
-        var surface: String
-        var digits = "" // fullwidth-normalized digit run awaiting lookup
-        var kana = "" // accumulated kana of resolved parts
-        var unresolved = false // a digit run with no table reading poisons the whole
-
-        init(surface: String, digits: String = "", kana: String = "", unresolved: Bool = false) {
-            self.surface = surface
-            self.digits = digits
-            self.kana = kana
-            self.unresolved = unresolved
-        }
-    }
-
-    /// Folds the held digit run into the kana (600 → ろっぴゃく).
-    private static func resolveDigits(into pending: inout PendingNumber) {
-        guard !pending.digits.isEmpty else { return }
-        if let mapped = digitReadings[pending.digits] {
-            pending.kana += mapped
-        } else {
-            pending.unresolved = true
-        }
-        pending.digits = ""
-    }
-
-    /// Extends a held-back numeral run: digit tokens accumulate their
-    /// normalized glyphs, kanji numerals contribute their dictionary kana
-    /// (三→さん, 万→まん). Any unreadable part marks the run unannotatable.
-    private static func accumulate(
-        _ token: DictionaryToken, surface: String, into pending: inout PendingNumber?
-    ) {
-        let ascii = surface.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? surface
-        if ascii.range(of: "^[0-9]+$", options: .regularExpression) != nil {
-            if pending != nil {
-                pending?.surface += surface
-                pending?.digits += ascii
-            } else {
-                pending = PendingNumber(surface: surface, digits: ascii)
-            }
-            return
-        }
-        let kana = token.reading
-        if pending != nil {
-            pending?.surface += surface
-            resolveDigits(into: &pending!)
-            if let kana {
-                pending?.kana += kana
-            } else {
-                pending?.unresolved = true
-            }
-        } else {
-            pending = PendingNumber(
-                surface: surface, kana: kana ?? "", unresolved: kana == nil
-            )
-        }
-    }
-
-    /// Fuses a held-back numeral run with the following token, or flushes
-    /// the run as its own segment. Returns true when `token` is fully
-    /// handled (fused into the number, or given a special-case counter
-    /// reading after the flush); false when the caller emits it normally.
-    private func fuse(
-        _ pending: inout PendingNumber?, with token: DictionaryToken, surface: String,
-        into segments: inout [ReadingSegment]
-    ) -> Bool {
-        guard var held = pending else { return false }
-        Self.resolveDigits(into: &held)
-        let reading = token.reading
-
-        // 年 after a number is the counter year (２年 → "ni nen"), never the
-        // standalone "toshi" reading, and it never geminates.
-        if surface == "年" {
-            pending = nil
-            appendNumber(held, into: &segments)
-            append(surface: surface, kana: "ねん", into: &segments)
-            return true
-        }
-        // 本 after さん/まん/せん voices to "bon" (三万本): the dictionary
-        // matches the shared もと/ほん entry, whose first reading is もと.
-        if surface == "本", !held.kana.isEmpty,
-           ["さん", "まん", "せん"].contains(where: held.kana.hasSuffix)
-        {
-            pending = nil
-            appendNumber(held, into: &segments)
-            append(surface: surface, kana: "ほん", romaji: "bon", into: &segments)
-            return true
-        }
-        // 人 is the irregular people counter: the model always splits
-        // 一人/二人/四人 into numeral + 人 (にん), and the fused readings
-        // that split implies (いちにん/ににん/よんにん) are wrong — the words
-        // read ひとり/ふたり/よにん.
-        if surface == "人", !held.unresolved,
-           let people = Self.peopleCounterReadings[held.kana]
-        {
-            pending = nil
-            append(surface: held.surface + surface, kana: people, into: &segments)
-            return true
-        }
-        // Generic fusion: the number keeps its geminating stem and the
-        // counter takes a sokuon (ろく+かい → ろっかい), except where the
-        // plain reading is lexical (六 + 歳/等/千) or the counter's onset
-        // can't take a sokuon (ば行 keeps the plain reading, 一番 → いちばん).
-        if !held.unresolved, !held.kana.isEmpty, let reading,
-           !Self.rokuException(numberKana: held.kana, counterKana: reading),
-           !Self.voicedOnsetException(reading),
-           let stem = Self.geminationStem(of: held.kana), Self.isGeminable(reading)
-        {
-            pending = nil
-            append(
-                surface: held.surface + surface,
-                kana: stem + "っ" + Self.postSokuonVoicing(reading),
-                into: &segments
-            )
-            return true
-        }
-        pending = nil
-        appendNumber(held, into: &segments)
-        return false
-    }
-
-    /// Whether a counter reading can take a sokuon: its first mora must
-    /// start with a geminable consonant (k/s/t rows; the は/ば rows realize
-    /// as the p-series, the ち row as "cch" — `KanaRomaji` derives both).
-    private static let geminableOnsets =
-        "かきくけこさしすせそたちつてとはひふへほばびぶべぼぱぴぷぺぽ"
-
-    private static func isGeminable(_ kana: String) -> Bool {
-        guard let first = kana.unicodeScalars.first else { return false }
-        return geminableOnsets.unicodeScalars.contains(first)
-    }
-
-    /// The stem a geminating numeral keeps before the っ: いち→い, ろく→ろ,
-    /// はち→は, …じゅう→…じゅ, …ゃく→…ゃ (ひゃく→ひゃ, ろっぴゃく→ろっぴゃ).
-    /// しち (七) never geminates; nor do に/さん/ご/よん/なな/せん/まん.
-    private static func geminationStem(of kana: String) -> String? {
-        let geminates = ["いち", "ろく", "はち", "じゅう", "ゃく"]
-        guard geminates.contains(where: kana.hasSuffix) else { return nil }
-        return String(kana.dropLast())
-    }
-
-    /// Irregular people-counter readings keyed by the number's kana: the
-    /// two-token split 一+人 can only imply いちにん, never ひとり. Numbers
-    /// outside the table (三人, 十人, 二十人) read regularly and stay on the
-    /// generic path.
-    private static let peopleCounterReadings: [String: String] = [
-        "いち": "ひとり", "に": "ふたり", "よん": "よにん"
-    ]
-
-    /// 六 keeps its plain reading before 歳/等/千 (ろくさい/ろくとう/ろくせん):
-    /// the fusion must not produce ろっさい.
-    private static func rokuException(numberKana: String, counterKana: String) -> Bool {
-        numberKana == "ろく" && ["さい", "とう", "せん"].contains { counterKana.hasPrefix($0) }
-    }
-
-    /// A ば行 onset keeps the plain reading for every numeral: 一番/六番/十番/
-    /// 八番/百番 all read without a sokuon (いちばん/ろくばん/じゅうばん/はちばん/
-    /// ひゃくばん). だ/が行 onsets can't geminate at all (`isGeminable`).
-    private static func voicedOnsetException(_ counterKana: String) -> Bool {
-        guard let first = counterKana.first else { return false }
-        return ["ば", "び", "ぶ", "べ", "ぼ"].contains(String(first))
-    }
-
-    /// The written form a counter takes after the geminating っ: a は-row
-    /// onset voices to the p-series (八+分 → はっぷん), matching how
-    /// `KanaRomaji` realizes the sound. ば行 onsets never geminate
-    /// (`voicedOnsetException`), so they can't reach this.
-    private static func postSokuonVoicing(_ kana: String) -> String {
-        let voiced = [
-            "は": "ぱ", "ひ": "ぴ", "ふ": "ぷ", "へ": "ぺ", "ほ": "ぽ"
-        ]
-        guard let first = kana.first, let p = voiced[String(first)] else {
-            return kana
-        }
-        return p + kana.dropFirst()
-    }
-
-    /// Digit runs whose counter readings the dictionary can't see, in kana
-    /// (the old heuristics' table transliterated): "600" → ろっぴゃく so
-    /// 600回 fuses to ろっぴゃっかい. Runs outside the table (123, 2026)
-    /// stay unannotated.
-    private static let digitReadings: [String: String] = [
-        "1": "いち", "2": "に", "3": "さん", "4": "よん", "5": "ご",
-        "6": "ろく", "7": "なな", "8": "はち", "9": "きゅう", "10": "じゅう",
-        "20": "にじゅう", "30": "さんじゅう", "40": "よんじゅう", "50": "ごじゅう",
-        "60": "ろくじゅう", "70": "ななじゅう", "80": "はちじゅう", "90": "きゅうじゅう",
-        "100": "ひゃく", "200": "にひゃく", "300": "さんびゃく", "400": "よんひゃく",
-        "500": "ごひゃく", "600": "ろっぴゃく", "700": "ななひゃく",
-        "800": "はっぴゃく", "900": "きゅうひゃく", "1000": "せん", "10000": "まん"
-    ]
-
-    /// Pure numeral surfaces (Arabic or fullwidth digits, kanji numerals):
-    /// held back for counter fusion. Engine-fused compounds (一回, 十四日)
-    /// contain non-numeral characters and never match.
-    private static func isNumeralRun(_ surface: String) -> Bool {
-        surface.range(
-            of: "^[0-9０-９一二三四五六七八九十百千万]+$", options: .regularExpression
-        ) != nil
     }
 
     // MARK: - Overrides
@@ -496,6 +266,11 @@ final class ReadingAnnotator: @unchecked Sendable {
         "こんにちは": "konnichiwa", "こんばんは": "konbanwa", "まっちゃ": "matcha",
         "それでは": "soredewa", "では": "dewa", "または": "matawa"
     ]
+
+    /// Dictionary readings repaired to the spoken form, keyed by the entry's
+    /// kana: 入口/入り口 carries the etymological いりくち but is spoken with
+    /// rendaku (いりぐち) — keyed by reading so both written forms inherit it.
+    private static let lexicalKana = ["いりくち": "いりぐち"]
 
     // MARK: - Text helpers
 

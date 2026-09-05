@@ -132,24 +132,24 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["十回", "jukkai", "じゅっかい"]])
     }
 
-    @Test("reads regular counter days as numeral + 日 (二日/三日/四日/七日)",
+    @Test("reads irregular kanji-numeral days as one fused word (二日/三日/四日/七日)",
           arguments: [
-              ("二日", [["二", "ni", "に"], ["日", "nichi", "にち"]]),
-              ("三日", [["三", "san", "さん"], ["日", "nichi", "にち"]]),
-              ("四日", [["四", "yon", "よん"], ["日", "nichi", "にち"]]),
-              ("七日", [["七", "nana", "なな"], ["日", "nichi", "にち"]])
+              ("二日", "futsuka", "ふつか"),
+              ("三日", "mikka", "みっか"),
+              ("四日", "yokka", "よっか"),
+              ("七日", "nanoka", "なのか")
           ])
-    func regularCounterDays(input: String, expected: [[String?]]) throws {
+    func irregularKanjiDays(input: String, romaji: String, furigana: String) throws {
         let segments = try segments(input)
 
-        #expect(describe(segments) == expected)
+        #expect(describe(segments) == [[input, romaji, furigana]])
     }
 
-    @Test("splits 二十日 into the numeral run + 日 (はつか is lost — documented IPADIC degradation)")
-    func hatsukaSplits() throws {
+    @Test("fuses 二十日 with the irregular day reading (はつか → hatsuka)")
+    func hatsukaFuses() throws {
         let segments = try segments("二十日")
 
-        #expect(describe(segments) == [["二十", "nijuu", "にじゅう"], ["日", "nichi", "にち"]])
+        #expect(describe(segments) == [["二十日", "hatsuka", "はつか"]])
     }
 
     @Test("fuses 二十歳 with the geminated counter (にじゅっさい; はたち is lost — documented)")
@@ -159,43 +159,43 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["二十歳", "nijussai", "にじゅっさい"]])
     }
 
-    @Test("splits 十四日 into the numeral run + 日 (じゅうよっか is lost — documented)")
-    func juuyokkaSplits() throws {
+    @Test("fuses 十四日 with the irregular day reading (じゅうよっか)")
+    func juuyokkaFuses() throws {
         let segments = try segments("十四日")
 
-        #expect(describe(segments) == [["十四", "juuyon", "じゅうよん"], ["日", "nichi", "にち"]])
+        #expect(describe(segments) == [["十四日", "juuyokka", "じゅうよっか"]])
     }
 
-    @Test("splits 2本 into numeral + counter (にほん)",
+    @Test("fuses 本 with the forced counter reading, voicing across ん (二本/三本)",
           arguments: [
-              ("二本", [["二", "ni", "に"], ["本", "hon", "ほん"]]),
-              ("三本", [["三", "san", "さん"], ["本", "bon", "ほん"]])
+              ("二本", "nihon", "にほん"),
+              ("三本", "sanbon", "さんぼん")
           ])
-    func splitHon(input: String, expected: [[String?]]) throws {
+    func fusedHon(input: String, romaji: String, furigana: String) throws {
         let segments = try segments(input)
 
-        #expect(describe(segments) == expected)
+        #expect(describe(segments) == [[input, romaji, furigana]])
     }
 
-    @Test("keeps 六 separate before 歳 (roku exception)")
+    @Test("fuses 六 plainly before 歳 (roku exception → plain fusion)")
     func rokuBeforeSai() throws {
         let segments = try segments("六歳")
 
-        #expect(describe(segments) == [["六", "roku", "ろく"], ["歳", "sai", "さい"]])
+        #expect(describe(segments) == [["六歳", "rokusai", "ろくさい"]])
     }
 
-    @Test("keeps 六 separate before 等 with its counter reading とう (the old suite pinned the standalone など reading)")
+    @Test("fuses 六 plainly before 等 with its counter reading とう (the old suite pinned the standalone など reading)")
     func rokuBeforeTou() throws {
         let segments = try segments("六等")
 
-        #expect(describe(segments) == [["六", "roku", "ろく"], ["等", "tou", "とう"]])
+        #expect(describe(segments) == [["六等", "rokutou", "ろくとう"]])
     }
 
-    @Test("keeps 七 separate before 回 with its dictionary reading なな (old suite pinned the heuristics' nana)")
+    @Test("fuses 七 plainly before 回 with its dictionary reading なな (old suite pinned the heuristics' nana)")
     func sevenCounter() throws {
         let segments = try segments("七回")
 
-        #expect(describe(segments) == [["七", "nana", "なな"], ["回", "kai", "かい"]])
+        #expect(describe(segments) == [["七回", "nanakai", "ななかい"]])
     }
 
     @Test("reads the irregular people counter as one fused word (一人/二人/四人)",
@@ -210,15 +210,15 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [[input, romaji, furigana]])
     }
 
-    @Test("keeps regular people counters on the numeral + 人 split (三人/十人)",
+    @Test("fuses regular people counters plainly (三人/十人)",
           arguments: [
-              ("三人", [["三", "san", "さん"], ["人", "nin", "にん"]]),
-              ("十人", [["十", "juu", "じゅう"], ["人", "nin", "にん"]])
+              ("三人", "sannin", "さんにん"),
+              ("十人", "juunin", "じゅうにん")
           ])
-    func regularPeopleCounter(input: String, expected: [[String?]]) throws {
+    func regularPeopleCounter(input: String, romaji: String, furigana: String) throws {
         let segments = try segments(input)
 
-        #expect(describe(segments) == expected)
+        #expect(describe(segments) == [[input, romaji, furigana]])
     }
 
     @Test("fuses Arabic digits with a counter via the digit table (600回)")
@@ -228,19 +228,19 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["600回", "roppyakkai", "ろっぴゃっかい"]])
     }
 
-    @Test("groups the voiced counter run before 本 (三万本 → sanman bon)")
+    @Test("fuses the voiced counter run with 本 (三万本 → sanmanbon)")
     func voicedHon() throws {
         let segments = try segments("三万本")
 
-        #expect(describe(segments) == [["三万", "sanman", "さんまん"], ["本", "bon", "ほん"]])
+        #expect(describe(segments) == [["三万本", "sanmanbon", "さんまんぼん"]])
     }
 
-    @Test("flushes the held-back number before punctuation, splitting 四本 (三、四本; old suite pinned the fused よんほん)")
+    @Test("flushes the held-back number before punctuation (三、四本; old suite pinned the split 四/本)")
     func flushedNumberBeforePunctuation() throws {
         let segments = try segments("三、四本")
 
         #expect(describe(segments) == [
-            ["三", "san", "さん"], ["、", "、", nil], ["四", "yon", "よん"], ["本", "hon", "ほん"]
+            ["三", "san", "さん"], ["、", "、", nil], ["四本", "yonbon", "よんぼん"]
         ])
     }
 
@@ -253,18 +253,18 @@ struct ReadingAnnotatorLiveTests {
 
     // MARK: 年
 
-    @Test("reads 年 as the counter after digits (2年 → ni nen)")
+    @Test("fuses 年 into the number (2年 → ninen)")
     func yearAfterDigits() throws {
         let segments = try segments("2年")
 
-        #expect(describe(segments) == [["2", "ni", nil], ["年", "nen", "ねん"]])
+        #expect(describe(segments) == [["2年", "ninen", "にねん"]])
     }
 
-    @Test("reads 年 as the counter after a kanji numeral (八年 → hachi nen)")
+    @Test("fuses 年 into a kanji numeral (八年 → hachinen)")
     func yearAfterKanjiNumeral() throws {
         let segments = try segments("八年")
 
-        #expect(describe(segments) == [["八", "hachi", "はち"], ["年", "nen", "ねん"]])
+        #expect(describe(segments) == [["八年", "hachinen", "はちねん"]])
     }
 
     // MARK: family honorifics

@@ -53,18 +53,31 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["八歳", "hassai", "はっさい"]])
     }
 
-    @Test("keeps the number as its own segment when the counter can't geminate (2日)")
-    func geminateNilFlushesNumber() throws {
-        let annotator = makeAnnotator(tokens(
-            ["2", "日"], readings: [nil, "にち"]
-        ))
+    @Test("reads irregular digit dates as one fused word (2日 → futsuka; 1日…10日, 14日, 20日, 24日)",
+          arguments: [
+              (["1", "日"], "1日", "tsuitachi", "ついたち"),
+              (["2", "日"], "2日", "futsuka", "ふつか"),
+              (["3", "日"], "3日", "mikka", "みっか"),
+              (["4", "日"], "4日", "yokka", "よっか"),
+              (["5", "日"], "5日", "itsuka", "いつか"),
+              (["6", "日"], "6日", "muika", "むいか"),
+              (["7", "日"], "7日", "nanoka", "なのか"),
+              (["8", "日"], "8日", "youka", "ようか"),
+              (["9", "日"], "9日", "kokonoka", "ここのか"),
+              (["10", "日"], "10日", "tooka", "とおか"),
+              (["14", "日"], "14日", "juuyokka", "じゅうよっか"),
+              (["20", "日"], "20日", "hatsuka", "はつか"),
+              (["24", "日"], "24日", "nijuuyokka", "にじゅうよっか")
+          ])
+    func irregularDigitDates(surfaces: [String], text: String, romaji: String, furigana: String) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: [String?](repeating: nil, count: surfaces.count - 1) + ["にち"]))
 
-        let segments = try #require(annotator.segments(for: "2日"))
+        let segments = try #require(annotator.segments(for: text))
 
-        #expect(describe(segments) == [["2", "ni", nil], ["日", "nichi", "にち"]])
+        #expect(describe(segments) == [[text, romaji, furigana]])
     }
 
-    @Test("keeps 六 separate before 歳 (roku exception)")
+    @Test("fuses 六 plainly before 歳 (roku exception → plain fusion)")
     func rokuExceptionBeforeSai() throws {
         let annotator = makeAnnotator(tokens(
             ["六", "歳"], readings: ["ろく", "さい"]
@@ -72,10 +85,10 @@ struct ReadingAnnotatorFusionTests {
 
         let segments = try #require(annotator.segments(for: "六歳"))
 
-        #expect(describe(segments) == [["六", "roku", "ろく"], ["歳", "sai", "さい"]])
+        #expect(describe(segments) == [["六歳", "rokusai", "ろくさい"]])
     }
 
-    @Test("keeps the digit 6 separate before 歳 (roku exception)")
+    @Test("fuses the digit 6 plainly before 歳 (roku exception → plain fusion)")
     func rokuExceptionDigitBeforeSai() throws {
         let annotator = makeAnnotator(tokens(
             ["6", "歳"], readings: [nil, "さい"]
@@ -83,7 +96,7 @@ struct ReadingAnnotatorFusionTests {
 
         let segments = try #require(annotator.segments(for: "6歳"))
 
-        #expect(describe(segments) == [["6", "roku", nil], ["歳", "sai", "さい"]])
+        #expect(describe(segments) == [["6歳", "rokusai", "ろくさい"]])
     }
 
     @Test("accumulates consecutive kanji numerals into one run (千 is itself a numeral)")
@@ -97,7 +110,7 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["六千", "rokusen", "ろくせん"]])
     }
 
-    @Test("keeps 六 separate before the とう reading of 等 (roku exception)")
+    @Test("fuses 六 plainly before the とう reading of 等 (roku exception → plain fusion)")
     func rokuExceptionBeforeTou() throws {
         let annotator = makeAnnotator(tokens(
             ["六", "等"], readings: ["ろく", "とう"]
@@ -105,24 +118,24 @@ struct ReadingAnnotatorFusionTests {
 
         let segments = try #require(annotator.segments(for: "六等"))
 
-        #expect(describe(segments) == [["六", "roku", "ろく"], ["等", "tou", "とう"]])
+        #expect(describe(segments) == [["六等", "rokutou", "ろくとう"]])
     }
 
-    @Test("keeps the plain reading before a ば行 counter (一番/十番/六番/八番)",
+    @Test("fuses plainly before a ば行 counter (一番/十番/六番/八番)",
           arguments: [
-              (["一", "番"], ["いち", "ばん"], "一番", [["一", "ichi", "いち"], ["番", "ban", "ばん"]]),
-              (["十", "番"], ["じゅう", "ばん"], "十番", [["十", "juu", "じゅう"], ["番", "ban", "ばん"]]),
-              (["六", "番"], ["ろく", "ばん"], "六番", [["六", "roku", "ろく"], ["番", "ban", "ばん"]]),
-              (["八", "番"], ["はち", "ばん"], "八番", [["八", "hachi", "はち"], ["番", "ban", "ばん"]])
+              (["一", "番"], ["いち", "ばん"], "一番", "ichiban", "いちばん"),
+              (["十", "番"], ["じゅう", "ばん"], "十番", "juuban", "じゅうばん"),
+              (["六", "番"], ["ろく", "ばん"], "六番", "rokuban", "ろくばん"),
+              (["八", "番"], ["はち", "ばん"], "八番", "hachiban", "はちばん")
           ])
-    func voicedOnsetKeepsPlainReading(
-        surfaces: [String], readings: [String], text: String, expected: [[String?]]
+    func voicedOnsetFusesPlainReading(
+        surfaces: [String], readings: [String], text: String, romaji: String, furigana: String
     ) throws {
         let annotator = makeAnnotator(tokens(surfaces, readings: readings))
 
         let segments = try #require(annotator.segments(for: text))
 
-        #expect(describe(segments) == expected)
+        #expect(describe(segments) == [[text, romaji, furigana]])
     }
 
     @Test("reads the irregular people counter as one fused word (一人/二人/四人)",
@@ -152,22 +165,22 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [["2人", "futari", "ふたり"]])
     }
 
-    @Test("keeps regular people counters separate (三人/十人)",
+    @Test("fuses regular people counters plainly (三人/十人)",
           arguments: [
-              (["三", "人"], ["さん", "にん"], "三人", [["三", "san", "さん"], ["人", "nin", "にん"]]),
-              (["十", "人"], ["じゅう", "にん"], "十人", [["十", "juu", "じゅう"], ["人", "nin", "にん"]])
+              (["三", "人"], ["さん", "にん"], "三人", "sannin", "さんにん"),
+              (["十", "人"], ["じゅう", "にん"], "十人", "juunin", "じゅうにん")
           ])
-    func regularPeopleCounterStaysSplit(
-        surfaces: [String], readings: [String], text: String, expected: [[String?]]
+    func regularPeopleCounterFusesPlainly(
+        surfaces: [String], readings: [String], text: String, romaji: String, furigana: String
     ) throws {
         let annotator = makeAnnotator(tokens(surfaces, readings: readings))
 
         let segments = try #require(annotator.segments(for: text))
 
-        #expect(describe(segments) == expected)
+        #expect(describe(segments) == [[text, romaji, furigana]])
     }
 
-    @Test("voices 本 to bon after さん/まん, with furigana ほん (三万本)")
+    @Test("fuses 本 with its forced counter reading and ん-voicing (三万本 → sanmanbon)")
     func voicedHon() throws {
         let annotator = makeAnnotator(tokens(
             ["三", "万", "本"], readings: ["さん", "まん", "ほん"]
@@ -175,7 +188,7 @@ struct ReadingAnnotatorFusionTests {
 
         let segments = try #require(annotator.segments(for: "三万本"))
 
-        #expect(describe(segments) == [["三万", "sanman", "さんまん"], ["本", "bon", "ほん"]])
+        #expect(describe(segments) == [["三万本", "sanmanbon", "さんまんぼん"]])
     }
 
     @Test("flushes the held-back number before punctuation (三、四本)")
@@ -187,11 +200,11 @@ struct ReadingAnnotatorFusionTests {
         let segments = try #require(annotator.segments(for: "三、四本"))
 
         #expect(describe(segments) == [
-            ["三", "san", "さん"], ["、", "、", nil], ["四", "yon", "よん"], ["本", "hon", "ほん"]
+            ["三", "san", "さん"], ["、", "、", nil], ["四本", "yonbon", "よんぼん"]
         ])
     }
 
-    @Test("reads 年 as the counter after resolved digits (2年 → ni nen)")
+    @Test("fuses 年 into the resolved number (2年 → ninen)")
     func yearAfterDigits() throws {
         let annotator = makeAnnotator(tokens(
             ["2", "年"], readings: [nil, "ねん"]
@@ -199,10 +212,10 @@ struct ReadingAnnotatorFusionTests {
 
         let segments = try #require(annotator.segments(for: "2年"))
 
-        #expect(describe(segments) == [["2", "ni", nil], ["年", "nen", "ねん"]])
+        #expect(describe(segments) == [["2年", "ninen", "にねん"]])
     }
 
-    @Test("reads 年 as the counter after a kanji numeral (八年 → hachi nen)")
+    @Test("fuses 年 into a kanji numeral (八年 → hachinen)")
     func yearAfterKanjiNumeral() throws {
         let annotator = makeAnnotator(tokens(
             ["八", "年"], readings: ["はち", "ねん"]
@@ -210,7 +223,7 @@ struct ReadingAnnotatorFusionTests {
 
         let segments = try #require(annotator.segments(for: "八年"))
 
-        #expect(describe(segments) == [["八", "hachi", "はち"], ["年", "nen", "ねん"]])
+        #expect(describe(segments) == [["八年", "hachinen", "はちねん"]])
     }
 
     @Test("reads 年 as the counter after unresolved digits (2026年)")
@@ -293,5 +306,141 @@ struct ReadingAnnotatorFusionTests {
         let segments = try #require(annotator.segments(for: "六"))
 
         #expect(describe(segments) == [["六", "roku", "ろく"]])
+    }
+
+    // MARK: - ASR whitespace
+
+    @Test("fuses across ASR whitespace between number and counter (2 人 → futari)")
+    func whitespaceTolerantPeopleFusion() throws {
+        let annotator = makeAnnotator(spacedTokens(
+            ["2", "人"], readings: [nil, "にん"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "2 人"))
+
+        #expect(describe(segments) == [["2 人", "futari", "ふたり"]])
+    }
+
+    @Test("fuses spaced dates segment-wise with the space re-emitted (9 月 10 日 → kugatsu tooka)")
+    func spacedDateFusion() throws {
+        let annotator = makeAnnotator(spacedTokens(
+            ["9", "月", "10", "日"], readings: [nil, "つき", nil, "にち"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "9 月 10 日"))
+
+        #expect(describe(segments) == [
+            ["9 月", "kugatsu", "くがつ"], [" ", " ", nil], ["10 日", "tooka", "とおか"]
+        ])
+    }
+
+    @Test("accumulates digits across ASR whitespace (3 万 → sanman)")
+    func whitespaceBetweenNumeralsAccumulates() throws {
+        let annotator = makeAnnotator(spacedTokens(
+            ["3", "万"], readings: [nil, "まん"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "3 万"))
+
+        #expect(describe(segments) == [["3 万", "sanman", "さんまん"]])
+    }
+
+    @Test("flushes a held number before a hiragana token, re-emitting the space (2 は → ni wa)")
+    func whitespaceBeforeParticleFlushes() throws {
+        let annotator = makeAnnotator(spacedTokens(
+            ["2", "は"], readings: [nil, "は"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "2 は"))
+
+        #expect(describe(segments) == [["2", "ni", nil], [" ", " ", nil], ["は", "wa", nil]])
+    }
+
+    // MARK: - Plain fusion
+
+    @Test("fuses non-geminating numbers plainly with the counter (一度/二階/十台)",
+          arguments: [
+              (["一", "度"], ["いち", "ど"], "一度", "ichido", "いちど"),
+              (["二", "階"], ["に", "かい"], "二階", "nikai", "にかい"),
+              (["十", "台"], ["じゅう", "だい"], "十台", "juudai", "じゅうだい")
+          ])
+    func plainFusion(
+        surfaces: [String], readings: [String], text: String, romaji: String, furigana: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: readings))
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == [[text, romaji, furigana]])
+    }
+
+    @Test("reads the lexical month numbers (4月/7月/9月; regular months stay plain)",
+          arguments: [
+              (["4", "月"], "4月", "shigatsu", "しがつ"),
+              (["7", "月"], "7月", "shichigatsu", "しちがつ"),
+              (["9", "月"], "9月", "kugatsu", "くがつ"),
+              (["3", "月"], "3月", "sangatsu", "さんがつ"),
+              (["10", "月"], "10月", "juugatsu", "じゅうがつ")
+          ])
+    func monthCounterReadings(
+        surfaces: [String], text: String, romaji: String, furigana: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: [nil, "つき"]))
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == [[text, romaji, furigana]])
+    }
+
+    @Test("reads the lexical hour numbers (4時/7時/9時; regular hours stay plain)",
+          arguments: [
+              (["4", "時"], "4時", "yoji", "よじ"),
+              (["7", "時"], "7時", "shichiji", "しちじ"),
+              (["9", "時"], "9時", "kuji", "くじ"),
+              (["1", "時"], "1時", "ichiji", "いちじ"),
+              (["3", "時"], "3時", "sanji", "さんじ")
+          ])
+    func hourCounterReadings(
+        surfaces: [String], text: String, romaji: String, furigana: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(surfaces, readings: [nil, "とき"]))
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == [[text, romaji, furigana]])
+    }
+
+    @Test("voices a は行 counter across a moraic ん (3分/4分/3匹/2分)",
+          arguments: [
+              (["3", "分"], "3分", "sanpun", "さんぷん"),
+              (["4", "分"], "4分", "yonpun", "よんぷん"),
+              (["3", "匹"], "3匹", "sanbiki", "さんびき"),
+              (["2", "分"], "2分", "nifun", "にふん")
+          ])
+    func voicedCounterAcrossN(
+        surfaces: [String], text: String, romaji: String, furigana: String
+    ) throws {
+        let annotator = makeAnnotator(tokens(
+            surfaces, readings: [nil, surfaces[1] == "分" ? "ふん" : "ひき"]
+        ))
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == [[text, romaji, furigana]])
+    }
+
+    // MARK: - Lexical reading repairs
+
+    @Test("repairs the dictionary's unvoiced reading of the entrance to the spoken rendaku form",
+          arguments: [
+              ("入口", "iriguchi", "いりぐち"),
+              ("入り口", "iriguchi", "いりぐち")
+          ])
+    func entranceRendakuRepair(text: String, romaji: String, furigana: String) throws {
+        let annotator = makeAnnotator([token(text, start: 0, reading: "いりくち")])
+
+        let segments = try #require(annotator.segments(for: text))
+
+        #expect(describe(segments) == [[text, romaji, furigana]])
     }
 }
