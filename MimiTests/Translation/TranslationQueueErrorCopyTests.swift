@@ -19,6 +19,8 @@ struct TranslationQueueErrorCopyTests {
     private final class ThrowingEngine: TranslationEngine, @unchecked Sendable {
         let preferredBatchSize = 16
         var onRetry: (@Sendable (RetryProgress) -> Void)?
+        /// Overridden to `true` for the LLM-engine severity tests.
+        var transientBadResponse = false
 
         private let handler: @Sendable () throws -> [String]
 
@@ -32,8 +34,10 @@ struct TranslationQueueErrorCopyTests {
     }
 
     /// Runs the queue against a throwing engine and returns the rendered
-    /// `.unavailable` message.
-    private func unavailableMessage(engine: TranslationEngine) async -> String? {
+    /// `.unavailable` message + severity.
+    private func unavailableOutcome(
+        engine: TranslationEngine
+    ) async -> (message: String, severity: TranslationFailureSeverity)? {
         let queue = TranslationQueue()
         queue.setHandlers(result: { _, _ in }, status: { _ in })
         queue.enqueue(Sentence(index: 0, startS: 0, endS: 1, lang: "ja", text: "テスト"))
@@ -41,11 +45,11 @@ struct TranslationQueueErrorCopyTests {
         await pollUntil(timeout: resultTimeout) { isUnavailable(queue.status) }
         worker.cancel()
 
-        guard case let .unavailable(message) = queue.status else {
+        guard case let .unavailable(message, severity) = queue.status else {
             Issue.record("expected .unavailable, got \(queue.status)")
             return nil
         }
-        return message
+        return (message, severity)
     }
 
     private func isUnavailable(_ status: TranslationStatus) -> Bool {
@@ -58,22 +62,71 @@ struct TranslationQueueErrorCopyTests {
     // MARK: - Engine error taxonomy
 
     /// The `.unavailable` message renders the provider-specific copy for
-    /// every engine error the queue can surface.
-    @Test("engine errors render their provider-specific status copy", arguments: [
-        (TranslationEngineError.invalidKey, "Invalid API key. Check the key in Settings, then retry."),
-        (TranslationEngineError.quotaExceeded, "The provider's API quota is exhausted. Retry later or switch provider."),
-        (TranslationEngineError.rateLimited, "The provider is rate limiting requests. Retry shortly."),
-        (TranslationEngineError.serverError(503), "Provider server error (503). Retry shortly."),
-        (TranslationEngineError.badResponse("nope"), "The provider returned an unexpected response: nope"),
-        (TranslationEngineError.network, "Network error reaching the provider. Check the connection, then retry."),
-        (TranslationEngineError.cancelled, "Translation was cancelled.")
+    /// every engine error the queue can surface, classified into the
+    /// transient/permanent toast severities (fixed-contract `.badResponse`,
+    /// `.invalidKey`, and `.quotaExceeded` are permanent; everything the
+    /// retry ladder treats as retryable is transient).
+    @Test("engine errors render their copy with the toast severity", arguments: [
+        (
+            TranslationEngineError.invalidKey,
+            "Invalid API key. Check the key in Settings, then retry.", TranslationFailureSeverity.permanent
+        ),
+        (
+            TranslationEngineError.quotaExceeded,
+            "The provider's API quota is exhausted. Retry later or switch provider.",
+            TranslationFailureSeverity.permanent
+        ),
+        (
+            TranslationEngineError.rateLimited,
+            "The provider is rate limiting requests. Retry shortly.", TranslationFailureSeverity.transient
+        ),
+        (
+            TranslationEngineError.serverError(503),
+            "Provider server error (503). Retry shortly.", TranslationFailureSeverity.transient
+        ),
+        (
+            TranslationEngineError.badResponse("nope"),
+            "The provider returned an unexpected response: nope", TranslationFailureSeverity.permanent
+        ),
+        (
+            TranslationEngineError.network,
+            "Network error reaching the provider. Check the connection, then retry.",
+            TranslationFailureSeverity.transient
+        )
     ])
-    func engineErrorCopy(error: TranslationEngineError, expected: String) async {
+    func engineErrorCopy(
+        error: TranslationEngineError, expected: String, severity: TranslationFailureSeverity
+    ) async {
         let engine = ThrowingEngine(handler: { throw error })
 
-        let message = await unavailableMessage(engine: engine)
+        let outcome = await unavailableOutcome(engine: engine)
 
-        #expect(message == expected)
+        #expect(outcome?.message == expected)
+        #expect(outcome?.severity == severity)
+    }
+
+    /// `.badResponse` follows the engine: from an LLM/chat-completions
+    /// engine (`transientBadResponse == true`) it classifies transient —
+    /// its own ladder already exhausted its retries, "transient" here means
+    /// a yellow toast, not "still retrying".
+    @Test("an LLM engine's badResponse classifies as transient")
+    func llmBadResponseClassifiesTransient() async {
+        let engine = ThrowingEngine(handler: {
+            throw TranslationEngineError.badResponse("rambled")
+        })
+        engine.transientBadResponse = true
+
+        let outcome = await unavailableOutcome(engine: engine)
+
+        #expect(outcome?.severity == .transient)
+    }
+
+    /// The engine flag mirrors each engine's ladder config.
+    @Test("transientBadResponse mirrors the engine ladder configs")
+    func engineFlagMirrorsLadderConfig() {
+        #expect(OpenRouterEngine(apiKey: "k", model: "m").transientBadResponse)
+        #expect(!GoogleTranslateEngine(apiKey: "k").transientBadResponse)
+        #expect(!DeepLEngine(apiKey: "k").transientBadResponse)
     }
 
     // MARK: - Translation framework errors
@@ -84,10 +137,10 @@ struct TranslationQueueErrorCopyTests {
     func translationFrameworkErrorRendersCopy() async {
         let engine = ThrowingEngine(handler: { throw TranslationError.nothingToTranslate })
 
-        let message = await unavailableMessage(engine: engine)
+        let outcome = await unavailableOutcome(engine: engine)
 
         #expect(
-            message == TranslationError.nothingToTranslate.errorDescription ?? "Translation failed."
+            outcome?.message == TranslationError.nothingToTranslate.errorDescription ?? "Translation failed."
         )
     }
 
@@ -99,10 +152,10 @@ struct TranslationQueueErrorCopyTests {
         }
         let engine = ThrowingEngine(handler: { throw TranslationError.notInstalled })
 
-        let message = await unavailableMessage(engine: engine)
+        let outcome = await unavailableOutcome(engine: engine)
 
         #expect(
-            message == "The ja→en translation pack is not installed. Allow the download "
+            outcome?.message == "The ja→en translation pack is not installed. Allow the download "
                 + "prompt (or install it in System Settings), then retry."
         )
     }
@@ -116,8 +169,8 @@ struct TranslationQueueErrorCopyTests {
         let unknown = ExplodingError()
         let engine = ThrowingEngine(handler: { throw unknown })
 
-        let message = await unavailableMessage(engine: engine)
+        let outcome = await unavailableOutcome(engine: engine)
 
-        #expect(message == "Translation failed: \(unknown.localizedDescription)")
+        #expect(outcome?.message == "Translation failed: \(unknown.localizedDescription)")
     }
 }

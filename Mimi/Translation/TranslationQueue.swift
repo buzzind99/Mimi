@@ -1,6 +1,15 @@
 import Foundation
 import Translation
 
+/// How a failure should be treated by the toast system: transient failures
+/// surface as a dismissable yellow card (the condition usually clears on
+/// retry), permanent ones as a non-dismissable red card carrying the fix
+/// action. Classified in the queue where the error identity is known.
+enum TranslationFailureSeverity: Equatable, Sendable {
+    case transient
+    case permanent
+}
+
 /// Translation status surfaced to the UI (non-blocking).
 enum TranslationStatus: Equatable {
     case idle
@@ -10,9 +19,13 @@ enum TranslationStatus: Equatable {
     /// the footer copy ("External translation failed, N retries left").
     case retrying(String)
     /// The external engine failed out for good and the session latched onto
-    /// Apple on-device; the payload is the footer copy explaining why.
-    case degraded(String)
-    case unavailable(String)
+    /// Apple on-device; the payloads are the footer copy explaining why and
+    /// the failure's severity (carried through from the triggering
+    /// `.unavailable` for the toast system).
+    case degraded(String, TranslationFailureSeverity)
+    /// The engine failed out and nothing is translating; the payloads are
+    /// the user-facing copy and the failure's severity.
+    case unavailable(String, TranslationFailureSeverity)
 }
 
 /// Translates finalized sentences ja→en, strictly in order.
@@ -126,7 +139,12 @@ final class TranslationQueue {
                         if error is CancellationError {
                             setStatus(.idle)
                         } else {
-                            setStatus(.unavailable(Self.describe(error)))
+                            setStatus(
+                                .unavailable(
+                                    Self.describe(error),
+                                    Self.severity(of: error, engine: engine)
+                                )
+                            )
                         }
                     } else {
                         // A stale run re-queued work after a newer run
@@ -276,6 +294,27 @@ final class TranslationQueue {
             return translationError.errorDescription ?? "Translation failed."
         default:
             return "Translation failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Classifies a failure for the toast system. `.invalidKey` /
+    /// `.quotaExceeded` are fixed-contract permanent; `.badResponse` follows
+    /// the engine (`transientBadResponse` — LLM output may improve on
+    /// re-ask, a fixed-contract API never does); everything the ladder
+    /// treats as retryable is transient. Note: "transient" here means a
+    /// yellow toast, not "still retrying" — by the time an LLM
+    /// `.badResponse` reaches `.unavailable`, its own ladder already
+    /// exhausted its retries.
+    private static func severity(
+        of error: Error, engine: any TranslationEngine
+    ) -> TranslationFailureSeverity {
+        switch TransientRetryLadder.engineError(of: error) {
+        case .invalidKey, .quotaExceeded:
+            return .permanent
+        case .badResponse:
+            return engine.transientBadResponse ? .transient : .permanent
+        case .rateLimited, .serverError, .network, .cancelled:
+            return .transient
         }
     }
 }

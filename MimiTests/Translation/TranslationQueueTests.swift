@@ -351,11 +351,13 @@ struct TranslationQueueTests {
 
         #expect(sink.statuses.count == 3)
         #expect(Array(sink.statuses.prefix(2)) == [.ready, .translating])
-        guard case let .unavailable(message) = queue.status else {
+        guard case let .unavailable(message, severity) = queue.status else {
             Issue.record("expected .unavailable, got \(queue.status)")
             return
         }
         #expect(!message.isEmpty)
+        // The mock is a fixed-contract engine: a `.badResponse` is permanent.
+        #expect(severity == .permanent)
 
         // Generous margin over drain's own timeout: the early return is
         // near-instant, and the assertion must never trip on scheduling
