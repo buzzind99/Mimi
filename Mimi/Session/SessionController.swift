@@ -12,6 +12,10 @@ final class SessionController {
 
     private let live: LivePartialState
     private let latency: LatencyState
+    private let audioLevel: AudioLevelState
+    /// Chunk RMS staged off-main by `handleCaptureChunk`, drained onto
+    /// `audioLevel` by the 60 ms poll tick (see `StagedRMS`).
+    private let stagedRMS = StagedRMS()
     private let translationQueue: TranslationQueue
     private let makeEngine: @Sendable (URL?, Bool) -> ASREngine?
     private let makeCapture: () -> any AudioCapturing
@@ -59,6 +63,7 @@ final class SessionController {
     init(
         live: LivePartialState,
         latency: LatencyState,
+        audioLevel: AudioLevelState = AudioLevelState(),
         translationQueue: TranslationQueue,
         makeEngine: @escaping @Sendable (URL?, Bool) -> ASREngine? = {
             ASREngineFactory.makeEngine(modelURL: $0, allowMock: $1)
@@ -73,6 +78,7 @@ final class SessionController {
     ) {
         self.live = live
         self.latency = latency
+        self.audioLevel = audioLevel
         self.translationQueue = translationQueue
         self.makeEngine = makeEngine
         self.makeCapture = makeCapture
@@ -126,6 +132,8 @@ final class SessionController {
         onSessionBegin?()
         live.partial = ""
         latency.reset()
+        audioLevel.reset()
+        stagedRMS.clear()
 
         let buffer = SentenceBuffer()
         buffer.onSentence = { [weak self] sentence in
@@ -133,23 +141,7 @@ final class SessionController {
         }
         sentenceBuffer = buffer
 
-        let capture = makeCapture()
-        // The engine is captured strongly: a session owns exactly one engine,
-        // and chunks must not read main-actor state from the SCK output
-        // queue. `capture.stop()` fences chunks after teardown.
-        capture.onChunk = { [weak self] chunk in
-            guard let self else { return }
-            self.handleCaptureChunk(chunk, engine: engine)
-        }
-        capture.onIOError = { [weak self] error in
-            Task { @MainActor in self?.onCaptureError?(error.localizedDescription) }
-        }
-        self.capture = capture
-
-        #if DEBUG
-            print("[session] start: whole-system SCK audio capture")
-        #endif
-        try await capture.start()
+        try await startCapture(for: engine)
 
         // `prepare` may wait out a multi-second GGUF load + Metal compile
         // (when the background warm-up hasn't finished) — keep it off the
@@ -166,6 +158,42 @@ final class SessionController {
         )
 
         return true
+    }
+
+    /// Builds, wires, and starts a new capture stream for `engine`. Shared
+    /// by `begin()` and `restartCapture()`. The engine is captured strongly:
+    /// a session owns exactly one engine, and chunks must not read
+    /// main-actor state from the SCK output queue. `capture.stop()` fences
+    /// chunks after teardown.
+    private func startCapture(for engine: ASREngine) async throws {
+        let capture = makeCapture()
+        capture.onChunk = { [weak self] chunk in
+            guard let self else { return }
+            self.handleCaptureChunk(chunk, engine: engine)
+        }
+        capture.onIOError = { [weak self] error in
+            Task { @MainActor in self?.onCaptureError?(error.localizedDescription) }
+        }
+        self.capture = capture
+
+        #if DEBUG
+            print("[session] start: whole-system SCK audio capture")
+        #endif
+        try await capture.start()
+    }
+
+    /// Rebuilds the capture stream mid-session after the source died — the
+    /// `capture.lost` toast's Restart action. The
+    /// engine, timers, sentence buffer, and translation queue are untouched:
+    /// no model reload, and `onSessionBegin` does not re-fire. Timestamp
+    /// continuity is free — sentence timestamps derive from the engine's
+    /// sample counters, not the capture's. A no-op without a live engine
+    /// (the session is already down).
+    func restartCapture() async throws {
+        guard let engine else { return }
+        // Defensive: fence any chunks still arriving from the dead stream.
+        capture?.stop()
+        try await startCapture(for: engine)
     }
 
     /// Teardown, ordered so pending translations finish first: capture and
@@ -197,12 +225,19 @@ final class SessionController {
         sentenceBuffer = nil
         _ = await translationQueue.drain(timeout: Self.translationDrainTimeout)
         live.partial = ""
+        audioLevel.reset()
+        stagedRMS.clear()
     }
 
     // MARK: - Capture (ASR queue)
 
     private func handleCaptureChunk(_ chunk: AudioChunk, engine: ASREngine) {
         engine.push(chunk.samples)
+        // Stage the per-chunk level for the sidebar AUDIO meter: this runs on
+        // the SCK output queue, so `AudioLevelState` (main-actor observable)
+        // is fed by the poll tick instead of from here — same RMS metric the
+        // debug ingress log samples every ~8 s.
+        stagedRMS.stage(AudioLevels.rms(of: chunk.samples))
         #if DEBUG
             logIngressEnergy(chunk)
         #endif
@@ -245,11 +280,16 @@ final class SessionController {
         while let event = engine.poll() {
             handleASREvent(event)
         }
-        // Latency rides the existing 60 ms tick (no per-chunk Task hop): the
-        // 0.1 s rounding gate in `LatencyState` keeps publishes visible-only.
+        // Latency and the audio meter ride the existing 60 ms tick (no
+        // per-chunk Task hop): the 0.1 s rounding gate in `LatencyState`
+        // keeps latency publishes visible-only, and the meter only needs
+        // the latest staged RMS.
         latency.update(
             max(0, Double(engine.pushedSamples - engine.processedSamples) / SessionClock.sampleRate)
         )
+        if let rms = stagedRMS.take() {
+            audioLevel.update(rms: rms)
+        }
     }
 
     // MARK: - Event handling (main actor)
@@ -265,5 +305,30 @@ final class SessionController {
             )
             _ = lang
         }
+    }
+}
+
+/// Single-slot handoff for the sidebar AUDIO meter: `handleCaptureChunk`
+/// stages the chunk's RMS from the SCK output queue; the main-actor poll
+/// tick drains the latest value into `AudioLevelState`. Lock-guarded (same
+/// pattern as `SystemAudioCapture`/`DictionaryEngine`) — the slot only ever
+/// holds a `Float`, so `NSLock.withLock` bounds the critical sections to
+/// sub-microsecond work. `take()` leaves the slot empty: with no new chunks
+/// (source lost), the poll tick simply doesn't re-publish and the meter
+/// freezes at its last level until `reset()`/`clear()`.
+private final class StagedRMS {
+    private let lock = NSLock()
+    private var value: Float?
+
+    func stage(_ rms: Float) {
+        lock.withLock { value = rms }
+    }
+
+    func take() -> Float? {
+        lock.withLock { let v = value; value = nil; return v }
+    }
+
+    func clear() {
+        lock.withLock { value = nil }
     }
 }
