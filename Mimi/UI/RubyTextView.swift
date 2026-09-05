@@ -3,8 +3,11 @@ import SwiftUI
 /// Wrapping flow layout: places children left-to-right, breaking onto a new
 /// line when the next child would exceed the available width. Child sizes are
 /// measured once per content change (keyed by `fingerprint`) and line breaks
-/// are packed per proposal width, so the repeated layout passes a lazy stack
-/// triggers don't re-measure every child each time.
+/// are packed per proposal width, so the repeated layout passes List's
+/// virtualized rows trigger (scroll materialization, insertion springs,
+/// re-anchor chases) don't re-measure every child each time. The fingerprint
+/// also guards row recycling: a reused layout instance re-measures when its
+/// content changes.
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 4
     var lineSpacing: CGFloat = 1
@@ -38,7 +41,7 @@ private struct FlowLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         measureIfNeeded(subviews: subviews, into: &cache)
-        pack(width: proposal.width ?? .infinity, cache: &cache)
+        pack(width: proposal.width ?? .infinity, subviews: subviews, cache: &cache)
         return cache.totalSize
     }
 
@@ -46,15 +49,23 @@ private struct FlowLayout: Layout {
         in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache
     ) {
         measureIfNeeded(subviews: subviews, into: &cache)
-        pack(width: bounds.width, cache: &cache)
+        pack(width: bounds.width, subviews: subviews, cache: &cache)
         for (index, subview) in zip(cache.placements.indices, subviews) {
+            // A child re-measured to fit the line must be placed under the
+            // same width proposal, or it re-expands to its ideal single-line
+            // width and overflows the row (a folded plain run in furigana
+            // mode can be wider than the whole transcript).
+            let proposal: ProposedViewSize =
+                cache.sizes[index].width > bounds.width
+                    ? ProposedViewSize(width: bounds.width, height: nil)
+                    : .unspecified
             subview.place(
                 at: CGPoint(
                     x: bounds.minX + cache.placements[index].x,
                     y: bounds.minY + cache.placements[index].y
                 ),
                 anchor: .topLeading,
-                proposal: .unspecified
+                proposal: proposal
             )
         }
     }
@@ -65,15 +76,29 @@ private struct FlowLayout: Layout {
         cache.packedWidth = nil
     }
 
-    private func pack(width: CGFloat, cache: inout Cache) {
+    private func pack(
+        width: CGFloat, subviews: Subviews, cache: inout Cache
+    ) {
         guard cache.packedWidth != width else { return }
         cache.packedWidth = width
+        // Children wider than the line can't be split by the flow packer;
+        // re-measure them under the line's width so their content (Text)
+        // wraps internally instead of overflowing the row. Their wrapped
+        // height keeps following children on a lower line.
+        var sizes = cache.sizes
+        if width.isFinite {
+            for (index, size) in cache.sizes.enumerated() where size.width > width {
+                sizes[index] = subviews[index].sizeThatFits(
+                    ProposedViewSize(width: width, height: nil)
+                )
+            }
+        }
         var placements: [CGPoint] = []
-        placements.reserveCapacity(cache.sizes.count)
+        placements.reserveCapacity(sizes.count)
         var x: CGFloat = 0
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
-        for size in cache.sizes {
+        for size in sizes {
             if x > 0, x + spacing + size.width > width {
                 x = 0
                 y += rowHeight + lineSpacing

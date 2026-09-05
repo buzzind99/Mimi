@@ -5,33 +5,29 @@ import SwiftUI
 /// SwiftUI skips unchanged rows when the transcript re-diffs.
 struct TranscriptRow: View, Equatable {
     let entry: SessionEntry
-    @ReadingAnnotationSetting private var readingAnnotation
-    @UIScaleSetting private var uiScale
-
-    /// Ignores `readingAnnotation` and `uiScale` on purpose: those values
-    /// live in `@AppStorage` via `DynamicProperty` wrappers
-    /// (`ReadingAnnotationSetting`, `UIScaleSetting`), which invalidate this
-    /// view directly when they change, bypassing the Equatable skip — so
-    /// comparing entries alone is sufficient.
-    nonisolated static func == (lhs: TranscriptRow, rhs: TranscriptRow) -> Bool {
-        lhs.entry == rhs.entry
-    }
+    /// Snapshots, not settings: under List, rows SwiftUI deems unchanged are
+    /// skipped via `==`, and `@AppStorage`-backed wrappers read the *live*
+    /// stored value — so comparing wrapper values would always hold and stale
+    /// rows would keep rendering the previous mode. Plain values passed from
+    /// the parent let a mode/scale change fail `==` and re-render every row.
+    let annotation: ReadingAnnotation
+    let scale: UIScale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("\(entry.startTimestamp) – \(entry.endTimestamp)")
-                .font(ScaledFont.caption(uiScale.factor).monospacedDigit())
+                .font(ScaledFont.caption(scale.factor).monospacedDigit())
                 .foregroundStyle(.secondary.opacity(0.6))
 
             if let joined = entry.joinedTranslations {
                 Text(joined)
-                    .font(ScaledFont.body(uiScale.factor))
+                    .font(ScaledFont.body(scale.factor))
                     .italic()
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             } else {
                 Text("…")
-                    .font(ScaledFont.body(uiScale.factor))
+                    .font(ScaledFont.body(scale.factor))
                     .italic()
                     .foregroundStyle(.secondary.opacity(0.3))
             }
@@ -40,9 +36,9 @@ struct TranscriptRow: View, Equatable {
             // every annotation mode; selectable in all modes.
             RubyTextView(
                 text: entry.sentence.text,
-                annotation: readingAnnotation,
-                surfaceFont: .system(size: 17 * uiScale.factor, weight: .medium),
-                annotationFont: ScaledFont.caption(uiScale.factor).monospaced(),
+                annotation: annotation,
+                surfaceFont: .system(size: 17 * scale.factor, weight: .medium),
+                annotationFont: ScaledFont.caption(scale.factor).monospaced(),
                 annotationColor: .secondary.opacity(0.55)
             )
             .textSelection(.enabled)

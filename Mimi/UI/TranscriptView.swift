@@ -2,40 +2,29 @@ import SwiftUI
 
 /// Chronological transcript, oldest first, newest appended at the bottom.
 ///
-/// Scroll behavior is a cooperation between the framework and a thin manual
-/// pin. The role-scoped default anchors do the heavy lifting:
+/// Scroll behavior is a thin manual pin. The `ScrollView`-only role-scoped
+/// default anchors (`.initialOffset`, `.sizeChanges`) do not apply to `List`
+/// — `defaultScrollAnchor` is documented as associating the anchor to a
+/// `ScrollView` — so `List` relies entirely on the pin:
 ///
-/// - `.initialOffset` starts at the newest sentence.
-/// - `.sizeChanges` keeps the bottom flush while content grows — but only
-///   when the viewport is *pixel-exactly* flush. A viewport that settled a
-///   few points short (spring settle, trackpad inertia, a lazy-estimated
-///   landing) keeps its visible content stationary instead, letting the
-///   bottom slide below the fold when a translation grows a row. Verified
-///   against macOS 15 with a geometry-logging harness.
+/// - Starting at the newest sentence is covered by `reAnchor` on appear and
+///   on every entries change.
+/// - Growth of the content under a stationary offset — a translation landing
+///   on any row, a new entry, a viewport resize — re-anchors to the bottom
+///   marker while pinned.
 ///
-/// The plain `.defaultScrollAnchor(.bottom)` is deliberately NOT used: for
-/// content shorter than the viewport it bottom-aligns via a negative
-/// content offset and transiently drops that alignment (resetting the
-/// offset to the top) on every content change before re-aligning — the
-/// transcript visibly bounced "from the top" on each insertion, and the
-/// offset reset/realign churn made `onScrollGeometryChange` fire multiple
-/// times per frame.
-///
-/// The manual pin covers what the anchors cannot. It is decided by scroll
-/// direction: only movement of the offset *away* from the bottom (the user
-/// dragging up) can drop it, and scrolling back down into the bottom
-/// re-engages it. That decision only reads the distance on ticks where the
-/// content and viewport span held still, so a translation landing in the
-/// same tick as a drag can't masquerade as either. Growth of the content
-/// under a stationary offset — a translation landing on any row, a new
-/// entry, a viewport resize — re-anchors to the bottom marker while pinned
-/// instead, because measuring distance from freshly grown content would
-/// read the growth itself and drop the pin exactly when it must act.
+/// The manual pin is decided by scroll direction: only movement of the
+/// offset *away* from the bottom (the user dragging up) can drop it, and
+/// scrolling back down into the bottom re-engages it. That decision only
+/// reads the distance on ticks where the content and viewport span held
+/// still, so a translation landing in the same tick as a drag can't
+/// masquerade as either. Distance measured from freshly grown content would
+/// read the growth itself and drop the pin exactly when it must act, so
+/// growth ticks never feed the pin decision.
 /// Re-anchoring then chases the bottom marker on every geometry tick until
 /// the content sits flush: a single scrollTo can land short while the
-/// insertion spring or the LazyVStack's estimated layout is still settling.
-/// With the role-scoped anchors there is no framework offset churn left to
-/// fight, so the chase converges quietly.
+/// insertion spring or List's estimated layout is still settling, so the
+/// chase converges quietly.
 struct TranscriptView: View {
     var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
@@ -55,34 +44,52 @@ struct TranscriptView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if model.entries.isEmpty {
-                        emptyState
-                    }
-                    ForEach(model.entries) { entry in
-                        TranscriptRow(entry: entry)
-                            .id(entry.id)
-                            // Opacity only: a .move transition inside a
-                            // ScrollView animates relative to the viewport,
-                            // which displaces neighboring rows while the
-                            // re-anchor chase is also repositioning content.
-                            .transition(.opacity)
+            List {
+                if model.entries.isEmpty {
+                    emptyState
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+                ForEach(model.entries) { entry in
+                    // One row per entry: List flattens each builder child
+                    // into its own row, so the divider must stay grouped
+                    // with the row it belongs to.
+                    VStack(spacing: 0) {
+                        TranscriptRow(
+                            entry: entry,
+                            annotation: readingAnnotation,
+                            scale: uiScale
+                        )
+                        // Opacity only: a .move transition animates
+                        // relative to the viewport, which displaces
+                        // neighboring rows while the re-anchor chase is
+                        // also repositioning content.
+                        .transition(.opacity)
                         Divider().opacity(0.15)
                     }
-                    Color.clear
-                        .frame(height: 1)
-                        .padding(.bottom, 12)
-                        .id(Self.bottomAnchorID)
+                    .id(entry.id)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
-                .padding(.horizontal, 16)
-                .animation(
-                    .spring(response: 0.35, dampingFraction: 0.85),
-                    value: model.entries.count
-                )
+                Color.clear
+                    .frame(height: 1)
+                    .padding(.bottom, 12)
+                    .id(Self.bottomAnchorID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             }
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            // The bottom marker row is 1pt tall; without this List enforces
+            // a minimum row height that would keep it from sitting flush.
+            .environment(\.defaultMinListRowHeight, 1)
+            .animation(
+                .spring(response: 0.35, dampingFraction: 0.85),
+                value: model.entries.count
+            )
             .onScrollGeometryChange(for: ScrollSnapshot.self) { geometry in
                 ScrollSnapshot(
                     offsetY: geometry.contentOffset.y,
@@ -133,6 +140,11 @@ struct TranscriptView: View {
             }
             .onChange(of: model.entries) { _, _ in
                 // Covers appends and rows growing when a translation lands.
+                reAnchor(proxy)
+            }
+            .onAppear {
+                // List has no `.initialOffset` anchor (ScrollView-only);
+                // start pinned at the newest sentence.
                 reAnchor(proxy)
             }
             .onChange(of: readingAnnotation) { _, _ in
