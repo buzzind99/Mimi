@@ -7,6 +7,7 @@ excluded:
   - local
   - models
   - .codegraph
+  - Mock
 
 # Keep the default rule set, then opt out of rules that fight the
 # existing code style. Re-enable individually if desired.

@@ -25,6 +25,7 @@ models/
 vendor/
 local/
 debug/
+Mock/
 
 # Logs & temp
 *.log
