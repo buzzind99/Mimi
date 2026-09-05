@@ -153,9 +153,9 @@ enum Theme {
             colors: [Color(light: 0x0D9488, dark: 0x5EEAD4), Color(light: 0x0284C7, dark: 0x38BDF8)],
             startPoint: .top, endPoint: .bottom
         )
-        /// "Stop session" capsule (`#FF5F6E → #E23A50`, leading→trailing).
+        /// "Stop session" capsule (`#FF6E9C → #E05585`, leading→trailing).
         static let stop = LinearGradient(
-            colors: [Color(light: 0xD92B3C, dark: 0xFF5F6E), Color(light: 0xB02035, dark: 0xE23A50)],
+            colors: [Color(light: 0xD14E77, dark: 0xFF6E9C), Color(light: 0xB33459, dark: 0xE05585)],
             startPoint: .leading, endPoint: .trailing
         )
         /// "Start session" capsule (`#2DD4BF → #38BDF8`, leading→trailing).

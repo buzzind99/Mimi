@@ -226,9 +226,7 @@ extension SidebarView {
         case .degraded: "On-device (fallback)"
         case .unavailable: "Unavailable"
         case .ready, .translating, .retrying, .idle:
-            model.activeTranslationEngine == .apple
-                ? "On-device"
-                : model.translationSettings.selectedProvider.displayName
+            model.activeTranslationEngine == .apple ? "On-device" : "External"
         }
     }
 

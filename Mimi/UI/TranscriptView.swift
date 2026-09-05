@@ -51,6 +51,7 @@ struct TranscriptView: View {
             List {
                 Color.clear
                     .frame(height: 1)
+                    .padding(.top, 16)
                     .id(Self.topAnchorID)
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
