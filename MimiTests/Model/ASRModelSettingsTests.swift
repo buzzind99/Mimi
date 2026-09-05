@@ -2,8 +2,8 @@ import Foundation
 @testable import Mimi
 import Testing
 
-/// Tests `ASRModelSettings` persistence over isolated `UserDefaults` suites
-/// (per `UNIT_TEST_NEW.md`): the production default, persisted round-trip,
+/// Tests `ASRModelSettings` persistence over isolated `UserDefaults` suites:
+/// the production default, persisted round-trip,
 /// and the stable raw-value contract the storage payload relies on.
 @MainActor
 @Suite("ASRModelSettings")
