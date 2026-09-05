@@ -176,8 +176,7 @@ enum KanaRomaji {
     /// The romaji a sokuon contributes before the mora at `index`, plus the
     /// number of characters consumed: the next mora's leading consonant
     /// doubles ("っか" → "kka", "っち" → "cchi", "っちゃ" → "ccha", "っつ" →
-    /// "ttsu", loanword geminates like "ベッド" → "ddo"), and the は/ば/ふ
-    /// sounds realize as the p-series ("っぴ" → "ppi", "っぷ" → "ppu").
+    /// "ttsu", "スタッフ" → "ffu", loanword geminates like "ベッド" → "ddo").
     /// Returns nil when the next mora can't geminate (vowel-initial,
     /// unmappable, or end of input).
     private static func geminatedSokuon(
@@ -198,9 +197,6 @@ enum KanaRomaji {
             return nil
         }
         guard let first = mora.first, !"aiueo".contains(first) else { return nil }
-        if "hbf".contains(first) {
-            return ("pp" + mora.dropFirst(), consumed + 1)
-        }
         return (String(first) + mora, consumed + 1)
     }
 
