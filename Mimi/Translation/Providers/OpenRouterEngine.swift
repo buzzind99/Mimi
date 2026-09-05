@@ -18,6 +18,11 @@ struct OpenRouterEngine: TranslationEngine {
     /// the queue slices every batch to one sentence.
     let preferredBatchSize = 1
 
+    /// LLM replies are nondeterministic: a `.badResponse` is a transient
+    /// (retryable, yellow-toast) failure, matching the ladder's
+    /// `retriesBadResponse: true`.
+    let transientBadResponse = true
+
     var onRetry: (@Sendable (RetryProgress) -> Void)?
 
     private let client: ChatCompletionsClient

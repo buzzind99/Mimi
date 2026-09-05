@@ -41,8 +41,24 @@ protocol TranslationEngine: Sendable {
     /// Never fired on-device; cloud engines fire it per retry attempt.
     var onRetry: (@Sendable (RetryProgress) -> Void)? { get set }
 
+    /// Whether a `.badResponse` from this engine is transient. Mirrors each
+    /// engine's ladder config (`TransientRetryLadder.retriesBadResponse`):
+    /// LLM/chat-completions engines produce nondeterministic output that
+    /// usually improves on re-ask (`true`), while fixed-contract APIs
+    /// (Google, DeepL) never retry it (`false` — the default). Apple never
+    /// surfaces engine errors. Resolves the `.badResponse` severity
+    /// ambiguity where the error identity is known (`TranslationQueue`).
+    var transientBadResponse: Bool { get }
+
     /// Translates the given texts 1:1, preserving order. Throws
     /// `TranslationEngineError` on failure, or `CancellationError` when the
     /// calling task is cancelled.
     func translate(_ texts: [String]) async throws -> [String]
+}
+
+/// Fixed-contract default: only LLM/chat-completions engines override.
+extension TranslationEngine {
+    var transientBadResponse: Bool {
+        false
+    }
 }
