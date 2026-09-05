@@ -187,7 +187,7 @@ struct AppModelTests {
 
     // MARK: - Capture errors
 
-    @Test("a capture error while running marks the source lost")
+    @Test("a capture error while running marks the source lost and posts the capture.lost toast")
     func onCaptureErrorMarksSourceLostWhenRunning() async {
         let model = await makeSUT()
         model.phase = .running
@@ -195,10 +195,13 @@ struct AppModelTests {
         model.sessionController.onCaptureError?("stream died")
 
         #expect(model.phase == .sourceLost)
-        #expect(model.errorMessage == "stream died")
+        let toast = model.toasts.toasts.first { $0.key == ToastKey.captureLost }
+        #expect(toast?.style == .redPersistent)
+        #expect(toast?.body == "stream died")
+        #expect(toast?.action?.label == "Restart capture")
     }
 
-    @Test("a capture error while starting marks the source lost")
+    @Test("a capture error while starting marks the source lost and posts the capture.lost toast")
     func onCaptureErrorMarksSourceLostWhenStarting() async {
         let model = await makeSUT()
         model.phase = .starting
@@ -206,7 +209,11 @@ struct AppModelTests {
         model.sessionController.onCaptureError?("stream died during start")
 
         #expect(model.phase == .sourceLost)
-        #expect(model.errorMessage == "stream died during start")
+        #expect(
+            model.toasts.toasts.contains {
+                $0.key == ToastKey.captureLost && $0.body == "stream died during start"
+            }
+        )
     }
 
     @Test("a capture error while idle is ignored")
@@ -217,7 +224,7 @@ struct AppModelTests {
         model.sessionController.onCaptureError?("stream died")
 
         #expect(model.phase == .idle)
-        #expect(model.errorMessage == nil)
+        #expect(model.toasts.toasts.isEmpty)
     }
 
     // MARK: - Export
@@ -360,13 +367,28 @@ struct AppModelTests {
         #expect(model.modelURL == url)
     }
 
-    @Test("engine error publishes the error message")
-    func onEngineErrorPublishesErrorMessage() async {
+    @Test("an engine error surfaces as an asr.warning toast")
+    func onEngineErrorSurfacesAsWarningToast() async {
         let model = await makeSUT()
 
         model.sessionController.onEngineError?("engine broke")
 
-        #expect(model.errorMessage == "engine broke")
+        let toast = model.toasts.toasts.first { $0.key == ToastKey.asrWarning }
+        #expect(toast?.style == .yellowAuto)
+        #expect(toast?.body == "engine broke")
+    }
+
+    @Test("stop clears all toasts")
+    func stopClearsToasts() async {
+        let model = await makeSUT()
+        model.phase = .running
+        model.sessionController.onEngineError?("engine broke")
+        #expect(!model.toasts.toasts.isEmpty)
+
+        model.stop()
+        #expect(await pollUntil { model.phase == .idle }, "stop winds down to idle")
+
+        #expect(model.toasts.toasts.isEmpty)
     }
 
     @Test("the translation queue status handler publishes the status")
@@ -438,14 +460,21 @@ struct AppModelTests {
 
     @Test("the app-terminate notification stops a running session")
     func terminateNotificationStopsRunningSession() async {
-        let model = await makeSUT()
+        // A private center: posting on the shared `.default` center would
+        // stop every other live `AppModel` running in parallel tests.
+        let notifications = NotificationCenter()
+        let model = AppModel(
+            translationSettings: isolatedTranslationSettings(suite: "test.AppModelControl"),
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelControl"),
+            initialModelResolve: { _ in nil },
+            willTerminateNotifications: notifications
+        )
+        await model.initialModelCheck?.value
         model.phase = .running
 
-        NotificationCenter.default.post(name: Self.willTerminateNotification, object: nil)
+        notifications.post(name: .mimiAppWillTerminate, object: nil)
         #expect(await pollUntil { model.phase == .idle }, "the terminate notification stops the session")
     }
-
-    private static let willTerminateNotification = NSNotification.Name("MimiAppWillTerminate")
 
     /// Gate parked inside the model check's `resolve`: keeps the check in
     /// flight (and `isCheckingModel` true) until the test opens it. Releases

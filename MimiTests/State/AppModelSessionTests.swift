@@ -88,20 +88,32 @@ struct AppModelSessionTests {
 
         private let log: FlowLog
         private let startError: (any Error)?
+        private let restartStartError: (any Error)?
         private let startGate: StartGate?
+        private let lock = NSLock()
+        private var starts = 0
 
-        init(log: FlowLog, startError: (any Error)? = nil, startGate: StartGate? = nil) {
+        init(
+            log: FlowLog, startError: (any Error)? = nil,
+            restartStartError: (any Error)? = nil, startGate: StartGate? = nil
+        ) {
             self.log = log
             self.startError = startError
+            self.restartStartError = restartStartError
             self.startGate = startGate
         }
 
         func start() async throws {
+            // The first start is `begin()`'s; later starts are restarts.
+            let attempt = lock.withLock { starts += 1; return starts }
             log.record("capture.start")
             // Suspend (never block the main actor thread) until the test
             // opens the gate.
             if let startGate {
                 await startGate.wait()
+            }
+            if attempt > 1, let restartStartError {
+                throw restartStartError
             }
             if let startError {
                 throw startError
@@ -149,13 +161,17 @@ struct AppModelSessionTests {
         resolveEngine: Bool = true,
         poll: [ASREvent] = [],
         captureStartError: (any Error)? = nil,
+        restartStartError: (any Error)? = nil,
         startGate: StartGate? = nil
     ) async -> SUT {
         let log = FlowLog()
         let engine = ScriptedASREngine(log: log, poll: poll)
-        let capture = ScriptedCapture(log: log, startError: captureStartError, startGate: startGate)
+        let capture = ScriptedCapture(
+            log: log, startError: captureStartError,
+            restartStartError: restartStartError, startGate: startGate
+        )
         let model = AppModel(
-            makeSessionController: { live, latency, translationQueue in
+            makeSessionController: { live, latency, _, translationQueue in
                 SessionController(
                     live: live, latency: latency, translationQueue: translationQueue,
                     makeEngine: { _, allowMock in
@@ -198,7 +214,6 @@ struct AppModelSessionTests {
         #expect(sut.model.phase == .starting)
         #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
         #expect(sut.model.translationConfig != nil)
-        #expect(sut.model.errorMessage == nil)
         #expect(sut.controller.sessionMetadata != nil)
         #expect(await pollUntil { sut.model.live.partial == "ライブ" }, "the scripted partial surfaces")
         #expect(sut.model.live.partial == "ライブ")
@@ -242,6 +257,41 @@ struct AppModelSessionTests {
         #expect(sut.log.names.contains("capture.start"))
         #expect(sut.controller.sessionMetadata == nil)
         #expect(sut.model.translationConfig == nil)
+        // The failure surfaces as the session.failed card: no
+        // action, dismissed by the next Start.
+        let toast = sut.model.toasts.toasts.first { $0.key == ToastKey.sessionFailed }
+        #expect(toast?.style == .redPersistent)
+        #expect(toast?.body == "boom")
+        #expect(toast?.action == nil)
+    }
+
+    /// The failure card is "cleared on next Start": the dismissal happens
+    /// synchronously at start entry, before the second attempt's own outcome.
+    @Test("a previous session's failure card is cleared by the next Start")
+    func startClearsPreviousSessionFailedToast() async {
+        let sut = await makeSUT(captureStartError: ScriptedStartError())
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the capture failure fails the start")
+        #expect(!sut.model.toasts.toasts.isEmpty, "the failure card is up")
+
+        sut.model.start()
+
+        #expect(sut.model.toasts.toasts.isEmpty, "the stale failure card was dismissed on entry")
+    }
+
+    @Test("a failed session restarts on Start")
+    func failedSessionRestartsOnStart() async {
+        let sut = await makeSUT(captureStartError: ScriptedStartError())
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the capture failure fails the start")
+
+        sut.model.start()
+
+        #expect(await pollUntil { sut.model.phase == .failed("boom") }, "the second attempt fails again (startError persists)")
+        #expect(
+            sut.log.names.filter { $0 == "capture.start" }.count == 2,
+            "the failed session was allowed to attempt a restart"
+        )
     }
 
     // MARK: - stop() during start
@@ -267,6 +317,73 @@ struct AppModelSessionTests {
         // Teardown must run (and beat the resumed begin, whose tail is a
         // no-op against a stopped session) in both interleavings.
         #expect(sut.log.contains(inOrder: ["capture.start", "capture.stop"]))
+    }
+
+    // MARK: - capture.lost + restartCapture
+
+    /// The capture error path: a mid-session stream death parks the model
+    /// on `.sourceLost` with the red capture.lost card; the card's Restart
+    /// action rebuilds only the capture (engine untouched, entries and clock
+    /// intact) and returns to running.
+    @Test("a mid-session capture error posts capture.lost and restart recovers")
+    func captureErrorPostsToastAndRestartRecovers() async {
+        let sut = await makeSUT(poll: [
+            .final(text: "おわり。", startSample: 0, endSample: 16000, lang: "ja")
+        ])
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
+        #expect(await pollUntil { sut.model.entries.count == 1 }, "the scripted final lands in the transcript")
+
+        sut.capture.onIOError?(.streamSetupFailed("stream died"))
+        #expect(await pollUntil { sut.model.phase == .sourceLost }, "the capture death parks the model on source lost")
+
+        let toast = sut.model.toasts.toasts.first { $0.key == ToastKey.captureLost }
+        #expect(toast?.style == .redPersistent)
+        #expect(toast?.body == CaptureError.streamSetupFailed("stream died").errorDescription)
+        #expect(toast?.action?.label == "Restart capture")
+
+        sut.model.restartCapture()
+
+        #expect(await pollUntil { sut.model.phase == .running }, "the restart brings the session back up")
+        #expect(sut.model.toasts.toasts.isEmpty, "the capture.lost card is dismissed on recovery")
+        #expect(sut.model.entries.count == 1, "entries survive the restart")
+        #expect(
+            sut.log.contains(inOrder: ["capture.start", "capture.stop", "capture.start"]),
+            "only the capture stream was rebuilt"
+        )
+        #expect(
+            sut.log.names.filter { $0 == "engine.openStream" }.count == 1,
+            "the engine was not reloaded (warm-up's prepare aside, no new stream opened)"
+        )
+    }
+
+    @Test("restartCapture is refused while the session is live")
+    func restartRefusedWhileRunning() async {
+        let sut = await makeSUT()
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
+
+        sut.model.restartCapture()
+
+        #expect(sut.model.phase == .running)
+        #expect(!sut.log.names.contains("capture.stop"), "nothing was torn down")
+    }
+
+    @Test("a failed restart keeps the source lost with an updated toast")
+    func failedRestartKeepsSourceLost() async {
+        let sut = await makeSUT(restartStartError: ScriptedStartError())
+        sut.model.start()
+        #expect(await pollUntil { sut.model.phase == .running }, "start brings the session up to running")
+
+        sut.controller.onCaptureError?("stream died")
+        #expect(await pollUntil { sut.model.phase == .sourceLost }, "the capture death parks the model on source lost")
+
+        sut.model.restartCapture()
+
+        #expect(await pollUntil { sut.model.phase == .sourceLost }, "the failed restart returns to source lost")
+        let toast = sut.model.toasts.toasts.first { $0.key == ToastKey.captureLost }
+        #expect(toast?.body == "Restart failed: boom", "the card carries the restart failure")
+        #expect(toast?.action?.label == "Restart capture", "the fix action stays actionable")
     }
 
     // MARK: - quit-time shutdown

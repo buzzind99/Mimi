@@ -5,8 +5,9 @@ import Testing
 
 /// Tests `AppModel`'s engine selection: an external provider spawns a
 /// worker task (config stays nil), an exhausted external engine latches the
-/// one-way Apple fallback per session, the latch survives manual retries,
-/// and an unconfigured selected provider degrades to Apple with a note.
+/// one-way Apple fallback per session, a manual retry resets the latch (the
+/// next failure re-latches instead of parking on `.unavailable`), and an
+/// unconfigured selected provider degrades to Apple with a note.
 @MainActor
 @Suite("AppModel engine selection + fallback")
 struct AppModelTranslationEngineTests {
@@ -67,8 +68,8 @@ struct AppModelTranslationEngineTests {
         await stopTranslation(model)
     }
 
-    @Test("an unconfigured selected provider degrades to Apple with a note")
-    func unconfiguredProviderFallsBackToAppleWithNote() {
+    @Test("an unconfigured selected provider degrades to Apple")
+    func unconfiguredProviderFallsBackToApple() {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         settings.select(.openrouter)
         let model = AppModel(
@@ -81,13 +82,6 @@ struct AppModelTranslationEngineTests {
 
         #expect(model.activeTranslationEngine == .apple)
         #expect(model.translationConfig != nil)
-        // Release names the missing key; dev pins to Apple via the no-op key
-        // store and says so instead.
-        #if DEBUG
-            #expect(model.errorMessage?.contains("Apple on-device") == true)
-        #else
-            #expect(model.errorMessage?.contains("no API key") == true)
-        #endif
     }
 
     @Test("each external provider builds its engine and spawns the worker")
@@ -135,14 +129,17 @@ struct AppModelTranslationEngineTests {
         #expect(model.translationConfig != nil, "the Apple host must be re-activated")
         #expect(
             model.translationStatus
-                == .degraded("External translation failed — using Apple on-device")
+                == .degraded("External translation failed — using Apple on-device", .permanent)
         )
 
         await stopTranslation(model)
     }
 
-    @Test("the fallback latch is one-way per session despite manual retries")
-    func fallbackLatchSurvivesManualRetry() async {
+    /// Every manual retry resets `translationFallbackActive`, so a
+    /// failure after a retry re-latches onto Apple instead of parking on
+    /// `.unavailable` forever.
+    @Test("a manual retry re-arms the one-way fallback latch")
+    func manualRetryRearmsFallbackLatch() async {
         let model = AppModel(
             translationSettings: makeSettings(provider: .openrouter),
             asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
@@ -155,29 +152,20 @@ struct AppModelTranslationEngineTests {
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
         #expect(await pollUntil { model.translationFallbackActive }, "the first failure latches the Apple fallback")
 
-        // Manual retry re-attempts the external engine (key may be fixed).
+        // Manual retry resets the latch and re-attempts the external engine
+        // (the key may have been fixed).
         model.retryTranslation()
+        #expect(!model.translationFallbackActive, "the retry re-arms the fallback")
         #expect(model.activeTranslationEngine == .external)
 
-        // A second failure must NOT re-enter the fallback: the latch is
-        // one-way, so the dead external run stays surfaced for the button.
+        // A second failure re-latches instead of parking on .unavailable.
         model.translationQueue.enqueue(makeSentence(index: 1, text: "こんにちは"))
         #expect(
-            await pollUntil(timeout: resultTimeout) {
-                if case .unavailable = model.translationStatus {
-                    return true
-                }
-                return false
-            },
-            "the second failure surfaces .unavailable"
+            await pollUntil { model.translationFallbackActive },
+            "the retried failure re-latches the Apple fallback"
         )
-
-        #expect(model.translationFallbackActive, "the latch stays engaged")
-        #expect(model.activeTranslationEngine == .external, "no second auto-fallback")
-        guard case .unavailable = model.translationStatus else {
-            Issue.record("expected .unavailable, got \(model.translationStatus)")
-            return
-        }
+        #expect(model.activeTranslationEngine == .apple, "no parking on .unavailable")
+        #expect(model.translationConfig != nil, "the Apple host is re-activated again")
 
         await stopTranslation(model)
     }
@@ -228,7 +216,9 @@ struct AppModelTranslationEngineTests {
         model.retryTranslation()
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
 
-        #expect(await pollUntil { !recorder.texts.isEmpty }, "the retried attempt delivers")
+        // The queue publishes .ready after the result; poll on the status so
+        // the assertions below observe the settled sequence.
+        #expect(await pollUntil { statuses.last == .ready }, "the retried attempt resolves back to ready")
 
         #expect(recorder.texts == ["hello"])
         #expect(

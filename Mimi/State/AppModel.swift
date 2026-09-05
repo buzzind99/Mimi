@@ -42,7 +42,6 @@ final class AppModel {
     /// entry. Pinning an older entry means new translations never move the
     /// view; nil tracks the newest.
     var hudPinnedIndex: Int?
-    var errorMessage: String?
     /// True while a session start is blocked on the first-launch dictionary
     /// build (see `ensureDictionaryReady`) so the status bar can show
     /// "Building dictionary…" instead of "Starting…".
@@ -67,6 +66,10 @@ final class AppModel {
 
     let live = LivePartialState()
     let latency = LatencyState()
+    let audioLevel = AudioLevelState()
+    /// Toast stack: every error surface routes through here;
+    /// cleared on session stop/teardown.
+    let toasts = ToastCenter()
     let translationQueue = TranslationQueue()
     /// Non-secret translation provider settings (selected provider, hasKey
     /// flags, OpenRouter model, test results). Keys stay in `SecureKeyStoring`
@@ -83,11 +86,14 @@ final class AppModel {
 
     /// True once this session has latched onto Apple on-device after an
     /// external engine failed (the Settings "Currently using" row surfaces it).
+    /// Reset by every manual retry (each retry re-arms the one-way fallback).
     var translationFallbackActive = false
 
     /// The engine currently attached to the queue — Apple's via the hidden
     /// `.translationTask` host, an external one via `translationWorker`.
-    private(set) var activeTranslationEngine: ActiveTranslationEngine = .apple
+    /// Internal: the translation-engine management lives in
+    /// `AppModelTranslation.swift` (file split for the lint gate).
+    var activeTranslationEngine: ActiveTranslationEngine = .apple
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).
@@ -95,7 +101,8 @@ final class AppModel {
 
     /// The spawned external-engine worker (`queue.run(with:)`). Apple runs
     /// belong to SwiftUI's `.translationTask` instead. Torn down on stop.
-    private var translationWorker: Task<Void, Never>?
+    /// Internal: managed from `AppModelTranslation.swift`.
+    var translationWorker: Task<Void, Never>?
 
     /// The in-flight teardown task from `stop()`. `shutdownForTermination`
     /// awaits it so quit never runs a second teardown concurrently with a
@@ -106,6 +113,16 @@ final class AppModel {
     /// `start` is refused — a session begun during the `.terminateLater`
     /// window would race the engine retirement that follows the drain.
     private(set) var isTerminating = false
+    /// SESSION-card duration anchors: set when a session's chunks start
+    /// flowing (`onSessionBegin`) and when teardown completes
+    /// (`performStop`); both nil before the first session. Duration reads
+    /// now − startedAt while running, endedAt − startedAt after stop.
+    private(set) var sessionStartedAt: Date?
+    private(set) var sessionEndedAt: Date?
+    /// When the capture source died mid-session (`.sourceLost`). The SESSION
+    /// card freezes at it during the outage — the session clock itself
+    /// survives a successful restart, so duration resumes counting then.
+    private(set) var captureLostAt: Date?
     /// Injectable so tests can observe (and fake) the quit-time release of
     /// the process-warm ASR engine; the default drives the real factory.
     private let retireWarmEngine: @Sendable () -> Void
@@ -113,6 +130,12 @@ final class AppModel {
     /// Injectable HTTP transport for the external engines (tests); nil drives
     /// the real per-provider `URLSession` transports.
     let translationTransport: HTTPTranslationTransport?
+
+    /// Injectable so the terminate-notification wiring can be tested
+    /// hermetically — posting on the shared `.default` center from a parallel
+    /// test would stop every other live `AppModel`. The default is the
+    /// app-wide center.
+    private let willTerminateNotifications: NotificationCenter
 
     /// Internal (not private) so tests can drive the session callbacks.
     let sessionController: SessionController
@@ -126,7 +149,7 @@ final class AppModel {
     /// the engine warm-up — real blocking work tests must never trigger.
     init(
         makeSessionController: (
-            (LivePartialState, LatencyState, TranslationQueue) -> SessionController
+            (LivePartialState, LatencyState, AudioLevelState, TranslationQueue) -> SessionController
         )? = nil,
         translationSettings: TranslationSettings? = nil,
         asrModelSettings: ASRModelSettings? = nil,
@@ -136,18 +159,21 @@ final class AppModel {
         },
         retireWarmEngine: @escaping @Sendable () -> Void = {
             ASREngineFactory.retireWarmEngine()
-        }
+        },
+        willTerminateNotifications: NotificationCenter = .default
     ) {
         self.translationSettings = translationSettings ?? TranslationSettings()
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
         modelResolve = initialModelResolve
         self.translationTransport = translationTransport
         self.retireWarmEngine = retireWarmEngine
+        self.willTerminateNotifications = willTerminateNotifications
         if let makeSessionController {
-            sessionController = makeSessionController(live, latency, translationQueue)
+            sessionController = makeSessionController(live, latency, audioLevel, translationQueue)
         } else {
             sessionController = SessionController(
-                live: live, latency: latency, translationQueue: translationQueue
+                live: live, latency: latency, audioLevel: audioLevel,
+                translationQueue: translationQueue
             )
         }
         wireSessionController()
@@ -162,7 +188,7 @@ final class AppModel {
         initialModelCheck = Task { await refreshModelAvailability() }
         prepareDictionaryIfNeeded()
 
-        NotificationCenter.default.addObserver(
+        willTerminateNotifications.addObserver(
             forName: .mimiAppWillTerminate, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.shutdownForTermination() }
@@ -174,6 +200,9 @@ final class AppModel {
             guard let self else { return }
             entries.removeAll()
             hudPinnedIndex = nil
+            sessionStartedAt = Date()
+            sessionEndedAt = nil
+            captureLostAt = nil
             // The Apple-fallback latch is per session: a fresh session
             // re-attempts the configured provider from scratch.
             translationFallbackActive = false
@@ -186,7 +215,11 @@ final class AppModel {
             self?.handleSentence(sentence)
         }
         sessionController.onEngineError = { [weak self] message in
-            self?.errorMessage = message
+            // Throttled ASR warnings (first + every 32nd): transient toast.
+            self?.toasts.post(
+                key: ToastKey.asrWarning, style: .yellowAuto,
+                title: "Transcription warning", body: message
+            )
         }
         sessionController.onCaptureError = { [weak self] message in
             // A capture failure is fatal in any active phase: mid-session it
@@ -194,8 +227,22 @@ final class AppModel {
             // session can never come up, so surface it instead of swallowing.
             guard let self, phase == .running || phase == .starting else { return }
             phase = .sourceLost
-            errorMessage = message
+            captureLostAt = Date()
+            postCaptureLost(body: message)
         }
+    }
+
+    /// The `capture.lost` red card with the Restart-capture fix action;
+    /// re-posted (deduped in place) when a restart fails.
+    private func postCaptureLost(body: String) {
+        toasts.post(
+            key: ToastKey.captureLost, style: .redPersistent,
+            title: "Capture lost", body: body,
+            action: ToastCenter.Action(
+                label: "Restart capture",
+                handler: { [weak self] in self?.restartCapture() }
+            )
+        )
     }
 
     // MARK: - Model / app discovery
@@ -315,9 +362,18 @@ final class AppModel {
     // MARK: - Session control
 
     func start() {
-        guard case .idle = phase, !isCheckingModel, !isTerminating else { return }
+        guard !isCheckingModel, !isTerminating else { return }
+        // A failed session restarts like an idle one (the sidebar offers
+        // Start from `.failed`, and the failure card clears on the
+        // next Start); every other active phase refuses.
+        switch phase {
+        case .idle, .failed: break
+        default: return
+        }
         phase = .starting
-        errorMessage = nil
+        // "Cleared on next Start": a previous session's failure card must
+        // not outlive the user pressing Start again.
+        toasts.dismiss(key: ToastKey.sessionFailed)
 
         Task { @MainActor in
             do {
@@ -325,6 +381,14 @@ final class AppModel {
                 try await self.beginSession()
             } catch {
                 self.phase = .failed(error.localizedDescription)
+                // Freeze the SESSION duration at the failure: a capture that
+                // died mid-start would otherwise leave the endedAt anchor nil
+                // and the frozen path reading now − startedAt per render.
+                self.sessionEndedAt = Date()
+                self.toasts.post(
+                    key: ToastKey.sessionFailed, style: .redPersistent,
+                    title: "Session failed", body: error.localizedDescription
+                )
             }
         }
     }
@@ -349,6 +413,9 @@ final class AppModel {
         }
 
         phase = .running
+        // A source-lost card cannot survive into the session it restarted
+        // (the restart path also clears it; this covers a fresh start).
+        toasts.dismiss(key: ToastKey.captureLost)
 
         // Activate translation: an external provider's worker is spawned
         // directly; Apple goes through the hidden `.translationTask` host
@@ -416,124 +483,37 @@ final class AppModel {
         translationWorker?.cancel()
         translationWorker = nil
         translationStatus = .idle
+        sessionEndedAt = Date()
+        // Stop/teardown clears all toasts (phase → `.idle`).
+        toasts.clearAll()
         phase = .idle
     }
 
-    /// Retry after a translation failure (status-bar button). Re-reads the
-    /// selected provider (and its key) and re-attaches an engine — so a
-    /// manual retry re-attempts the external engine even after the fallback
-    /// latched, in case the key or network was fixed. The latch itself is
-    /// one-way per session: a second external failure stays `.unavailable`
-    /// with this same button for recovery.
-    func retryTranslation() {
-        // A stale note (e.g. "…has no API key") must not outlive the retry:
-        // `activateTranslation` re-sets it when still unconfigured.
-        errorMessage = nil
-        activateTranslation()
-    }
-
-    /// Attaches the selected provider's engine to the queue. Called on
-    /// session start and on `retryTranslation` — a provider change therefore
-    /// applies no later than the next session start.
-    ///
-    /// External path: build the engine (key read from the Keychain here, at
-    /// construction), spawn the worker task, park the Apple host by
-    /// invalidating any live config. Apple path: invalidate + recreate the
-    /// config so `.translationTask` reliably re-fires and hands an
-    /// `AppleSessionEngine` to `queue.run(with:)`.
-    private func activateTranslation() {
-        if let engine = makeExternalEngine() {
-            activeTranslationEngine = .external
-            translationConfig?.invalidate()
-            translationWorker?.cancel()
-            let queue = translationQueue
-            translationWorker = Task {
-                await queue.run(with: engine)
+    /// Restarts the capture stream mid-session — the `capture.lost` toast's
+    /// fix action. Guarded on `.sourceLost`: a
+    /// double-tap is a no-op and a `stop()` during the restart wins the race
+    /// (the phase check after the await refuses to resurrect a stopped
+    /// session). Entries, the session clock, and the fallback latch survive;
+    /// `onSessionBegin` does not re-fire.
+    func restartCapture() {
+        guard phase == .sourceLost else { return }
+        phase = .starting
+        Task { @MainActor in
+            do {
+                try await sessionController.restartCapture()
+                // A stop() interleaved while the restart was in flight: the
+                // session is gone (engine nil, restartCapture no-oped) and
+                // must not come back up.
+                guard phase == .starting else { return }
+                phase = .running
+                captureLostAt = nil
+                toasts.dismiss(key: ToastKey.captureLost)
+            } catch {
+                guard phase == .starting else { return }
+                phase = .sourceLost
+                postCaptureLost(body: "Restart failed: \(error.localizedDescription)")
             }
-        } else {
-            if translationSettings.selectedProvider.isExternal {
-                // Selected but unconfigured (key deleted): degrade to Apple
-                // with a status note instead of failing outright. Dev builds
-                // use a no-op key store (see `TranslationSettings.init`), so
-                // the note explains the dev pin instead of a missing key.
-                #if DEBUG
-                    errorMessage =
-                        "Dev build uses Apple on-device translation — external providers are disabled."
-                #else
-                    errorMessage =
-                        "\(translationSettings.selectedProvider.displayName) has no API key — using Apple on-device."
-                #endif
-            }
-            activeTranslationEngine = .apple
-            translationConfig?.invalidate()
-            translationConfig = makeTranslationConfig()
         }
-    }
-
-    /// Builds the selected external provider's engine, or nil when Apple is
-    /// selected (or the external provider has no usable key — the unconfigured
-    /// edge falls back to Apple with a note in `activateTranslation`).
-    private func makeExternalEngine() -> (any TranslationEngine)? {
-        let provider = translationSettings.selectedProvider
-        guard provider.isExternal, let key = translationSettings.key(for: provider) else {
-            return nil
-        }
-        // The guard narrowed the domain to the external providers; Apple is
-        // served by the `.translationTask` host in `activateTranslation`.
-        var engine: any TranslationEngine
-        if provider == .google {
-            engine = GoogleTranslateEngine(apiKey: key, transport: translationTransport)
-        } else if provider == .deepl {
-            engine = DeepLEngine(apiKey: key, transport: translationTransport)
-        } else {
-            engine = OpenRouterEngine(
-                apiKey: key,
-                model: translationSettings.openRouterModel,
-                transport: translationTransport
-            )
-        }
-        let queue = translationQueue
-        engine.onRetry = { progress in
-            Task { @MainActor in queue.noteRetry(progress) }
-        }
-        return engine
-    }
-
-    /// Routes queue status updates to the published state and drives the
-    /// latched Apple fallback. When an external engine exhausts its retries
-    /// (`.unavailable`) and the fallback hasn't engaged this session,
-    /// invalidate + recreate `translationConfig` — the hidden
-    /// `TranslationSessionHost` fires, hands an `AppleSessionEngine` to
-    /// `queue.run(with:)`, the generation token retires the dead external
-    /// run, and the surviving `pending` replays onto Apple. Internal so tests
-    /// can drive the queue's status callback directly.
-    func handleTranslationStatus(_ status: TranslationStatus) {
-        translationStatus = status
-        guard case .unavailable = status,
-              activeTranslationEngine == .external,
-              !translationFallbackActive
-        else { return }
-        translationFallbackActive = true
-        fallBackToApple()
-    }
-
-    /// The one-way latch: once on Apple for the rest of the session (no
-    /// periodic re-probing). Publishes `.degraded` so the footer explains the
-    /// switch; the fresh Apple run publishes `.ready` over it once flowing.
-    private func fallBackToApple() {
-        activeTranslationEngine = .apple
-        translationStatus = .degraded("External translation failed — using Apple on-device")
-        translationConfig?.invalidate()
-        translationConfig = makeTranslationConfig()
-    }
-
-    /// ja→en configuration, built identically for session start and retry so
-    /// SwiftUI's `.translationTask` treats both paths the same way.
-    private func makeTranslationConfig() -> TranslationSession.Configuration {
-        TranslationSession.Configuration(
-            source: Locale.Language(identifier: "ja"),
-            target: Locale.Language(identifier: "en")
-        )
     }
 
     // MARK: - Event handling (main actor)
@@ -552,46 +532,8 @@ final class AppModel {
         }
     }
 
-    // MARK: - Export
-
-    var isExportable: Bool {
-        !entries.isEmpty
-    }
-
-    func exportText() -> String {
-        SessionExporter.plainText(entries: entries)
-    }
-
-    /// Copies the plain-text transcript to the pasteboard; shared by the
-    /// ⌘⇧C command and the export menu.
-    func copyTranscript() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(exportText(), forType: .string)
-    }
-
-    func export(format: SessionExporter.Format) throws -> Data {
-        switch format {
-        case .txt:
-            return Data(SessionExporter.plainText(entries: entries).utf8)
-        case .srt:
-            return Data(SessionExporter.subtitles(entries: entries, format: .srt).utf8)
-        case .vtt:
-            return Data(SessionExporter.subtitles(entries: entries, format: .vtt).utf8)
-        case .json:
-            let results = snapshotTranslationResults()
-            return try SessionExporter.json(
-                entries: entries, metadata: sessionController.sessionMetadata, results: results
-            )
-        }
-    }
-
-    private func snapshotTranslationResults() -> [Int: SentenceTranslation] {
-        var snapshot: [Int: SentenceTranslation] = [:]
-        for entry in entries {
-            if let translation = entry.translations.last {
-                snapshot[entry.sentence.index] = translation
-            }
-        }
-        return snapshot
+    /// SESSION-card character total: Σ sentence text lengths.
+    var sessionCharacterCount: Int {
+        entries.reduce(0) { $0 + $1.sentence.text.count }
     }
 }

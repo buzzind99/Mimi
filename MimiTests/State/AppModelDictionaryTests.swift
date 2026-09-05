@@ -60,7 +60,7 @@ struct AppModelDictionaryTests {
         )
         completion?(.failure(failure))
 
-        #expect(model.errorMessage == nil)
+        #expect(!model.isPreparingDictionary)
     }
 
     // MARK: - Session-start gate (`ensureDictionaryReady`)
@@ -116,6 +116,5 @@ struct AppModelDictionaryTests {
         }
 
         #expect(!model.isPreparingDictionary)
-        #expect(model.errorMessage == nil)
     }
 }
