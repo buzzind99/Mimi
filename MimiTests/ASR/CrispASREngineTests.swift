@@ -182,8 +182,37 @@ struct CrispASREngineTests {
     @Test("sanitizeDecodeText keeps speech and cleans up around stripped tags")
     func sanitizeKeepsSpeech() {
         #expect(CrispASREngine.sanitizeDecodeText("こんにちは。") == "こんにちは。")
-        #expect(CrispASREngine.sanitizeDecodeText("こんにちは <sil> です。") == "こんにちは です。")
-        #expect(CrispASREngine.sanitizeDecodeText("こんにちは /sil です。") == "こんにちは です。")
+        #expect(CrispASREngine.sanitizeDecodeText("こんにちは <sil> です。") == "こんにちはです。")
+        #expect(CrispASREngine.sanitizeDecodeText("こんにちは /sil です。") == "こんにちはです。")
         #expect(CrispASREngine.sanitizeDecodeText("  こんにちは。  ") == "こんにちは。")
+    }
+
+    @Test("sanitizeDecodeText joins ASR's space-separated CJK tokens")
+    func sanitizeJoinsCJKTokens() {
+        #expect(CrispASREngine.sanitizeDecodeText("参加 者 だと 思 って") == "参加者だと" + "思って")
+        #expect(CrispASREngine.sanitizeDecodeText("いの ね、そう いっ た") == "いのね、そういった")
+        #expect(CrispASREngine.sanitizeDecodeText("求め られ てい ません ので") == "求められていませんので")
+        #expect(CrispASREngine.sanitizeDecodeText("参加\u{3000}者") == "参加者")
+        #expect(CrispASREngine.sanitizeDecodeText("思\nって") == "思って")
+    }
+
+    @Test("sanitizeDecodeText keeps whitespace next to Latin and digits")
+    func sanitizeKeepsNonCJKWhitespace() {
+        #expect(CrispASREngine.sanitizeDecodeText("hello world です") == "hello world です")
+        #expect(CrispASREngine.sanitizeDecodeText("600 回") == "600 回")
+        #expect(CrispASREngine.sanitizeDecodeText("2 人 です") == "2 人です")
+        #expect(CrispASREngine.sanitizeDecodeText("A B") == "A B")
+    }
+
+    @Test("isCJKSurface classifies kana, kanji, and CJK punctuation")
+    func cjkSurfaceClassification() throws {
+        #expect(try CrispASREngine.isCJKSurface(#require("思".unicodeScalars.first)))
+        #expect(try CrispASREngine.isCJKSurface(#require("っ".unicodeScalars.first)))
+        #expect(try CrispASREngine.isCJKSurface(#require("ー".unicodeScalars.first)))
+        #expect(try CrispASREngine.isCJKSurface(#require("、".unicodeScalars.first)))
+        #expect(try CrispASREngine.isCJKSurface(#require("々".unicodeScalars.first)))
+        #expect(try !CrispASREngine.isCJKSurface(#require("a".unicodeScalars.first)))
+        #expect(try !CrispASREngine.isCJKSurface(#require("6".unicodeScalars.first)))
+        #expect(try !CrispASREngine.isCJKSurface(#require(" ".unicodeScalars.first)))
     }
 }

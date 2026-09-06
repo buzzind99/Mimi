@@ -126,7 +126,7 @@ struct CrispASREngineLibraryTests {
         engine.push([Float](repeating: 0, count: 20000))
 
         let final = await pollFinal(engine)
-        requireFinal(final, text: "こんにちは です。", start: 0, end: 16000)
+        requireFinal(final, text: "こんにちは" + "です。", start: 0, end: 16000)
     }
 
     @Test("a zero-span VAD verdict discards the speechless utterance")

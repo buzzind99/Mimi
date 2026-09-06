@@ -105,18 +105,63 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
         options: [.caseInsensitive]
     )
 
-    /// Removes non-speech tags from a decode result and collapses the
-    /// whitespace they leave behind; "" when nothing spoken remains.
+    /// Removes non-speech tags from a decode result, collapses whitespace,
+    /// and joins the ASR's space-separated CJK tokens; "" when nothing spoken
+    /// remains.
     static func sanitizeDecodeText(_ raw: String) -> String {
-        guard let regex = nonSpeechTagRegex else {
-            return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = raw
+        if let regex = nonSpeechTagRegex {
+            text = regex.stringByReplacingMatches(
+                in: text, options: [], range: NSRange(text.startIndex..., in: text),
+                withTemplate: " "
+            )
         }
-        let stripped = regex.stringByReplacingMatches(
-            in: raw, options: [], range: NSRange(raw.startIndex..., in: raw), withTemplate: " "
+        return droppingInterCJKWhitespace(
+            text
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        return stripped
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Kana, kanji, and CJK punctuation — surfaces that never take an
+    /// inter-word space in Japanese.
+    static func isCJKSurface(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x3001 ... 0x303F, // 、。「々〆…
+             0x3041 ... 0x309F, // hiragana
+             0x30A1 ... 0x30FF, // katakana incl. ー
+             0x3400 ... 0x4DBF, 0x4E00 ... 0x9FFF: // kanji
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Removes whitespace runs whose neighbors on both sides are CJK
+    /// surfaces. The models emit space-separated CJK tokens, and the gaps
+    /// fragment words at dictionary stem boundaries (思 って) so the reading
+    /// annotator loses whole fragments; spaces touching Latin or digits stay
+    /// ("600 回" keeps its gap — numeral fusion already tolerates it).
+    static func droppingInterCJKWhitespace(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        var result = String.UnicodeScalarView()
+        var i = 0
+        while i < scalars.count {
+            let scalar = scalars[i]
+            if scalar.properties.isWhitespace, i > 0, isCJKSurface(scalars[i - 1]) {
+                var j = i
+                while j < scalars.count, scalars[j].properties.isWhitespace {
+                    j += 1
+                }
+                if j < scalars.count, isCJKSurface(scalars[j]) {
+                    i = j
+                    continue
+                }
+            }
+            result.append(scalar)
+            i += 1
+        }
+        return String(result)
     }
 
     /// `library` is injectable so tests can drive the full state machine over

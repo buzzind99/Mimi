@@ -391,6 +391,13 @@ struct ReadingAnnotatorLiveTests {
         #expect(describe(segments) == [["なっ ちゃっ てる", "nacchatteru", nil]])
     }
 
+    @Test("merges the stem + auxiliary across the ASR boundary (思って; the ASR-sanitized form — spaced 思 って leaves 思 unannotated)")
+    func omotteMerges() throws {
+        let segments = try segments("思って")
+
+        #expect(describe(segments) == [["思って", "omotte", "おもって"]])
+    }
+
     // MARK: Latin and rare forms
 
     @Test("self-transcribes a Latin run as one unknown token (Hello; old suite split per character)")
