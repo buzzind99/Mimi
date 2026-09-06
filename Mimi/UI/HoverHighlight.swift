@@ -1,17 +1,19 @@
 import SwiftUI
 
-/// Hover highlight for buttons: a faint text-tinted wash over `shape` while
+/// Hover highlight for buttons: a faint wash of `tint` over `shape` while
 /// the pointer is inside, suppressed while `isEnabled` is false.
 struct HoverHighlight<S: Shape>: ViewModifier {
     let shape: S
     var isEnabled: Bool = true
+    var tint: Color = Theme.primaryText
+    var opacity: Double = 0.07
 
     @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
             .overlay {
-                shape.fill(Theme.primaryText.opacity(hovering && isEnabled ? 0.07 : 0))
+                shape.fill(tint.opacity(hovering && isEnabled ? opacity : 0))
                     .allowsHitTesting(false)
             }
             .onHover { hovering = $0 }
@@ -20,7 +22,10 @@ struct HoverHighlight<S: Shape>: ViewModifier {
 }
 
 extension View {
-    func hoverHighlight<S: Shape>(_ shape: S, isEnabled: Bool = true) -> some View {
-        modifier(HoverHighlight(shape: shape, isEnabled: isEnabled))
+    func hoverHighlight<S: Shape>(
+        _ shape: S, isEnabled: Bool = true, tint: Color = Theme.primaryText,
+        opacity: Double = 0.07
+    ) -> some View {
+        modifier(HoverHighlight(shape: shape, isEnabled: isEnabled, tint: tint, opacity: opacity))
     }
 }
