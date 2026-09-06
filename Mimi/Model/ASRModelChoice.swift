@@ -73,9 +73,9 @@ enum ASRModelChoice: String, CaseIterable, Identifiable {
     var blurb: String {
         switch self {
         case .lite:
-            "SenseVoice-Small. Smaller download, fast startup — great default for everyday transcription."
+            "Smaller download & memory usage, faster inference — great default for everyday transcription. (Recommended)"
         case .full:
-            "FunASR-Nano-2512. Larger download for potentially more accurate transcription."
+            "Larger download & memory usage, slower inference — for potentially more accurate transcription."
         }
     }
 }
