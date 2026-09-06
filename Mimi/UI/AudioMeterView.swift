@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// Center-mirrored gradient meter with an edge fade, ported from
-/// `MockAudioMeter`; bars come from the rolling level ring and flatline at
-/// their stub height when idle.
+/// Center-mirrored gradient meter with an edge fade; bars come from the
+/// rolling level ring and flatline at their stub height when idle.
 struct AudioMeterView: View {
     var levels: [Double]
     var barHeight: CGFloat = 44

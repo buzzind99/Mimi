@@ -8,7 +8,7 @@ import Foundation
 @Observable
 @MainActor
 final class AudioLevelState {
-    /// Ring capacity; matches the mock meter's bar count.
+    /// Ring capacity; matches the audio meter's bar count.
     static let slotCount = 48
     /// Full-scale floor: RMS at or below this level maps to 0.
     static let floorDB: Double = -60

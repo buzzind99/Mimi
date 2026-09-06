@@ -16,7 +16,7 @@ struct TranslationSessionHost: View {
     }
 }
 
-/// Root view: onboarding until the model resolves, then the Sakura Studio
+/// Root view: onboarding until the model resolves, then the main shell —
 /// shell — sidebar | 1pt divider | transcript pane with the live strip and
 /// the toast stack overlaid top-trailing.
 struct ContentView: View {

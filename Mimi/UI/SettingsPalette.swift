@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Settings-local adaptive palette: Mock 9's warm paper light appearance and
-/// Mock 10's sakura dark appearance. Resolves through the drawing appearance,
+/// Settings-local adaptive palette: warm paper light appearance and sakura
+/// dark appearance. Resolves through the drawing appearance,
 /// which the Appearance setting drives via `.preferredColorScheme`.
 enum Palette {
     // Surfaces

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One Sakura Studio row: mono start timestamp in a fixed-width gutter,
+/// One transcript row: mono start timestamp in a fixed-width gutter,
 /// JP sentence with the configured reading annotation, and the EN
 /// translation marked by a gradient capsule bar. `Equatable` so SwiftUI
 /// skips unchanged rows when the transcript re-diffs.
@@ -40,7 +40,7 @@ struct TranscriptRow: View, Equatable {
 
             Spacer(minLength: 0)
         }
-        // The mock's generous row spacing stands in for the old divider.
+        // Generous row spacing stands in for a divider.
         .padding(.bottom, 24)
     }
 

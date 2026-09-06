@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Sakura Studio live strip: LIVE indicator + the in-flight partial,
+/// Live strip: LIVE indicator + the in-flight partial,
 /// pinned below the transcript in the main window. Isolated so the
 /// high-frequency partial state (6–10 Hz) re-renders only this view,
 /// never the transcript.

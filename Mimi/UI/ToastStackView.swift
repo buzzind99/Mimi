@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Toast stack overlay: cards stacked newest first,
 /// `move` + `opacity` transitions, yellow/red treatments per class, × only
-/// on `.yellowAuto`, action link on persistent cards. Card styling follows
-/// the mock6 toast (300pt, corner 14, themed background/border/icon tint).
+/// on `.yellowAuto`, action link on persistent cards (300pt, corner 14, themed
+/// background/border/icon tint).
 struct ToastStackView: View {
     var center: ToastCenter
 

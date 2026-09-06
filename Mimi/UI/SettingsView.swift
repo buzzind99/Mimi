@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// App settings — "stacked cards" design (Mock 9 paper light / Mock 10
-/// sakura dark): a single scrollable column of cards (notice, provider,
-/// API key, appearance, ASR model, session) with no navigation chrome.
-/// Buttons highlight pink on hover; appearance segments use a neutral wash.
+/// App settings — "stacked cards" design: a single scrollable column of cards
+/// (notice, provider, API key, appearance, ASR model, session) with no
+/// navigation chrome. Buttons highlight pink on hover; appearance segments use
+/// a neutral wash.
 struct SettingsView: View {
     var model: AppModel
     @Bindable private var settings: TranslationSettings

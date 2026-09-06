@@ -1,9 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Sakura Studio sidebar: brand header, session capsule, reading-aid picker,
+/// Main sidebar: brand header, session capsule, reading-aid picker,
 /// engines/audio/session cards, and the toolbar row. Fixed 282pt, themed by
-/// `Theme` (mock6 palette); the transcript pane supplies the 1pt divider.
+/// `Theme`; the transcript pane supplies the 1pt divider.
 struct SidebarView: View {
     @Bindable var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
