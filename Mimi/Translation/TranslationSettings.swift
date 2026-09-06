@@ -206,11 +206,19 @@ final class TranslationSettings {
     // MARK: - "Currently using" row
 
     /// Truthful description of the engine currently in use, including the
-    /// Apple-fallback latch ("DeepL (Free) — fallback active"). Driven by
-    /// published state (`fallbackActive`), never re-derived from the picker.
-    func activeEngineDescription(fallbackActive: Bool) -> String {
+    /// Apple-fallback latch ("DeepL (Free) — fallback active"). The base
+    /// label prefers the attached provider (`attachedProvider`) over the
+    /// picker so it never names an engine that isn't actually running; nil
+    /// (nothing external attached, or no session yet) falls back to the
+    /// picker selection. Driven by published state (`fallbackActive`,
+    /// `activeExternalProvider`), never re-derived from the picker alone.
+    func activeEngineDescription(
+        fallbackActive: Bool,
+        attachedProvider: TranslationProvider? = nil
+    ) -> String {
+        let provider = attachedProvider ?? selectedProvider
         var label: String
-        switch selectedProvider {
+        switch provider {
         case .apple:
             label = "Apple (on-device)"
         case .google:
@@ -220,7 +228,7 @@ final class TranslationSettings {
         case .openrouter:
             label = openRouterModel.isEmpty ? "OpenRouter" : "OpenRouter · \(openRouterModel)"
         }
-        if fallbackActive, selectedProvider.isExternal {
+        if fallbackActive, provider.isExternal {
             label += " — fallback active"
         }
         return label

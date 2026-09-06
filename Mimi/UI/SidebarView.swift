@@ -218,9 +218,13 @@ extension SidebarView {
         model.translationFallbackActive && model.activeTranslationEngine == .apple
     }
 
+    /// Names the engine actually attached to the queue: an external run
+    /// names `activeExternalProvider` (recorded at attachment time), never
+    /// the picker — a mid-session selection change must not relabel an
+    /// engine the queue isn't using.
     private var translationEngineName: String {
         guard model.activeTranslationEngine == .external else { return "Apple" }
-        return switch model.translationSettings.selectedProvider {
+        return switch model.activeExternalProvider ?? model.translationSettings.selectedProvider {
         case .apple: "Apple"
         case .google: "Google"
         case .deepl: "DeepL"

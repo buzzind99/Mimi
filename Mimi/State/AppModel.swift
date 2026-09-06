@@ -16,8 +16,8 @@ enum SessionPhase: Equatable {
 
 /// Which translation engine is currently attached to the queue. Derived
 /// state (status pill, Settings "Currently using" row) reads this, never the
-/// provider picker — a provider change applies on the next session start or
-/// manual retry.
+/// provider picker — a provider change re-attaches the engine via
+/// `activateTranslation` before the labels could disagree.
 enum ActiveTranslationEngine: Equatable {
     case apple
     case external
@@ -94,6 +94,13 @@ final class AppModel {
     /// Internal: the translation-engine management lives in
     /// `AppModelTranslation.swift` (file split for the lint gate).
     var activeTranslationEngine: ActiveTranslationEngine = .apple
+
+    /// Which external provider is attached while `activeTranslationEngine`
+    /// is `.external` (nil on the Apple paths). Labels read this, never the
+    /// picker, so the ENGINES card and "Currently using" row can't describe
+    /// a provider that isn't actually attached. Internal: managed from
+    /// `AppModelTranslation.swift`.
+    var activeExternalProvider: TranslationProvider?
 
     /// The refresh spawned by the most recent `selectModel` (tracked so
     /// `adoptDownloadedModel` can await it instead of stacking passes).

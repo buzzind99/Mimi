@@ -53,12 +53,15 @@ struct SettingsView: View {
             LabeledContent("Currently using") {
                 // Truthful mid-fallback: the suffix shows only while the
                 // latched Apple engine is actually the active one — a manual
-                // retry that re-engaged the external engine hides it.
+                // retry that re-engaged the external engine hides it. The
+                // base label reads the attached provider (never the picker),
+                // so it can't describe an engine the queue isn't using.
                 Text(
                     settings.activeEngineDescription(
                         fallbackActive:
                         model.translationFallbackActive &&
-                            model.activeTranslationEngine == .apple
+                            model.activeTranslationEngine == .apple,
+                        attachedProvider: model.activeExternalProvider
                     )
                 )
                 .font(.caption.monospaced())
@@ -69,6 +72,13 @@ struct SettingsView: View {
                 ForEach(TranslationProvider.allCases) { provider in
                     Text(provider.displayName).tag(provider)
                 }
+            }
+            // A selection change applies immediately while a session is
+            // running: the queue re-attaches the selected engine mid-drain
+            // (pending sentences replay onto it). Covers the picker and the
+            // save-key auto-select — both mutate `selectedProvider`.
+            .onChange(of: settings.selectedProvider) {
+                model.translationProviderDidChange()
             }
 
             providerForm

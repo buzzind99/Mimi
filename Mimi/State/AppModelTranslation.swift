@@ -22,8 +22,9 @@ extension AppModel {
     }
 
     /// Attaches the selected provider's engine to the queue. Called on
-    /// session start and on `retryTranslation` — a provider change therefore
-    /// applies no later than the next session start.
+    /// session start, on `retryTranslation`, and (via
+    /// `translationProviderDidChange`) on a provider selection change while
+    /// a session is running.
     ///
     /// External path: build the engine (key read from the Keychain here, at
     /// construction), spawn the worker task, park the Apple host by
@@ -33,6 +34,7 @@ extension AppModel {
     func activateTranslation() {
         if let engine = makeExternalEngine() {
             activeTranslationEngine = .external
+            activeExternalProvider = translationSettings.selectedProvider
             translationConfig?.invalidate()
             translationWorker?.cancel()
             let queue = translationQueue
@@ -47,9 +49,24 @@ extension AppModel {
             // to a no-op (see `TranslationSettings.init`), so external
             // providers always take this path there.
             activeTranslationEngine = .apple
+            activeExternalProvider = nil
             translationConfig?.invalidate()
             translationConfig = makeTranslationConfig()
         }
+    }
+
+    /// Applies a provider selection change while a session is live:
+    /// re-attaches the selected engine to the queue (pending sentences
+    /// replay onto it via the queue's generation token) and resets the
+    /// Apple-fallback latch — an explicit change is user intent to
+    /// re-engage, same as a manual retry. No-op outside a running session:
+    /// session start calls `activateTranslation` with the then-selected
+    /// provider anyway.
+    func translationProviderDidChange() {
+        guard phase == .running || phase == .sourceLost else { return }
+        translationFallbackActive = false
+        toasts.dismiss(key: ToastKey.translationFallback)
+        activateTranslation()
     }
 
     /// Builds the selected external provider's engine, or nil when Apple is
@@ -152,6 +169,7 @@ extension AppModel {
     /// switch; the fresh Apple run publishes `.ready` over it once flowing.
     private func fallBackToApple(severity: TranslationFailureSeverity) {
         activeTranslationEngine = .apple
+        activeExternalProvider = nil
         translationStatus = .degraded("External translation failed — using Apple on-device", severity)
         reconcileTranslationToasts(translationStatus)
         translationConfig?.invalidate()

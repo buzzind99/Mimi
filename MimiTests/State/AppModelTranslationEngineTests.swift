@@ -235,6 +235,86 @@ struct AppModelTranslationEngineTests {
         await stopTranslation(model)
     }
 
+    // MARK: - Mid-session provider change
+
+    /// A selection change while a session runs re-attaches the engine
+    /// immediately: Apple swaps the queue onto the on-device host (nil
+    /// external provider), a later external switch rebuilds that engine and
+    /// records it. While idle the change is deferred to session start.
+    @Test("a mid-session provider change re-attaches the engine; idle defers")
+    func providerChangeReattachesEngineMidSession() async {
+        let settings = makeSettings(provider: .openrouter)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: constantStatusTransport(401),
+            initialModelResolve: { _ in nil }
+        )
+
+        // Attach the external engine (as session start would).
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .openrouter)
+
+        // Idle: a selection change defers — nothing activates.
+        settings.select(.apple)
+        model.phase = .idle
+        model.translationProviderDidChange()
+        #expect(model.activeTranslationEngine == .external, "no activation while idle")
+        #expect(model.activeExternalProvider == .openrouter)
+
+        // Running: the change re-attaches Apple right away.
+        model.phase = .running
+        model.translationProviderDidChange()
+        #expect(model.activeTranslationEngine == .apple)
+        #expect(model.activeExternalProvider == nil)
+        #expect(model.translationConfig != nil, "the Apple host must be re-activated")
+
+        // Back to an external provider (save-key auto-selects it): the new
+        // engine is built and recorded.
+        try? settings.saveKey("test-key-1234", for: .google)
+        model.translationProviderDidChange()
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .google)
+
+        await stopTranslation(model)
+    }
+
+    /// An explicit provider change clears the latched Apple fallback — user
+    /// intent to re-engage, same as a manual retry — and dismisses the
+    /// fallback card.
+    @Test("a mid-session provider change resets the fallback latch")
+    func providerChangeResetsFallbackLatch() async {
+        let settings = makeSettings(provider: .openrouter)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: constantStatusTransport(401),
+            initialModelResolve: { _ in nil }
+        )
+
+        model.retryTranslation()
+        model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
+        #expect(await pollUntil { model.translationFallbackActive }, "the failure latches the Apple fallback")
+
+        // Saving a Google key auto-selects it; the explicit change then
+        // rebuilds the queue onto the Google engine.
+        try? settings.saveKey("test-key-1234", for: .google)
+        model.phase = .running
+        model.translationProviderDidChange()
+
+        #expect(!model.translationFallbackActive, "an explicit change re-arms the fallback")
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .google)
+        #expect(
+            !model.toasts.toasts.contains { $0.key == ToastKey.translationFallback },
+            "the fallback card is dismissed"
+        )
+
+        await stopTranslation(model)
+    }
+
     /// Thread-safe text sink for result handlers.
     private final class TextRecorder: @unchecked Sendable {
         private let lock = NSLock()
