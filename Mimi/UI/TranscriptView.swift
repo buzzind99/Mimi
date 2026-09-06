@@ -287,7 +287,7 @@ struct TranscriptView: View {
             Text("No transcript yet")
                 .font(ScaledFont.title3(uiScale.factor))
                 .foregroundStyle(Theme.secondaryText)
-            Text("Play any Japanese audio on your Mac (e.g. a livestream in your browser) and press Start.")
+            Text("Play any Japanese audio on your Mac (e.g. a livestream in your browser) and press Start session.")
                 .font(ScaledFont.callout(uiScale.factor))
                 .foregroundStyle(Theme.secondaryText.opacity(0.7))
         }

@@ -93,6 +93,7 @@ struct SidebarView: View {
                 .padding(.vertical, 10)
                 .background(Capsule().fill(sessionButtonGradient))
                 .foregroundStyle(.white)
+                .pointerStyle(.link)
         }
         .buttonStyle(.plain)
         .disabled(sessionButtonDisabled)
@@ -157,6 +158,7 @@ struct SidebarView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .hoverHighlight(Capsule())
     }
 }
 
@@ -387,6 +389,7 @@ extension SidebarView {
         .disabled(!model.isExportable)
         .frame(width: 34, height: 32)
         .background(iconButtonBackground)
+        .hoverHighlight(iconButtonShape, isEnabled: model.isExportable)
         .help("Copy or export the session transcript")
     }
 
@@ -396,10 +399,12 @@ extension SidebarView {
         } label: {
             Image(systemName: "rectangle.on.rectangle")
                 .foregroundStyle(model.hudVisible ? Theme.accentPink : Theme.primaryText.opacity(0.7))
+                .frame(width: 34, height: 32)
+                .background(iconButtonBackground)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(width: 34, height: 32)
-        .background(iconButtonBackground)
+        .hoverHighlight(iconButtonShape)
         .help("Floating always-on-top subtitle overlay (click-through, resizable)")
     }
 
@@ -412,23 +417,25 @@ extension SidebarView {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hoverHighlight(iconButtonShape)
         .help("Settings")
     }
 
     private var iconButtonBackground: some View {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
+        iconButtonShape
             .fill(Theme.cardFill)
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Theme.cardStroke)
-            )
+            .overlay(iconButtonShape.stroke(Theme.cardStroke))
+    }
+
+    private var iconButtonShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 9, style: .continuous)
     }
 
     private var scaleStepper: some View {
         HStack(spacing: 0) {
-            stepButton("minus", isLeading: true) {
+            stepButton("minus", isLeading: true, isEnabled: uiScale != .percent75) {
                 uiScale = uiScale.step(-1)
             }
-            .disabled(uiScale == .percent75)
             .accessibilityLabel("Decrease text size")
 
             Text(uiScale.label)
@@ -438,16 +445,16 @@ extension SidebarView {
                 .background(Theme.tileFill)
                 .help("Text size for the transcript and HUD")
 
-            stepButton("plus", isLeading: false) {
+            stepButton("plus", isLeading: false, isEnabled: uiScale != .percent200) {
                 uiScale = uiScale.step(1)
             }
-            .disabled(uiScale == .percent200)
             .accessibilityLabel("Increase text size")
         }
     }
 
     private func stepButton(
-        _ systemImage: String, isLeading: Bool, action: @escaping () -> Void
+        _ systemImage: String, isLeading: Bool, isEnabled: Bool,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
@@ -455,21 +462,25 @@ extension SidebarView {
                 .foregroundStyle(Theme.primaryText.opacity(0.7))
                 .frame(width: 26, height: 32)
                 .background(
-                    Theme.cardFill.clipShape(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: isLeading ? 9 : 0,
-                            bottomLeadingRadius: isLeading ? 9 : 0,
-                            bottomTrailingRadius: isLeading ? 0 : 9,
-                            topTrailingRadius: isLeading ? 0 : 9,
-                            style: .continuous
-                        )
-                    )
+                    Theme.cardFill.clipShape(stepShape(isLeading: isLeading))
                 )
                 .overlay(alignment: isLeading ? .trailing : .leading) {
                     Rectangle().fill(Theme.divider).frame(width: 1)
                 }
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .hoverHighlight(stepShape(isLeading: isLeading), isEnabled: isEnabled)
+    }
+
+    private func stepShape(isLeading: Bool) -> UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: isLeading ? 9 : 0,
+            bottomLeadingRadius: isLeading ? 9 : 0,
+            bottomTrailingRadius: isLeading ? 0 : 9,
+            topTrailingRadius: isLeading ? 0 : 9,
+            style: .continuous
+        )
     }
 
     private func runExport(_ format: SessionExporter.Format) {
@@ -520,51 +531,6 @@ private struct AudioCardView: View {
         }
         .padding(14)
         .background(cardChrome)
-    }
-}
-
-/// Center-mirrored gradient meter with an edge fade, ported from
-/// `MockAudioMeter`; bars come from the rolling level ring and flatline at
-/// their stub height when idle.
-struct AudioMeterView: View {
-    var levels: [Double]
-    var barHeight: CGFloat = 44
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 3) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { index, level in
-                bar(at: index, level: level)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .background(glow)
-    }
-
-    private func bar(at index: Int, level: Double) -> some View {
-        let normalized = min(max(level, 0), 1)
-        let mid = Double(levels.count - 1) / 2
-        let spread = Double(max(levels.count, 1)) / 2
-        let offset = (Double(index) - mid) / spread
-        let edgeFade = max(0.45, 1 - offset * offset * 0.55)
-        return Capsule()
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Theme.meterTeal.opacity(edgeFade), Theme.meterBlue.opacity(edgeFade * 0.85)
-                    ],
-                    startPoint: .top, endPoint: .bottom
-                )
-            )
-            .frame(maxWidth: .infinity)
-            .frame(height: max(6, normalized * barHeight))
-    }
-
-    private var glow: some View {
-        LinearGradient(
-            colors: [Theme.meterTeal.opacity(0.10), Theme.meterBlue.opacity(0.06)],
-            startPoint: .top, endPoint: .bottom
-        )
-        .blur(radius: 12)
     }
 }
 
