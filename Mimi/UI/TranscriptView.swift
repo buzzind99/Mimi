@@ -251,6 +251,7 @@ struct TranscriptView: View {
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
         .animation(.easeOut(duration: 0.18), value: visible)
+        .pointerStyle(visible ? .link : nil)
     }
 
     /// The scroll values that separate offset movement (the pin is

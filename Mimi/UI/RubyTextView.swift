@@ -192,6 +192,29 @@ struct RubyTextView: View, Equatable {
     /// never shift the kanji. Off by default; `TranscriptRow` relies on it.
     var reservesAnnotationLine = false
 
+    private struct SurfaceText: View {
+        let text: String
+        let font: Font
+        var italic = false
+        var hoverColor = Theme.accentPink
+
+        @State private var hovering = false
+
+        var body: some View {
+            Text(verbatim: text)
+                .font(font)
+                .italic(italic)
+                .foregroundStyle(hovering ? AnyShapeStyle(hoverColor) : AnyShapeStyle(.primary))
+                .textSelection(.disabled)
+                .onHover { hovering = $0 }
+                .animation(.easeOut(duration: 0.12), value: hovering)
+        }
+    }
+
+    private func hoverableSurface(_ text: String) -> some View {
+        SurfaceText(text: text, font: surfaceFont, italic: surfaceItalic)
+    }
+
     var body: some View {
         let units = displayUnits
         if annotation != .none, units.contains(where: \.isAnnotated) {
@@ -205,14 +228,10 @@ struct RubyTextView: View, Equatable {
             if reservesAnnotationLine {
                 VStack(spacing: 0) {
                     reservedAnnotationLine
-                    Text(verbatim: text)
-                        .font(surfaceFont)
-                        .italic(surfaceItalic)
+                    hoverableSurface(text)
                 }
             } else {
-                Text(verbatim: text)
-                    .font(surfaceFont)
-                    .italic(surfaceItalic)
+                hoverableSurface(text)
             }
         }
     }
@@ -290,17 +309,15 @@ struct RubyTextView: View, Equatable {
                         .font(noteFont)
                         .foregroundStyle(annotationColor)
                         .lineLimit(1)
-                    Text(verbatim: surface)
-                        .font(surfaceFont)
-                        .italic(surfaceItalic)
+                        .textSelection(.disabled)
+                    hoverableSurface(surface)
                 } else {
-                    Text(verbatim: surface)
-                        .font(surfaceFont)
-                        .italic(surfaceItalic)
+                    hoverableSurface(surface)
                     Text(verbatim: note)
                         .font(noteFont)
                         .foregroundStyle(annotationColor)
                         .lineLimit(1)
+                        .textSelection(.disabled)
                 }
             }
         }
@@ -317,14 +334,10 @@ struct RubyTextView: View, Equatable {
         if annotation == .furigana || reservesAnnotationLine {
             VStack(spacing: 0) {
                 reservedAnnotationLine
-                Text(verbatim: surface)
-                    .font(surfaceFont)
-                    .italic(surfaceItalic)
+                hoverableSurface(surface)
             }
         } else {
-            Text(verbatim: surface)
-                .font(surfaceFont)
-                .italic(surfaceItalic)
+            hoverableSurface(surface)
         }
     }
 }
