@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 
 extension Color {
-    /// 0xRRGGBB initializer used by the theme tokens (and any view-local
-    /// accent that never ships in a mock).
+    /// 0xRRGGBB initializer used by the theme tokens and view-local accents.
     init(hex: UInt32) {
         self.init(
             red: Double((hex >> 16) & 0xFF) / 255,
@@ -12,9 +11,8 @@ extension Color {
         )
     }
 
-    /// Appearance-adaptive color: the dark value is the verbatim mock6
-    /// palette entry, the light value the derived counterpart. Resolves
-    /// through the drawing appearance, which the Appearance setting drives
+    /// Appearance-adaptive color: resolves a light and a dark value through
+    /// the drawing appearance, which the Appearance setting drives
     /// via `.preferredColorScheme` at the window root.
     init(light: UInt32, dark: UInt32) {
         self.init(
@@ -45,20 +43,20 @@ extension NSColor {
     }
 }
 
-/// Sakura Studio design tokens (mock6). Dark values are verbatim from
-/// `Mock6SakuraStudio.swift`; the light variant is derived — white surfaces,
-/// near-black text, and darkened pink/teal accents for contrast. Centralized
-/// here so tokens stay tweakable without touching view code.
+/// Main-window design tokens. Light values mirror the Settings warm-paper
+/// palette (`Palette` in SettingsPalette.swift): cream surfaces, warm-brown
+/// text, coral accent. Dark values use the matching sakura dark appearance.
+/// Centralized here so tokens stay tweakable without touching view code.
 enum Theme {
 
     // MARK: Surfaces
 
     /// Transcript pane background.
-    static let window = Color(light: 0xFAF9FE, dark: 0x12101A)
+    static let window = Color(light: 0xFAF7F2, dark: 0x12101A)
     /// Sidebar background.
-    static let sidebar = Color(light: 0xFFFFFF, dark: 0x171320)
+    static let sidebar = Color(light: 0xFAF7F2, dark: 0x171320)
     /// Live strip background.
-    static let liveStrip = Color(light: 0xF2F1F8, dark: 0x1B1626)
+    static let liveStrip = Color(light: 0xF0EAE1, dark: 0x1B1626)
     /// Toast card background.
     static let toastBackground = Color(light: 0xFFFFFF, dark: 0x241522)
     /// Jump-button fill (circular scroll affordances).
@@ -71,56 +69,58 @@ enum Theme {
 
     // MARK: Strokes & fills
 
-    /// Card fill: white 4.5% on dark, black 4% on light.
+    /// Card fill: white 4.5% on dark, solid white (settings card fill) on light.
     static let cardFill = Color(
-        light: NSColor.black.withAlphaComponent(0.04),
+        light: NSColor.white,
         dark: NSColor.white.withAlphaComponent(0.045)
     )
-    /// Card stroke: white 7% on dark, black 8% on light.
+    /// Card stroke: settings hairline `#E9E2D8` on light, white 7% on dark.
     static let cardStroke = Color(
-        light: NSColor.black.withAlphaComponent(0.08),
+        light: NSColor(hex: 0xE9E2D8),
         dark: NSColor.white.withAlphaComponent(0.07)
     )
     /// 1pt separators (sidebar divider, live-strip top edge).
     static let divider = Color(
-        light: NSColor.black.withAlphaComponent(0.1),
+        light: NSColor(hex: 0xE9E2D8),
         dark: NSColor.white.withAlphaComponent(0.06)
     )
     /// Inner tile fill (scale stepper middle, toast dismiss button).
     static let tileFill = Color(
-        light: NSColor.black.withAlphaComponent(0.04),
+        light: NSColor(hex: 0xF0EAE1),
         dark: NSColor.white.withAlphaComponent(0.04)
     )
 
     // MARK: Text
 
     /// JP transcript text (primary line).
-    static let jpText = Color(light: 0x1A1626, dark: 0xF5F3FA)
+    static let jpText = Color(light: 0x2A241E, dark: 0xF5F3FA)
     /// Generic primary text.
-    static let primaryText = Color(light: 0x1A1626, dark: 0xFFFFFF)
-    /// Labels and detail lines: white 45% on dark, black 55% on light.
+    static let primaryText = Color(light: 0x2A241E, dark: 0xFFFFFF)
+    /// Labels and detail lines: warm gray `#8A8177` on light, white 45% on dark.
     static let secondaryText = Color(
-        light: NSColor.black.withAlphaComponent(0.55),
+        light: NSColor(hex: 0x8A8177),
         dark: NSColor.white.withAlphaComponent(0.45)
     )
-    /// Gutter timestamps: white 35% on dark, black 40% on light.
+    /// Gutter timestamps: white 35% on dark, muted `#B3A99C` on light.
     static let gutterText = Color(
-        light: NSColor.black.withAlphaComponent(0.4),
+        light: NSColor(hex: 0xB3A99C),
         dark: NSColor.white.withAlphaComponent(0.35)
     )
 
     // MARK: Accents
 
-    /// Pink accent (reading-aid selected pill, jump-button glyphs, brand).
-    static let accentPink = Color(light: 0xE0487C, dark: 0xFF6E9C)
-    /// Brand gradient's violet end (`#FF6E9C → #B36BFF`).
-    static let brandViolet = Color(light: 0x7C3AED, dark: 0xB36BFF)
+    /// Accent (reading-aid selected pill, jump-button glyphs, brand): settings
+    /// coral `#FF6B5E` on light, sakura pink on dark.
+    static let accentPink = Color(light: 0xFF6B5E, dark: 0xFF6E9C)
+    /// Brand gradient's second stop — flat coral on light (mirrors the
+    /// settings header mark), violet on dark.
+    static let brandViolet = Color(light: 0xFF6B5E, dark: 0xB36BFF)
     /// Inline romaji / furigana reading annotations.
     static let annotationPink = Color(light: 0xB33459, dark: 0xFF9DBB)
     /// Translation text.
     static let translationTeal = Color(light: 0x0E7C74, dark: 0x9FE8DF)
-    /// LIVE indicator (dot + label).
-    static let liveRed = Color(light: 0xD92638, dark: 0xFF4D5E)
+    /// LIVE indicator (dot + label): settings status red on light.
+    static let liveRed = Color(light: 0xC21F30, dark: 0xFF4D5E)
     /// Engine-status dots (green = running, yellow = transitioning).
     static let dotGreen = Color(light: 0x15803D, dark: 0x4ADE80)
     static let dotYellow = Color(light: 0xB45309, dark: 0xFBBF24)
@@ -137,7 +137,7 @@ enum Theme {
         light: NSColor(hex: 0x92610A).withAlphaComponent(0.5),
         dark: NSColor(hex: 0xFBBF24).withAlphaComponent(0.35)
     )
-    /// Red-class toast icon tint (`#FF8A93` in the mock).
+    /// Red-class toast icon tint.
     static let toastRedIcon = Color(light: 0xC21F30, dark: 0xFF8A93)
 
     // MARK: Gradients
@@ -153,9 +153,10 @@ enum Theme {
             colors: [Color(light: 0x0D9488, dark: 0x5EEAD4), Color(light: 0x0284C7, dark: 0x38BDF8)],
             startPoint: .top, endPoint: .bottom
         )
-        /// "Stop session" capsule (`#FF6E9C → #E05585`, leading→trailing).
+        /// "Stop session" capsule (coral `#FF6B5E → #E0483C` on light,
+        /// `#FF6E9C → #E05585` on dark, leading→trailing).
         static let stop = LinearGradient(
-            colors: [Color(light: 0xD14E77, dark: 0xFF6E9C), Color(light: 0xB33459, dark: 0xE05585)],
+            colors: [Color(light: 0xFF6B5E, dark: 0xFF6E9C), Color(light: 0xE0483C, dark: 0xE05585)],
             startPoint: .leading, endPoint: .trailing
         )
         /// "Start session" capsule (`#2DD4BF → #38BDF8`, leading→trailing).
