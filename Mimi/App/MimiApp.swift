@@ -61,11 +61,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         repliedToTerminate = false
-        teardownWatchdog = Timer.scheduledTimer(
-            withTimeInterval: Self.teardownWatchdogInterval, repeats: false
-        ) { [weak self] _ in
+        // `.common` mode: termination can land while the user is mid-gesture
+        // (tracking mode), where a `.default`-mode timer would never fire.
+        let interval = Self.teardownWatchdogInterval
+        let watchdog = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.replyToTerminate() }
         }
+        RunLoop.main.add(watchdog, forMode: .common)
+        teardownWatchdog = watchdog
         teardownCompleteObserver = NotificationCenter.default.addObserver(
             forName: .mimiTerminationTeardownComplete, object: nil, queue: .main
         ) { [weak self] _ in

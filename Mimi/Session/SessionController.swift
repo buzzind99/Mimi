@@ -261,13 +261,26 @@ final class SessionController {
 
     func startTimers() {
         pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.pollASR() }
+        pollTimer = makeCommonModeTimer(interval: 0.06) { [weak self] in
+            self?.pollASR()
         }
         tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.sentenceBuffer?.tick() }
+        tickTimer = makeCommonModeTimer(interval: 0.2) { [weak self] in
+            self?.sentenceBuffer?.tick()
         }
+    }
+
+    /// Timers must fire while a mouse press/drag tracks (`eventTracking`
+    /// run-loop mode), or the live UI freezes on hold; `.common` covers
+    /// default + tracking + modal modes.
+    private func makeCommonModeTimer(
+        interval: TimeInterval, onMainActor body: @escaping @MainActor () -> Void
+    ) -> Timer {
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in
+            Task { @MainActor in body() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
     }
 
     private func stopTimers() {
