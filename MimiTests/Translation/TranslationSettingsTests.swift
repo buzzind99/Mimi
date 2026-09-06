@@ -118,6 +118,31 @@ struct TranslationSettingsTests {
         #expect(settings.testResult(for: .google) == nil)
     }
 
+    @Test("removing the selected provider's key falls back to Apple")
+    func removingSelectedProviderKeyFallsBackToApple() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-google-9999", for: .google)
+        settings.select(.google)
+
+        settings.removeKey(for: .google)
+
+        // An unconfigured provider can't stay active: the settings view's
+        // selection observer re-attaches the Apple engine on this change.
+        #expect(settings.selectedProvider == .apple)
+    }
+
+    @Test("removing a non-selected provider's key keeps the selection")
+    func removingOtherProviderKeyKeepsSelection() throws {
+        let (settings, _) = makeSUT()
+        try settings.saveKey("sk-google-9999", for: .google)
+        settings.select(.google)
+        try settings.saveKey("sk-deepl-9999", for: .deepl)
+
+        settings.removeKey(for: .deepl)
+
+        #expect(settings.selectedProvider == .google)
+    }
+
     @Test("a stored hasKey flag without a backing key degrades to no key")
     func staleFlagWithoutKeyDegrades() throws {
         let (first, defaults) = makeSUT()

@@ -166,10 +166,10 @@ final class TranslationSettings {
         }
     }
 
-    /// Removes the key and its non-secret traces. Selection is left alone —
-    /// an unconfigured selected provider falls back to Apple at engine
-    /// construction time, and a manual re-selection is friendlier than
-    /// yanking the picker mid-edit.
+    /// Removes the key and its non-secret traces. Removing the selected
+    /// provider's key falls back to Apple — an unconfigured provider can't
+    /// stay active, and the settings view's selection observer re-attaches
+    /// the on-device engine immediately.
     func removeKey(for provider: TranslationProvider) {
         keys.deleteKey(for: provider.rawValue)
         hasKey[provider] = false
@@ -177,6 +177,9 @@ final class TranslationSettings {
         defaults.set(false, forKey: Self.hasKeyKey(provider))
         defaults.removeObject(forKey: Self.keyHintKey(provider))
         setTestResult(nil, for: provider)
+        if selectedProvider == provider {
+            select(.apple)
+        }
     }
 
     // MARK: - Selection
