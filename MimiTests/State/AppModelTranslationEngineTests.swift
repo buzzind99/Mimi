@@ -23,8 +23,10 @@ struct AppModelTranslationEngineTests {
     private func makeSettings(provider: TranslationProvider) -> TranslationSettings {
         let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
         if provider != .apple {
-            // Saving a key for an external provider auto-selects it.
+            // A configured external provider is selected (the Settings key
+            // card does this once the post-save connection test succeeds).
             try? settings.saveKey("test-key-1234", for: provider)
+            settings.select(provider)
         }
         return settings
     }
@@ -271,9 +273,11 @@ struct AppModelTranslationEngineTests {
         #expect(model.activeExternalProvider == nil)
         #expect(model.translationConfig != nil, "the Apple host must be re-activated")
 
-        // Back to an external provider (save-key auto-selects it): the new
-        // engine is built and recorded.
+        // Back to an external provider (configured + selected, as the key
+        // card's verified-key path does): the new engine is built and
+        // recorded.
         try? settings.saveKey("test-key-1234", for: .google)
+        settings.select(.google)
         model.translationProviderDidChange()
         #expect(model.activeTranslationEngine == .external)
         #expect(model.activeExternalProvider == .google)
@@ -298,9 +302,10 @@ struct AppModelTranslationEngineTests {
         model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
         #expect(await pollUntil { model.translationFallbackActive }, "the failure latches the Apple fallback")
 
-        // Saving a Google key auto-selects it; the explicit change then
-        // rebuilds the queue onto the Google engine.
+        // A verified Google key selects it (the key card's success path);
+        // the explicit change then rebuilds the queue onto the Google engine.
         try? settings.saveKey("test-key-1234", for: .google)
+        settings.select(.google)
         model.phase = .running
         model.translationProviderDidChange()
 
@@ -311,6 +316,43 @@ struct AppModelTranslationEngineTests {
             !model.toasts.toasts.contains { $0.key == ToastKey.translationFallback },
             "the fallback card is dismissed"
         )
+
+        await stopTranslation(model)
+    }
+
+    /// Selecting an unconfigured external provider mid-session keeps the
+    /// currently attached engine instead of degrading to Apple — it's a
+    /// settings edit; the key save's connection test activates the new
+    /// provider once it verifies.
+    @Test("selecting an unconfigured provider keeps the active engine")
+    func unconfiguredProviderChangeKeepsActiveEngine() async {
+        let settings = makeSettings(provider: .openrouter)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: constantStatusTransport(401),
+            initialModelResolve: { _ in nil }
+        )
+
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        #expect(model.activeExternalProvider == .openrouter)
+
+        // Selecting DeepL with no key: the OpenRouter engine stays attached.
+        model.phase = .running
+        settings.select(.deepl)
+        model.translationProviderDidChange()
+
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .openrouter, "the unconfigured selection doesn't evict the active engine")
+
+        // A verified DeepL key selects it (the key card's success path) and
+        // then activates it.
+        try? settings.saveKey("test-key-1234", for: .deepl)
+        settings.select(.deepl)
+        model.translationProviderDidChange()
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .deepl)
 
         await stopTranslation(model)
     }

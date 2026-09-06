@@ -61,9 +61,16 @@ extension AppModel {
     /// Apple-fallback latch — an explicit change is user intent to
     /// re-engage, same as a manual retry. No-op outside a running session:
     /// session start calls `activateTranslation` with the then-selected
-    /// provider anyway.
+    /// provider anyway. Selecting an unconfigured external provider keeps
+    /// the currently attached engine instead of degrading to Apple — it's
+    /// a settings edit, not a live switch; the key save's connection test
+    /// (`SettingsKeyCard`) activates the new provider once it verifies.
     func translationProviderDidChange() {
         guard phase == .running || phase == .sourceLost else { return }
+        let provider = translationSettings.selectedProvider
+        if provider.isExternal, translationSettings.key(for: provider) == nil {
+            return
+        }
         translationFallbackActive = false
         toasts.dismiss(key: ToastKey.translationFallback)
         activateTranslation()
