@@ -2,17 +2,20 @@ import SwiftUI
 
 /// The API key card: per-provider key entry (straight to the Keychain on
 /// save, never held beyond the field), an opaque dot mask for a saved key
-/// with Remove/Test actions, and the OpenRouter model field. Shown only for
-/// external providers.
+/// with Remove/Test actions, and the OpenRouter model field. Shown for
+/// external providers — the selected one, or a pending (not yet configured)
+/// one being set up. Saving a key auto-runs a connection test; a successful
+/// test (auto or via the Test button) selects the provider and activates its
+/// engine immediately.
 struct SettingsKeyCard: View {
     var model: AppModel
     @Bindable var settings: TranslationSettings
+    let provider: TranslationProvider
     @Binding var keyDraft: String
     @Binding var keySaveFailed: Bool
     @State private var isTestingConnection = false
 
     var body: some View {
-        let provider = settings.selectedProvider
         VStack(alignment: .leading, spacing: 12) {
             settingsCardLabel(provider.displayName.uppercased())
             if settings.hasKey(for: provider) {
@@ -51,7 +54,7 @@ struct SettingsKeyCard: View {
         HStack(spacing: 6) {
             connectionStatus(provider)
             Spacer()
-            Text("Stored securely in the Keychain — never written to disk.")
+            Text("Key is stored securely in the Keychain and never written to disk.")
                 .font(.system(size: 10))
                 .foregroundStyle(Palette.mutedText)
         }
@@ -83,7 +86,7 @@ struct SettingsKeyCard: View {
         } else {
             HStack(spacing: 6) {
                 Spacer()
-                Text("Stored securely in the Keychain — never written to disk.")
+                Text("Key is stored securely in the Keychain and never written to disk.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Palette.mutedText)
             }
@@ -163,6 +166,17 @@ struct SettingsKeyCard: View {
             case let .failure(error): ConnectionTestResult.failure(error.statusMessage)
             }
             settings.setTestResult(message, for: provider)
+            // A verified key configures the provider: selecting it moves the
+            // checkmark and re-attaches its engine via SettingsView's
+            // onChange. Already-selected providers (re-test after a key
+            // fix) re-attach directly.
+            if case .success = result {
+                if settings.selectedProvider == provider {
+                    model.translationProviderDidChange()
+                } else {
+                    settings.select(provider)
+                }
+            }
             isTestingConnection = false
         }
     }
@@ -178,6 +192,9 @@ struct SettingsKeyCard: View {
             try settings.saveKey(key, for: provider)
             keyDraft = ""
             keySaveFailed = false
+            // Auto-check the connection on save; a verified key activates
+            // the provider's engine right away (see `runConnectionTest`).
+            runConnectionTest(for: provider)
         } catch {
             keySaveFailed = true
         }

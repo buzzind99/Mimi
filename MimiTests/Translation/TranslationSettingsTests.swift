@@ -82,13 +82,15 @@ struct TranslationSettingsTests {
         #expect(settings.keyHint(for: .google) == "1234")
     }
 
-    @Test("saving a key for an external provider switches the selection to it")
-    func savingExternalKeySwitchesSelection() throws {
+    @Test("saving a key leaves the selection alone")
+    func savingKeyDoesNotSwitchSelection() throws {
         let (settings, _) = makeSUT()
 
         try settings.saveKey("sk-deepl", for: .deepl)
 
-        #expect(settings.selectedProvider == .deepl)
+        // Selection moves only on a verified key: the Settings key card
+        // selects the provider when the post-save connection test succeeds.
+        #expect(settings.selectedProvider == .apple)
     }
 
     @Test("saving a DeepL free-tier key records the tier")
@@ -96,6 +98,7 @@ struct TranslationSettingsTests {
         let (settings, _) = makeSUT()
 
         try settings.saveKey("abc123:fx", for: .deepl)
+        settings.select(.deepl)
 
         #expect(settings.deeplIsFreeTier)
         #expect(settings.activeEngineDescription(fallbackActive: false) == "DeepL (Free)")
@@ -201,6 +204,7 @@ struct TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: false) == "Apple (on-device)")
 
         try settings.saveKey("sk-openrouter", for: .openrouter)
+        settings.select(.openrouter)
         settings.openRouterModel = "tencent/hy-mt2-30b-a3b"
 
         #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b")
@@ -210,6 +214,7 @@ struct TranslationSettingsTests {
     func fallbackNoteOnlyForExternal() throws {
         let (settings, _) = makeSUT()
         try settings.saveKey("sk-google", for: .google)
+        settings.select(.google)
 
         #expect(settings.activeEngineDescription(fallbackActive: true) == "Google Translate — fallback active")
     }

@@ -10,6 +10,16 @@ struct SettingsView: View {
     @AppearanceSetting private var appearance
     @State private var keyDraft = ""
     @State private var keySaveFailed = false
+    /// An external provider being set up but not yet configured: its key
+    /// card is shown, but the selection (checkmark) stays on the current
+    /// provider until a key is saved and the connection test succeeds.
+    @State private var pendingProvider: TranslationProvider?
+
+    /// The provider whose card (key entry + privacy notice) is displayed:
+    /// the pending one while it's being configured, otherwise the selection.
+    private var displayedProvider: TranslationProvider {
+        pendingProvider ?? settings.selectedProvider
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -33,9 +43,11 @@ struct SettingsView: View {
         .preferredColorScheme($appearance.resolvedColorScheme)
         // A selection change applies immediately while a session is running:
         // the queue re-attaches the selected engine mid-drain (pending
-        // sentences replay onto it). Covers both the provider rows and the
-        // save-key auto-select — both mutate `selectedProvider`.
+        // sentences replay onto it). Selection changes come from provider-row
+        // picks on configured providers and from a verified key selecting its
+        // provider on the key card's post-save connection test.
         .onChange(of: settings.selectedProvider) {
+            pendingProvider = nil
             keyDraft = ""
             keySaveFailed = false
             model.translationProviderDidChange()
@@ -74,9 +86,9 @@ struct SettingsView: View {
         VStack(spacing: 16) {
             noticeCard
             providerCard
-            if settings.selectedProvider.isExternal {
+            if displayedProvider.isExternal {
                 SettingsKeyCard(
-                    model: model, settings: settings,
+                    model: model, settings: settings, provider: displayedProvider,
                     keyDraft: $keyDraft, keySaveFailed: $keySaveFailed
                 )
             }
@@ -102,11 +114,11 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var noticeCard: some View {
-        if settings.selectedProvider.isExternal {
+        if displayedProvider.isExternal {
             notice(
                 icon: "arrow.up.forward.circle.fill",
                 title: "External provider",
-                body: "Sentences will be sent to \(settings.selectedProvider.displayName) for translation."
+                body: "Sentences will be sent to \(displayedProvider.displayName) for translation."
             )
         } else {
             notice(
@@ -159,7 +171,16 @@ struct SettingsView: View {
     private func providerRow(_ provider: TranslationProvider) -> some View {
         let selected = settings.selectedProvider == provider
         return Button {
-            settings.select(provider)
+            // Configured providers (and Apple) select immediately. An
+            // unconfigured external provider only opens its key card — the
+            // checkmark moves once a key is saved and the connection test
+            // succeeds (the key card's success path selects it).
+            if provider == .apple || settings.hasKey(for: provider) {
+                pendingProvider = nil
+                settings.select(provider)
+            } else {
+                pendingProvider = provider
+            }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: provider.settingsIcon)

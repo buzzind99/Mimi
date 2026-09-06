@@ -42,9 +42,10 @@ enum ConnectionTestResult: Equatable {
 /// `SecureKeyStoring` (the Keychain in production) and are read on demand
 /// when an engine is constructed — never cached here.
 ///
-/// Auto-default policy: saving a key for an external provider switches the
-/// selection to it; Apple on-device stays active until any external provider
-/// is configured.
+/// Selection policy: a provider becomes selected only once it's configured —
+/// a saved key that passes the connection test (the Settings key card selects
+/// it on test success). Apple on-device stays active until then, and an
+/// unconfigured selection degrades to Apple at engine construction.
 @Observable
 @MainActor
 final class TranslationSettings {
@@ -145,9 +146,10 @@ final class TranslationSettings {
         return keys.readKey(for: provider.rawValue)
     }
 
-    /// Writes the key to the secure store, records the non-secret `hasKey`
-    /// flag + last-4 hint, and applies the auto-default policy: an external
-    /// provider with a key becomes the selected provider.
+    /// Writes the key to the secure store and records the non-secret
+    /// `hasKey` flag + last-4 hint. Selection is unchanged — the Settings
+    /// key card selects the provider when the post-save connection test
+    /// succeeds.
     func saveKey(_ key: String, for provider: TranslationProvider) throws(KeychainStoreError) {
         try keys.saveKey(key, for: provider.rawValue)
         hasKey[provider] = true
@@ -161,9 +163,6 @@ final class TranslationSettings {
         }
         if provider == .deepl {
             deeplIsFreeTier = key.hasSuffix(":fx")
-        }
-        if provider.isExternal {
-            select(provider)
         }
     }
 
