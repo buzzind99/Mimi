@@ -39,7 +39,8 @@ struct SidebarView: View {
 
             toolbar
         }
-        .padding(20)
+        .padding(.top, 16)
+        .padding([.horizontal, .bottom], 20)
         .frame(width: 282, alignment: .topLeading)
         .frame(maxHeight: .infinity)
         .background(Theme.sidebar)
@@ -426,10 +427,14 @@ extension SidebarView {
         .hoverHighlight(iconButtonShape)
         .help("Settings")
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-            if isSettingsWindow(note.object) { isSettingsOpen = true }
+            if isSettingsWindow(note.object) {
+                isSettingsOpen = true
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-            if isSettingsWindow(note.object) { isSettingsOpen = false }
+            if isSettingsWindow(note.object) {
+                isSettingsOpen = false
+            }
         }
     }
 

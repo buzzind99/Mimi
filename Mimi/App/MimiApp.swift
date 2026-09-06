@@ -16,6 +16,7 @@ struct MimiApp: App {
                     appDelegate.hud.setVisible(visible)
                 }
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .newItem) {
@@ -30,6 +31,7 @@ struct MimiApp: App {
         Settings {
             SettingsView(model: model)
         }
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
@@ -54,6 +56,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var repliedToTerminate = false
     private var teardownWatchdog: Timer?
     private var teardownCompleteObserver: NSObjectProtocol?
+    private var chromeObserver: NSObjectProtocol?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftUI's Settings scene ignores `.windowStyle(.hiddenTitleBar)`,
+        // so the chrome is hidden at the AppKit level when the window shows
+        // (the lazily-created window becomes key on open).
+        chromeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let window = note.object as? NSWindow,
+                  window.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true,
+                  window.titleVisibility != .hidden
+            else { return }
+            self?.hideTitleChrome(of: window)
+        }
+    }
+
+    private static let settingsWindowID = "com_apple_SwiftUI_Settings_window"
+
+    private func hideTitleChrome(of window: NSWindow) {
+        window.styleMask.insert(.fullSizeContentView)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false

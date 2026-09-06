@@ -36,7 +36,7 @@ struct SettingsView: View {
             }
         }
         .frame(
-            minWidth: 420, idealWidth: 460, maxWidth: 580,
+            minWidth: 420, idealWidth: 460, maxWidth: 560,
             minHeight: 720, idealHeight: 800
         )
         .background(Palette.window)
@@ -75,7 +75,8 @@ struct SettingsView: View {
                 .foregroundStyle(Palette.primaryText)
             Spacer()
         }
-        .padding(.horizontal, 28)
+        .padding(.leading, 52)
+        .padding(.trailing, 28)
         .padding(.vertical, 14)
         .background(Palette.headerBar)
     }
@@ -280,19 +281,12 @@ struct SettingsView: View {
                     SettingsModelRow(choice: choice, model: model)
                 }
             }
-            settingsDivider()
-            row(label: "Models folder") {
-                Text(ModelLocator.modelsDirectory.path)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(Palette.mutedText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
             HStack {
                 Spacer()
                 SettingsPill(label: "Re-check model") {
                     Task { await model.refreshModelAvailability() }
                 }
+                .padding(.top, 6)
             }
         }
         .padding(16)

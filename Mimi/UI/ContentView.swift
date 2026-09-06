@@ -48,6 +48,7 @@ struct ContentView: View {
             Rectangle()
                 .fill(Theme.divider)
                 .frame(width: 1)
+                .ignoresSafeArea()
             VStack(spacing: 0) {
                 TranscriptView(model: model)
                 LiveStripView(live: live)
