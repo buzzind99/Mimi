@@ -6,6 +6,9 @@ import SwiftUI
 /// manually dropped-in GGUF is picked up automatically by
 /// `ModelLocator.resolve(for:)`.
 struct OnboardingView: View {
+    /// Corner radius shared with the settings cards.
+    private let cardShape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
     var model: AppModel
     @State private var downloader: ModelDownloader
 
@@ -19,33 +22,18 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.teal)
+            brandMark
 
             VStack(spacing: 6) {
                 Text("Welcome to Mimi")
-                    .font(.title.bold())
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(Theme.primaryText)
                 Text("Real-time Japanese audio transcription & translation")
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondaryText)
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                Label {
-                    Text("Mimi listens to the audio playing on your Mac so it can transcribe what you hear. "
-                        + "To allow this, macOS asks for Screen Recording access the first time you start; "
-                        + "Mimi never records your screen or uploads anything. Everything runs locally on your Mac.")
-                } icon: {
-                    Image(systemName: "display")
-                }
-                Label {
-                    Text("The speech model (\(selectedChoice.approximateSize)) downloads once from Hugging Face and is stored in Application Support.")
-                } icon: {
-                    Image(systemName: "arrow.down.circle")
-                }
-            }
-            .font(.callout)
-            .frame(maxWidth: 520, alignment: .leading)
+            permissionCard
 
             modelChoiceCards
 
@@ -55,6 +43,7 @@ struct OnboardingView: View {
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.window)
         .onAppear {
             Task { await model.refreshModelAvailability() }
         }
@@ -73,6 +62,44 @@ struct OnboardingView: View {
         }
     }
 
+    /// Brand mark matching the sidebar header: gradient circle with the 耳
+    /// glyph, scaled up for the welcome screen.
+    private var brandMark: some View {
+        ZStack {
+            Circle().fill(Theme.Gradients.brand)
+            Text("耳")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 56, height: 56)
+    }
+
+    /// Screen-recording + model-download explainer rows inside a themed card.
+    private var permissionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label {
+                Text("Mimi listens to the audio playing on your Mac so it can transcribe what you hear. "
+                    + "To allow this, macOS asks for Screen Recording access the first time you start; "
+                    + "Mimi never records your screen or uploads anything. Everything runs locally on your Mac.")
+            } icon: {
+                Image(systemName: "display")
+                    .foregroundStyle(Theme.accentPink)
+            }
+            Label {
+                Text("The speech model (\(selectedChoice.approximateSize)) downloads once from Hugging Face and is stored in Application Support.")
+            } icon: {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundStyle(Theme.accentPink)
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.secondaryText)
+        .padding(16)
+        .frame(maxWidth: 520, alignment: .leading)
+        .background(cardShape.fill(Theme.cardFill))
+        .overlay(cardShape.stroke(Theme.cardStroke))
+    }
+
     private var selectedChoice: ASRModelChoice {
         model.asrModelSettings.selected
     }
@@ -83,36 +110,39 @@ struct OnboardingView: View {
     private var modelChoiceCards: some View {
         HStack(spacing: 12) {
             ForEach(ASRModelChoice.allCases) { choice in
+                let isSelected = choice == selectedChoice
                 Button {
-                    guard choice != selectedChoice else { return }
+                    guard !isSelected else { return }
                     model.asrModelSettings.select(choice)
                 } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
-                            Text(choice.displayName).font(.headline)
-                            if choice == selectedChoice {
+                            Text(choice.displayName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.primaryText)
+                            if isSelected {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.teal)
+                                    .foregroundStyle(Theme.accentPink)
                             }
                         }
                         Text("\(choice.approximateSize) · \(choice.blurb)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.secondaryText)
                             .multilineTextAlignment(.leading)
                     }
                     .padding(12)
                     .frame(maxWidth: 250, alignment: .leading)
                 }
                 .buttonStyle(.plain)
+                .hoverHighlight(
+                    cardShape, isEnabled: true,
+                    tint: Theme.accentPink, opacity: isSelected ? 0.08 : 0.05
+                )
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(choice == selectedChoice ? Color.teal.opacity(0.12) : Color.primary.opacity(0.04))
+                    cardShape.fill(isSelected ? Theme.accentPink.opacity(0.1) : Theme.cardFill)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(
-                            choice == selectedChoice ? Color.teal : Color.clear, lineWidth: 1.5
-                        )
+                    cardShape.strokeBorder(isSelected ? Theme.accentPink : Theme.cardStroke)
                 )
             }
         }
@@ -122,71 +152,93 @@ struct OnboardingView: View {
     private var modelSection: some View {
         switch downloader.state {
         case .idle, .failed:
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 if model.modelAvailability[selectedChoice] == nil {
-                    Button("Download \(selectedChoice.displayName) speech model") {
-                        downloader.start()
-                    }
-                    .buttonStyle(.borderedProminent)
+                    downloadButton
                 }
                 if case let .failed(message) = downloader.state {
                     Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.toastRedIcon)
                         .frame(maxWidth: 480)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Retry") { downloader.start() }
-                        .buttonStyle(.link)
-                        .font(.caption)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.accentPink)
+                        .buttonStyle(.plain)
                     Text(
                         "Offline? Download the GGUF on another machine and drop it into "
                             + "~/Library/Application Support/Mimi/models/ — Mimi picks it up automatically."
                     )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.gutterText)
                     .frame(maxWidth: 480)
-                } else if model.modelURL == nil {
-                    Text("Or drop the GGUF into ~/Library/Application Support/Mimi/models/")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 }
             }
         case let .downloading(_, bytes, total):
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 if let total, total > 0 {
                     ProgressView(value: Double(bytes), total: Double(total))
+                        .tint(Theme.accentPink)
                     Text(
                         "Downloading \(selectedChoice.displayName) model… "
                             + bytes.formatted(.byteCount(style: .memory)) + " / "
                             + total.formatted(.byteCount(style: .memory))
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(Theme.secondaryText)
                 } else {
                     ProgressView()
+                        .tint(Theme.accentPink)
                     Text(
                         "Downloading \(selectedChoice.displayName) model… "
                             + bytes.formatted(.byteCount(style: .memory))
                     )
-                    .font(.caption.monospacedDigit())
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(Theme.secondaryText)
                 }
                 Button("Cancel") { downloader.cancel() }
-                    .buttonStyle(.link)
-                    .font(.caption)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.accentPink)
+                    .buttonStyle(.plain)
             }
             .frame(maxWidth: 420)
         case .done:
             Label("\(selectedChoice.displayName) model ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.dotGreen)
         }
 
         if let resolved = model.modelURL {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.dotGreen)
                 Text(resolved.path)
-                    .font(.caption.monospaced())
+                    .font(.system(size: 10).monospaced())
+                    .foregroundStyle(Theme.gutterText)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
         }
+    }
+
+    /// Capsule download button matching the sidebar's session capsule
+    /// (start-session gradient, white label).
+    private var downloadButton: some View {
+        Button {
+            downloader.start()
+        } label: {
+            Text("Download \(selectedChoice.displayName) speech model")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(Theme.Gradients.start))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
     }
 }
