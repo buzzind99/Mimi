@@ -34,7 +34,7 @@ struct ContentView: View {
                 mainContent
             }
         }
-        .preferredColorScheme(appearance.resolvedColorScheme)
+        .preferredColorScheme($appearance.resolvedColorScheme)
         .background(TranslationSessionHost(model: model))
         .frame(minWidth: 860, minHeight: 600)
         .onAppear {

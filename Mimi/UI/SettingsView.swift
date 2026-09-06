@@ -30,7 +30,7 @@ struct SettingsView: View {
             minHeight: 720, idealHeight: 800
         )
         .background(Palette.window)
-        .preferredColorScheme(appearance.resolvedColorScheme)
+        .preferredColorScheme($appearance.resolvedColorScheme)
         // A selection change applies immediately while a session is running:
         // the queue re-attaches the selected engine mid-drain (pending
         // sentences replay onto it). Covers both the provider rows and the

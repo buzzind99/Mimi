@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Window appearance. Persisted (UserDefaults key `"Appearance"`); the
@@ -21,14 +22,35 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .dark: "Dark"
         }
     }
+}
 
-    /// Value for `.preferredColorScheme`; nil follows the system.
-    var resolvedColorScheme: ColorScheme? {
-        switch self {
-        case .system: nil
-        case .light: .light
-        case .dark: .dark
-        }
+/// Tracks the system-wide color scheme so `.system` can resolve to a
+/// concrete `ColorScheme`. Passing `nil` (the natural "follow the system"
+/// encoding) to `.preferredColorScheme` fails to revert a previously applied
+/// explicit scheme on macOS — the window content keeps the old appearance
+/// while the chrome follows the system — so the scheme must always be
+/// explicit, which in turn requires knowing the current system value.
+@MainActor
+final class SystemSchemeObserver: ObservableObject {
+    static let shared = SystemSchemeObserver()
+
+    @Published private(set) var colorScheme = SystemSchemeObserver.currentSystemScheme()
+
+    private init() {
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(systemThemeChanged),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil
+        )
+    }
+
+    @objc private func systemThemeChanged() {
+        colorScheme = Self.currentSystemScheme()
+    }
+
+    private static func currentSystemScheme() -> ColorScheme {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? .dark : .light
     }
 }
 
@@ -36,20 +58,42 @@ enum Appearance: String, CaseIterable, Identifiable {
 /// `Appearance` (invalid stored values fall back to `.system`). Mirrors
 /// `ReadingAnnotationSetting`: conforms to `DynamicProperty` so observing
 /// views re-render on change; the projected value is a
-/// `Binding<Appearance>` for controls.
+/// `Binding<Appearance>` for controls plus the always-concrete scheme for
+/// `.preferredColorScheme` at the window root.
+@MainActor
 @propertyWrapper
 struct AppearanceSetting: DynamicProperty {
     @AppStorage(Appearance.storageKey) private var raw = Appearance.system.rawValue
+    @StateObject private var systemScheme = SystemSchemeObserver.shared
 
     var wrappedValue: Appearance {
         get { Appearance(rawValue: raw) ?? .system }
         nonmutating set { raw = newValue.rawValue }
     }
 
-    var projectedValue: Binding<Appearance> {
-        Binding(
-            get: { Appearance(rawValue: raw) ?? .system },
-            set: { raw = $0.rawValue }
+    var projectedValue: AppearanceProjection {
+        AppearanceProjection(
+            binding: Binding(
+                get: { Appearance(rawValue: raw) ?? .system },
+                set: { raw = $0.rawValue }
+            ),
+            resolvedColorScheme: resolvedColorScheme
         )
     }
+
+    /// Always-concrete value for `.preferredColorScheme`: the stored choice,
+    /// or the observed system scheme for `.system`.
+    var resolvedColorScheme: ColorScheme {
+        switch wrappedValue {
+        case .system: systemScheme.colorScheme
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+/// Projected value of `AppearanceSetting`.
+struct AppearanceProjection {
+    var binding: Binding<Appearance>
+    var resolvedColorScheme: ColorScheme
 }
