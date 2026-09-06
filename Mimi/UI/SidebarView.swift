@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -12,6 +13,9 @@ struct SidebarView: View {
     @State private var exportPresented = false
     @State private var exportFormat: SessionExporter.Format = .txt
     @State private var exportData: Data?
+    @State private var isSettingsOpen = false
+
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -409,9 +413,11 @@ extension SidebarView {
     }
 
     private var settingsButton: some View {
-        SettingsLink {
+        Button {
+            toggleSettings()
+        } label: {
             Image(systemName: "gearshape")
-                .foregroundStyle(Theme.primaryText.opacity(0.7))
+                .foregroundStyle(isSettingsOpen ? Theme.accentPink : Theme.primaryText.opacity(0.7))
                 .frame(width: 34, height: 32)
                 .background(iconButtonBackground)
                 .contentShape(Rectangle())
@@ -419,6 +425,32 @@ extension SidebarView {
         .buttonStyle(.plain)
         .hoverHighlight(iconButtonShape)
         .help("Settings")
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            if isSettingsWindow(note.object) { isSettingsOpen = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
+            if isSettingsWindow(note.object) { isSettingsOpen = false }
+        }
+    }
+
+    /// SwiftUI's Settings scene window identifier.
+    private static let settingsWindowID = "com_apple_SwiftUI_Settings_window"
+
+    private func isSettingsWindow(_ object: Any?) -> Bool {
+        (object as? NSWindow)?.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true
+    }
+
+    private func toggleSettings() {
+        if let window = NSApp.windows.first(where: {
+            // SwiftUI keeps the closed Settings window cached in `windows`,
+            // so check visibility rather than mere existence.
+            $0.identifier?.rawValue == Self.settingsWindowID && $0.isVisible
+        }) {
+            window.performClose(nil)
+        } else {
+            isSettingsOpen = true
+            openSettings()
+        }
     }
 
     private var iconButtonBackground: some View {
