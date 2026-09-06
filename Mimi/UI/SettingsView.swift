@@ -185,7 +185,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: provider.settingsIcon)
                     .font(.system(size: 13))
-                    .foregroundStyle(Palette.primaryText.opacity(0.8))
+                    .foregroundStyle(selected ? Palette.accent : Palette.primaryText.opacity(0.8))
                     .frame(width: 26, height: 26)
                     .background(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
