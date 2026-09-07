@@ -29,13 +29,21 @@ enum ToastKey {
 @Observable
 @MainActor
 final class ToastCenter {
-    /// The three toast classes: transient warnings auto-dismiss
-    /// after 6 s; persistent cards stay until their condition clears and
-    /// carry the fix action (red cards are always actionable).
+    /// The three toast classes: transient warnings auto-dismiss after 3 s
+    /// (delay is per-center); persistent cards stay until their condition
+    /// clears and carry the fix action (red cards are always actionable).
     enum Style: Equatable, Sendable {
         case yellowAuto
         case yellowPersistent
         case redPersistent
+
+        /// Transient cards auto-dismiss after the delay; persistent ones stay.
+        var autoDismisses: Bool {
+            switch self {
+            case .yellowAuto: true
+            case .yellowPersistent, .redPersistent: false
+            }
+        }
     }
 
     struct Action: Equatable {
@@ -65,7 +73,7 @@ final class ToastCenter {
 
     /// Auto-dismiss delay for `.yellowAuto` cards (timer resets when the
     /// same key re-fires).
-    static let autoDismissDelay: Duration = .seconds(6)
+    static let autoDismissDelay: Duration = .seconds(3)
     /// Stack cap; the oldest card is dropped beyond this.
     static let maxVisible = 3
 
@@ -124,14 +132,15 @@ final class ToastCenter {
         toasts.removeAll()
     }
 
-    /// Arms the auto-dismiss timer for `.yellowAuto` cards. Dismissal is
+    /// Arms the auto-dismiss timer for transient cards (`.yellowAuto`,
+    /// `.neutralAuto`). Dismissal is
     /// keyed on the toast's `id`; the guard is defense-in-depth — the timer
     /// is always cancelled before a replacement is scheduled, so a stale
     /// firing should not occur, and with the replaced card's id preserved a
     /// late fire would simply be a correct dismissal.
     private func scheduleAutoDismiss(of toast: Toast) {
         timers.removeValue(forKey: toast.key)?()
-        guard toast.style == .yellowAuto else { return }
+        guard toast.style.autoDismisses else { return }
         timers[toast.key] = scheduler(autoDismissAfter) { [weak self] in
             self?.dismiss(id: toast.id)
         }

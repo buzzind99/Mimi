@@ -77,7 +77,7 @@ struct ToastCenterTests {
 
     // MARK: - Auto-dismiss
 
-    @Test("a yellowAuto toast schedules its 6 s auto-dismiss and fires it")
+    @Test("a yellowAuto toast schedules its 3 s auto-dismiss and fires it")
     func yellowAutoAutoDismisses() {
         let spy = ManualScheduler()
         let center = makeSUT(scheduler: spy)
@@ -85,7 +85,7 @@ struct ToastCenterTests {
         center.post(key: "a", style: .yellowAuto, title: "A", body: "transient")
 
         #expect(spy.pendingCount == 1)
-        #expect(spy.delays == [.seconds(6)])
+        #expect(spy.delays == [.seconds(3)])
 
         spy.firePending()
 

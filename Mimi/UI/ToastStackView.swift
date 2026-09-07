@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Toast stack overlay: cards stacked newest first,
-/// `move` + `opacity` transitions, yellow/red treatments per class, × only
-/// on `.yellowAuto`, action link on persistent cards (300pt, corner 14, themed
-/// background/border/icon tint).
+/// `move` + `opacity` transitions, yellow/red treatments per class,
+/// × on transient cards, action link on persistent cards (300pt, corner 14,
+/// themed background/border/icon tint).
 struct ToastStackView: View {
     var center: ToastCenter
 
@@ -56,7 +56,7 @@ private struct ToastCard: View {
             }
             Spacer(minLength: 8)
 
-            if toast.style == .yellowAuto {
+            if toast.style.autoDismisses {
                 Button(action: dismiss) {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
