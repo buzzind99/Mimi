@@ -13,6 +13,20 @@ struct TranscriptRow: View, Equatable {
     /// the parent let a mode/scale change fail `==` and re-render every row.
     let annotation: ReadingAnnotation
     let scale: UIScale
+    let cursorMode: CursorMode
+    /// Excluded from `==`: the closure is stable per parent render, and mode
+    /// changes re-render rows via `cursorMode`.
+    let onCopy: (String) -> Void
+
+    /// `nonisolated` so it can satisfy `Equatable` on this
+    /// `@MainActor`-inferred view; every compared property is an immutable
+    /// Sendable stored `let`.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.entry == rhs.entry
+            && lhs.annotation == rhs.annotation
+            && lhs.scale == rhs.scale
+            && lhs.cursorMode == rhs.cursorMode
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -31,7 +45,9 @@ struct TranscriptRow: View, Equatable {
                     surfaceFont: .system(size: 22 * scale.factor),
                     annotationFont: .system(size: 11 * scale.factor, design: .monospaced),
                     furiganaFont: .system(size: 14 * scale.factor, design: .monospaced),
-                    annotationColor: Theme.annotationPink
+                    annotationColor: Theme.annotationPink,
+                    cursorMode: cursorMode,
+                    onCopy: onCopy
                 )
                 .textSelection(.enabled)
 

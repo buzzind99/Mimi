@@ -6,7 +6,11 @@ import SwiftUI
 /// never the transcript.
 struct LiveStripView: View {
     var live: LivePartialState
+    /// Invoked with the clicked surface text when cursor mode is `.copy`;
+    /// the owner (ContentView) supplies the pasteboard + toast path.
+    var onCopy: ((String) -> Void)?
     @ReadingAnnotationSetting private var readingAnnotation
+    @CursorModeSetting private var cursorMode
     @UIScaleSetting private var uiScale
     @State private var pulsing = false
 
@@ -69,7 +73,9 @@ struct LiveStripView: View {
                     surfaceFont: .system(size: 22 * uiScale.factor, weight: .medium),
                     annotationFont: .system(size: 13 * uiScale.factor, design: .monospaced),
                     annotationColor: Theme.annotationPink,
-                    reservesAnnotationLine: true
+                    reservesAnnotationLine: true,
+                    cursorMode: cursorMode,
+                    onCopy: onCopy
                 )
                 .foregroundStyle(Theme.primaryText.opacity(0.9))
             }

@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct SidebarView: View {
     @Bindable var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
+    @CursorModeSetting private var cursorMode
     @UIScaleSetting private var uiScale
 
     @State private var exportPresented = false
@@ -25,7 +26,10 @@ struct SidebarView: View {
             sessionButton
 
             sectionLabel("ANNOTATION")
-            readingPicker
+            annotationPicker
+
+            sectionLabel("CURSOR MODE")
+            cursorPicker
                 .padding(.bottom, 22)
 
             enginesCard
@@ -130,40 +134,22 @@ struct SidebarView: View {
             || (model.isCheckingModel && model.phase != .running && model.phase != .sourceLost)
     }
 
-    // MARK: - Reading aids
+    // MARK: - Annotation picker
 
-    private var readingPicker: some View {
-        HStack(spacing: 2) {
-            ForEach(ReadingAnnotation.allCases) { mode in
-                readingSegment(mode)
-            }
-        }
-        .padding(3)
-        .background(Capsule().fill(Theme.cardFill))
-        .help(
-            "Reading annotation for the Japanese text — romaji and furigana are mutually exclusive"
+    private var annotationPicker: some View {
+        ModePicker(
+            help: "Reading annotation for the Japanese text — romaji and furigana are mutually exclusive",
+            modes: ReadingAnnotation.allCases, selection: $readingAnnotation,
+            label: \.label
         )
     }
 
-    private func readingSegment(_ mode: ReadingAnnotation) -> some View {
-        let selected = readingAnnotation == mode
-        return Button {
-            readingAnnotation = mode
-        } label: {
-            Text(mode.label)
-                .font(.system(size: 11, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Theme.primaryText : Theme.secondaryText)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 5)
-                .background {
-                    if selected {
-                        Capsule().fill(Theme.accentPink)
-                    }
-                }
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .hoverHighlight(Capsule())
+    private var cursorPicker: some View {
+        ModePicker(
+            help: "Click behavior for Japanese text — Copy places the clicked word on the pasteboard",
+            modes: CursorMode.allCases, selection: $cursorMode,
+            label: \.label
+        )
     }
 }
 

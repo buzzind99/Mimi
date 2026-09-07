@@ -70,6 +70,9 @@ final class AppModel {
     /// Toast stack: every error surface routes through here;
     /// cleared on session stop/teardown.
     let toasts = ToastCenter()
+    /// Transient notice pill (e.g. copy confirmation); single message,
+    /// auto-dismissed, cleared on session stop/teardown.
+    let notices = NoticeCenter()
     let translationQueue = TranslationQueue()
     /// Non-secret translation provider settings (selected provider, hasKey
     /// flags, OpenRouter model, test results). Keys stay in `SecureKeyStoring`
@@ -491,8 +494,9 @@ final class AppModel {
         translationWorker = nil
         translationStatus = .idle
         sessionEndedAt = Date()
-        // Stop/teardown clears all toasts (phase → `.idle`).
+        // Stop/teardown clears all toasts and notices (phase → `.idle`).
         toasts.clearAll()
+        notices.dismiss()
         phase = .idle
     }
 

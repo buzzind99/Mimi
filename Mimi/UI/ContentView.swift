@@ -51,10 +51,13 @@ struct ContentView: View {
                 .ignoresSafeArea()
             VStack(spacing: 0) {
                 TranscriptView(model: model)
-                LiveStripView(live: live)
+                LiveStripView(live: live, onCopy: { model.copySnippet($0) })
             }
             .overlay(alignment: .topTrailing) {
                 ToastStackView(center: model.toasts)
+            }
+            .overlay(alignment: .top) {
+                NoticePillView(center: model.notices)
             }
         }
         .background(Theme.window)

@@ -20,6 +20,14 @@ extension AppModel {
         NSPasteboard.general.setString(exportText(), forType: .string)
     }
 
+    /// Copies a clicked text snippet to the pasteboard and confirms with a
+    /// transient toast; backs the sidebar cursor-mode `.copy` behavior.
+    func copySnippet(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        notices.post(message: "Text copied")
+    }
+
     func export(format: SessionExporter.Format) throws -> Data {
         switch format {
         case .txt:

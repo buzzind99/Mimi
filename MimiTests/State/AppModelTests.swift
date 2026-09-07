@@ -177,9 +177,7 @@ struct AppModelTests {
         let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
-        model.applyTranslation(
-            index: 99, translation: SentenceTranslation(lang: "en", text: translationText)
-        )
+        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: translationText))
 
         #expect(model.entries[0].translations == [])
         #expect(model.entries[0].joinedTranslations == nil)
@@ -265,6 +263,16 @@ struct AppModelTests {
         model.copyTranscript()
 
         #expect(NSPasteboard.general.string(forType: .string) == model.exportText())
+    }
+
+    @Test("copySnippet puts the snippet on the pasteboard and posts the notice")
+    func copySnippetPutsSnippetOnPasteboardAndPostsNotice() async {
+        let model = await makeSUT()
+
+        model.copySnippet("こんにちは")
+
+        #expect(NSPasteboard.general.string(forType: .string) == "こんにちは")
+        #expect(model.notices.message == "Text copied")
     }
 
     @Test("txt export matches the plain exporter")

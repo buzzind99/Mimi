@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Wrapping flow layout: places children left-to-right, breaking onto a new
@@ -173,7 +174,7 @@ private struct FlowLayout: Layout {
 /// romaji doesn't reverse to kana) render inline as plain text, so their
 /// surfaces stay top-aligned with annotated words on the same line.
 /// Consecutive plain runs fold into a single flow child.
-struct RubyTextView: View, Equatable {
+struct RubyTextView: View, @preconcurrency Equatable {
     let text: String
     var annotation: ReadingAnnotation = .romaji
     var surfaceFont: Font
@@ -191,12 +192,19 @@ struct RubyTextView: View, Equatable {
     /// vertical position in None, Romaji, and Furigana modes, so mode toggles
     /// never shift the kanji. Off by default; `TranscriptRow` relies on it.
     var reservesAnnotationLine = false
+    /// Click behavior for surfaces (sidebar "cursor mode"): `.copy` invokes
+    /// `onCopy` with the clicked run; `.none` leaves clicks inert.
+    var cursorMode: CursorMode = .none
+    /// Invoked with the clicked surface text when `cursorMode == .copy`; the
+    /// host owns the pasteboard write and the confirmation toast.
+    var onCopy: ((String) -> Void)?
 
     private struct SurfaceText: View {
         let text: String
         let font: Font
         var italic = false
         var hoverColor = Theme.accentPink
+        var copyAction: (() -> Void)?
 
         @State private var hovering = false
 
@@ -207,12 +215,17 @@ struct RubyTextView: View, Equatable {
                 .foregroundStyle(hovering ? AnyShapeStyle(hoverColor) : AnyShapeStyle(.primary))
                 .textSelection(.disabled)
                 .onHover { hovering = $0 }
+                .pointerStyle(copyAction == nil ? nil : .link)
+                .onTapGesture { copyAction?() }
                 .animation(.easeOut(duration: 0.12), value: hovering)
         }
     }
 
     private func hoverableSurface(_ text: String) -> some View {
-        SurfaceText(text: text, font: surfaceFont, italic: surfaceItalic)
+        SurfaceText(
+            text: text, font: surfaceFont, italic: surfaceItalic,
+            copyAction: cursorMode == .copy ? { onCopy?(text) } : nil
+        )
     }
 
     var body: some View {
@@ -234,6 +247,21 @@ struct RubyTextView: View, Equatable {
                 hoverableSurface(text)
             }
         }
+    }
+
+    /// Excludes `onCopy` (closures have no value identity). The witness stays
+    /// MainActor-isolated (SwiftUI diffs views on the main actor); the
+    /// conformance is `@preconcurrency` to permit that.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text
+            && lhs.annotation == rhs.annotation
+            && lhs.surfaceFont == rhs.surfaceFont
+            && lhs.annotationFont == rhs.annotationFont
+            && lhs.furiganaFont == rhs.furiganaFont
+            && lhs.annotationColor == rhs.annotationColor
+            && lhs.surfaceItalic == rhs.surfaceItalic
+            && lhs.reservesAnnotationLine == rhs.reservesAnnotationLine
+            && lhs.cursorMode == rhs.cursorMode
     }
 
     private enum DisplayUnit {

@@ -7,6 +7,7 @@ struct HUDView: View {
     var live: LivePartialState
     @ObservedObject var panel: HUDPanel
     @ReadingAnnotationSetting private var readingAnnotation
+    @CursorModeSetting private var cursorMode
     @UIScaleSetting private var uiScale
 
     /// Set on offscreen measurement copies: fixes the layout width so the
@@ -154,7 +155,9 @@ struct HUDView: View {
             annotation: readingAnnotation,
             surfaceFont: .system(size: 14 * uiScale.factor),
             annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
-            annotationColor: .secondary.opacity(0.8)
+            annotationColor: .secondary.opacity(0.8),
+            cursorMode: cursorMode,
+            onCopy: { model.copySnippet($0) }
         )
         .foregroundStyle(.white)
     }

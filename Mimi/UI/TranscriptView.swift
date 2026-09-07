@@ -28,6 +28,7 @@ import SwiftUI
 struct TranscriptView: View {
     var model: AppModel
     @ReadingAnnotationSetting private var readingAnnotation
+    @CursorModeSetting private var cursorMode
     @UIScaleSetting private var uiScale
     @State private var pinnedToBottom = true
     @State private var reAnchorScheduled = false
@@ -66,7 +67,9 @@ struct TranscriptView: View {
                     TranscriptRow(
                         entry: entry,
                         annotation: readingAnnotation,
-                        scale: uiScale
+                        scale: uiScale,
+                        cursorMode: cursorMode,
+                        onCopy: { model.copySnippet($0) }
                     )
                     // Opacity only: a .move transition animates
                     // relative to the viewport, which displaces

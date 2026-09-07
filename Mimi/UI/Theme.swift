@@ -119,6 +119,11 @@ enum Theme {
     static let annotationPink = Color(light: 0xB33459, dark: 0xFF9DBB)
     /// Translation text.
     static let translationTeal = Color(light: 0x0E7C74, dark: 0x9FE8DF)
+    /// Notice pill fill: solid teal, light deep teal and dark pale mint.
+    static let noticeFill = Color(light: 0x0E7C74, dark: 0x9FE8DF)
+    /// Notice pill text: white on the deep light fill, dark teal ink on the
+    /// pale dark fill.
+    static let noticeText = Color(light: 0xFFFFFF, dark: 0x0B2E2B)
     /// LIVE indicator (dot + label): settings status red on light.
     static let liveRed = Color(light: 0xC21F30, dark: 0xFF4D5E)
     /// Engine-status dots (green = running, yellow = transitioning).
