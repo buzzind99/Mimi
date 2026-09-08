@@ -17,7 +17,17 @@ typealias NoticeScheduler = @Sendable (
 @Observable
 @MainActor
 final class NoticeCenter {
+    /// Pill tones: `.confirm` (copy confirmation, teal) and `.warning`
+    /// (dictionary no-hit, amber). The pill paints both from the tone.
+    enum NoticeTone: Equatable, Sendable {
+        case confirm
+        case warning
+    }
+
     private(set) var message: String?
+    /// Tone of the visible notice; drives the pill's color tokens. Resets
+    /// with the message on dismissal.
+    private(set) var tone: NoticeTone = .confirm
 
     /// Auto-dismiss delay (timer resets when the notice re-fires).
     static let autoDismissDelay: Duration = .seconds(2)
@@ -30,8 +40,11 @@ final class NoticeCenter {
     }
 
     /// Shows the message (replacing any visible one) and arms the timer.
-    func post(message: String) {
+    /// The tone travels with the message so a re-post replaces both in
+    /// place.
+    func post(message: String, tone: NoticeTone = .confirm) {
         self.message = message
+        self.tone = tone
         timer?()
         timer = scheduler(Self.autoDismissDelay) { [weak self] in
             self?.dismiss()
@@ -43,6 +56,7 @@ final class NoticeCenter {
         timer?()
         timer = nil
         message = nil
+        tone = .confirm
     }
 
     /// Real-time scheduler: sleeps off-main, then hops the dismissal to the

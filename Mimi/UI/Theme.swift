@@ -124,6 +124,13 @@ enum Theme {
     /// Notice pill text: white on the deep light fill, dark teal ink on the
     /// pale dark fill.
     static let noticeText = Color(light: 0xFFFFFF, dark: 0x0B2E2B)
+    /// Notice pill warning tone (dictionary no-hit): deep amber on light,
+    /// pale amber on dark. Hexes provisional pending a light/dark contrast
+    /// glance.
+    static let noticeWarningFill = Color(light: 0xB45309, dark: 0xFDBA74)
+    /// Warning-tone pill text: white on the deep light fill, dark brown ink
+    /// on the pale dark fill.
+    static let noticeWarningText = Color(light: 0xFFFFFF, dark: 0x431407)
     /// LIVE indicator (dot + label): settings status red on light.
     static let liveRed = Color(light: 0xC21F30, dark: 0xFF4D5E)
     /// Engine-status dots (green = running, yellow = transitioning).
@@ -178,4 +185,21 @@ enum Theme {
     /// Audio meter bar colors (also the translation bar's gradient stops).
     static let meterTeal = Color(light: 0x0D9488, dark: 0x5EEAD4)
     static let meterBlue = Color(light: 0x0284C7, dark: 0x38BDF8)
+}
+
+/// The notice pill's color pair for one tone.
+struct NoticePillTokens: Equatable {
+    let fill: Color
+    let text: Color
+}
+
+extension Theme {
+    /// Pure tone→token mapping for the notice pill (unit-tested): confirm
+    /// keeps the teal pair, warning the amber pair.
+    static func noticeTokens(for tone: NoticeCenter.NoticeTone) -> NoticePillTokens {
+        switch tone {
+        case .confirm: NoticePillTokens(fill: noticeFill, text: noticeText)
+        case .warning: NoticePillTokens(fill: noticeWarningFill, text: noticeWarningText)
+        }
+    }
 }
