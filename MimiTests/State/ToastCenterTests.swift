@@ -191,6 +191,18 @@ struct ToastCenterTests {
         #expect(center.toasts.isEmpty)
         #expect(spy.pendingCount == 0)
     }
+
+    // MARK: - Actions
+
+    @Test("actions compare by label, not handler identity")
+    func actionsCompareByLabel() {
+        let byLabel = ToastCenter.Action(label: "Retry") {}
+        let sameLabel = ToastCenter.Action(label: "Retry") {}
+        let other = ToastCenter.Action(label: "Dismiss") {}
+
+        #expect(byLabel == sameLabel)
+        #expect(byLabel != other)
+    }
 }
 
 // MARK: - Manual scheduler fixtures

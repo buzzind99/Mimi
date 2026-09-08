@@ -2,7 +2,7 @@ import Foundation
 @testable import Mimi
 import Testing
 
-/// Tests `AppModel.start()`'s full flow — dictionary gate (a dictionary is
+/// Tests `AppModel.start()`'s full flow — dictionary gate (both artifacts are
 /// installed on this machine, so it passes through) → `SessionController.begin()`
 /// → running, with translation activation — over an injected
 /// `makeSessionController` factory wiring scripted engine/capture doubles, and
@@ -17,7 +17,10 @@ import Testing
 /// throw, which lands in the same catch. The real factories (TCC preflight,
 /// SCK stream) stay production-only.
 @MainActor
-@Suite("AppModel session flow", .enabled(if: DictionaryStore.resolve() != nil))
+@Suite(
+    "AppModel session flow",
+    .enabled(if: DictionaryStore.resolve() != nil && InstalledJMDict.url != nil)
+)
 struct AppModelSessionTests {
 
     // MARK: - Fixtures

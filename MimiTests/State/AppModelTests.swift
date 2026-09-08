@@ -177,7 +177,7 @@ struct AppModelTests {
         let model = await makeSUT()
         model.sessionController.onSentence?(makeSentence(index: 7))
 
-        model.applyTranslation(index: 7, translation: SentenceTranslation(lang: "en", text: translationText))
+        model.applyTranslation(index: 99, translation: SentenceTranslation(lang: "en", text: translationText))
 
         #expect(model.entries[0].translations == [])
         #expect(model.entries[0].joinedTranslations == nil)

@@ -14,9 +14,23 @@ struct TranscriptRow: View, Equatable {
     let annotation: ReadingAnnotation
     let scale: UIScale
     let cursorMode: CursorMode
-    /// Excluded from `==`: the closure is stable per parent render, and mode
-    /// changes re-render rows via `cursorMode`.
+    /// Excluded from `==`: the closures are stable per parent render, and
+    /// mode changes re-render rows via `cursorMode`.
     let onCopy: (String) -> Void
+    /// Invoked with the tapped word when cursor mode is `.dictionary`;
+    /// nil keeps `.dictionary` on the legacy rendering path.
+    var onLookup: ((LookupToken) -> Void)?
+    /// The selection's source while this row owns the word-anchored
+    /// dictionary popover (this row's sentenceIndex matches), else nil.
+    /// Part of `==`: the owning row must re-render when the selection
+    /// lands, moves between this row's words, or clears — the word units'
+    /// popover bindings read the selection at render time.
+    let lookupAnchor: SelectedLookup.Source?
+    /// Per-word popover presentation resolver, invoked with a word unit's
+    /// segment index (`RubyTextView.LookupPopover`). Excluded from `==`:
+    /// `lookupAnchor` covers the changes that must re-render the row, and
+    /// the closure is stable per parent render.
+    var lookupPopover: ((Int) -> RubyTextView.LookupPopover?)?
 
     /// `nonisolated` so it can satisfy `Equatable` on this
     /// `@MainActor`-inferred view; every compared property is an immutable
@@ -26,6 +40,7 @@ struct TranscriptRow: View, Equatable {
             && lhs.annotation == rhs.annotation
             && lhs.scale == rhs.scale
             && lhs.cursorMode == rhs.cursorMode
+            && lhs.lookupAnchor == rhs.lookupAnchor
     }
 
     var body: some View {
@@ -47,7 +62,9 @@ struct TranscriptRow: View, Equatable {
                     furiganaFont: .system(size: 14 * scale.factor, design: .monospaced),
                     annotationColor: Theme.annotationPink,
                     cursorMode: cursorMode,
-                    onCopy: onCopy
+                    onCopy: onCopy,
+                    onLookup: onLookup,
+                    lookupPopover: lookupPopover
                 )
                 .textSelection(.enabled)
 

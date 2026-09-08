@@ -44,12 +44,31 @@ final class AppModel {
     var hudPinnedIndex: Int?
     /// True while a session start is blocked on the first-launch dictionary
     /// build (see `ensureDictionaryReady`) so the status bar can show
-    /// "Building dictionary…" instead of "Starting…".
-    private(set) var isPreparingDictionary = false
+    /// "Building dictionary…" instead of "Starting…". Mutated only by the
+    /// preparation surface in `AppModelDictionary.swift`.
+    var isPreparingDictionary = false
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
     /// verify hashes up to ~1.2 GB and must never run on the main thread.
     private(set) var isCheckingModel = true
+
+    /// The popover's current anchor: the surface (transcript row or live
+    /// strip) whose tap owns the app's single dictionary popover, with the
+    /// result shown and the paged entry index. Nil when no popover is up.
+    var selectedLookup: SelectedLookup?
+    /// The pinned sidebar DICTIONARY card content: the last lookup of the
+    /// session with its "also:" shorter hits and paged entry index.
+    /// Persists after the popover dismisses; cleared on session clear.
+    /// Setter stays in `AppModelLookup.swift` (lookup lifecycle only).
+    internal(set) var pinnedLookup: PinnedLookup?
+    /// Staleness token for in-flight lookups: each new tap invalidates the
+    /// previous one, so a slow lookup that lands after a newer tap (or a
+    /// session clear) never presents stale state. Mutated only by the
+    /// lookup lifecycle in `AppModelLookup.swift`.
+    var lookupGeneration = 0
+    /// The JMDict lookup engine behind dictionary taps; injectable so tests
+    /// drive a fixture database (the default resolves the prepared store).
+    let jmDictLookup: JMDictLookup
 
     /// Drives SwiftUI's `.translationTask` (session acquisition + pack prompt).
     var translationConfig: TranslationSession.Configuration?
@@ -164,6 +183,7 @@ final class AppModel {
         translationSettings: TranslationSettings? = nil,
         asrModelSettings: ASRModelSettings? = nil,
         translationTransport: HTTPTranslationTransport? = nil,
+        jmDictLookup: JMDictLookup? = nil,
         initialModelResolve: @escaping @Sendable (ASRModelChoice) -> URL? = {
             ModelLocator.resolve(for: $0)
         },
@@ -174,6 +194,7 @@ final class AppModel {
     ) {
         self.translationSettings = translationSettings ?? TranslationSettings()
         self.asrModelSettings = asrModelSettings ?? ASRModelSettings()
+        self.jmDictLookup = jmDictLookup ?? JMDictLookup()
         modelResolve = initialModelResolve
         self.translationTransport = translationTransport
         self.retireWarmEngine = retireWarmEngine
@@ -216,6 +237,11 @@ final class AppModel {
             // The Apple-fallback latch is per session: a fresh session
             // re-attempts the configured provider from scratch.
             translationFallbackActive = false
+            // Dictionary state is per session too: the popover anchor and
+            // the pinned card reset, and any in-flight lookup is dropped.
+            selectedLookup = nil
+            pinnedLookup = nil
+            lookupGeneration &+= 1
         }
         sessionController.onEngineChosen = { [weak self] isMock, url in
             self?.engineIsMock = isMock
@@ -328,46 +354,8 @@ final class AppModel {
 
     // MARK: - Dictionary preparation
 
-    /// Kicks the first-launch dictionary preparation (bundled `system.dic.zst`
-    /// → decompressed dictionary, see `DictionaryStore`) in the background so
-    /// ruby annotations come up soon after startup. Purely opportunistic:
-    /// until it succeeds (or if it never does) text renders unannotated, so
-    /// failures are logged only and retried on the next launch.
-    /// `resolve`/`prepare` are injectable for tests; the defaults drive the
-    /// real store.
-    func prepareDictionaryIfNeeded(
-        resolve: () -> URL? = { DictionaryStore.resolve() },
-        prepare: ((@escaping @Sendable (Result<URL, Error>) -> Void) -> Void) = {
-            DictionaryStore.shared.prepare(completion: $0)
-        }
-    ) {
-        guard resolve() == nil else { return }
-        prepare { result in
-            if case let .failure(error) = result {
-                print(
-                    "[dictionary] first-launch build failed; text stays unannotated: \(error.localizedDescription)"
-                )
-            }
-        }
-    }
-
-    /// Session-start gate: a session must never run while furigana is
-    /// silently missing, so a missing database is built before capture
-    /// begins. The launch-time kick (`prepareDictionaryIfNeeded`, above)
-    /// usually finishes the build first; this coalesces behind an in-flight
-    /// build on the store's queue and only blocks when none is running.
-    /// A failed build throws so the start fails visibly in the status bar
-    /// (pressing Start again retries). `resolve`/`prepare` are injectable
-    /// for tests; the defaults drive the real store's async surface.
-    func ensureDictionaryReady(
-        resolve: () -> URL? = { DictionaryStore.resolve() },
-        prepare: (() async throws -> URL)? = nil
-    ) async throws {
-        guard resolve() == nil else { return }
-        isPreparingDictionary = true
-        defer { isPreparingDictionary = false }
-        _ = try await(prepare ?? DictionaryStore.shared.prepare)()
-    }
+    // The first-launch dictionary kick-off and the session-start gate live
+    // in `AppModelDictionary.swift` (file split for the lint gate).
 
     // MARK: - Session control
 

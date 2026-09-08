@@ -69,7 +69,20 @@ struct TranscriptView: View {
                         annotation: readingAnnotation,
                         scale: uiScale,
                         cursorMode: cursorMode,
-                        onCopy: { model.copySnippet($0) }
+                        onCopy: { model.copySnippet($0) },
+                        onLookup: {
+                            model.handleLookupTap(
+                                $0,
+                                source: .transcript(
+                                    sentenceIndex: entry.sentence.index,
+                                    tokenIndex: $0.tokenIndex
+                                )
+                            )
+                        },
+                        lookupAnchor: lookupAnchor(for: entry.sentence.index),
+                        lookupPopover: { tokenIndex in
+                            lookupPopover(entry.sentence.index, tokenIndex)
+                        }
                     )
                     // Opacity only: a .move transition animates
                     // relative to the viewport, which displaces
@@ -169,7 +182,51 @@ struct TranscriptView: View {
                 // Scaling resizes every row; re-anchor if pinned.
                 reAnchor(proxy)
             }
+            .onChange(of: cursorMode) { _, _ in
+                // Dictionary mode restructures every row's flow children
+                // (per-token units, no plain-run folding), changing row
+                // heights; re-anchor if pinned.
+                reAnchor(proxy)
+            }
         }
+    }
+
+    /// Whether this row owns the word-anchored dictionary popover: the
+    /// selection's transcript source matching this row's sentenceIndex.
+    /// Reading it in the body (not inside a closure) registers the
+    /// observation dependency that re-diffs the rows when the selection
+    /// lands, moves, or clears.
+    private func lookupAnchor(for sentenceIndex: Int) -> SelectedLookup.Source? {
+        guard
+            case let .transcript(anchorSentenceIndex, _)? = model.selectedLookup?.source,
+            anchorSentenceIndex == sentenceIndex
+        else { return nil }
+        return model.selectedLookup?.source
+    }
+
+    /// Per-word popover presentation for the row's word units: the
+    /// binding is true only while this exact word is the selection's
+    /// anchor (a different-word retap dismisses and re-presents), and the
+    /// content is the shared entry view once the async lookup has landed.
+    private func lookupPopover(
+        _ sentenceIndex: Int, _ tokenIndex: Int
+    ) -> RubyTextView.LookupPopover {
+        let source = SelectedLookup.Source.transcript(
+            sentenceIndex: sentenceIndex, tokenIndex: tokenIndex
+        )
+        return RubyTextView.LookupPopover(
+            isPresented: Binding(
+                get: { model.selectedLookup?.source == source },
+                set: { isPresented in
+                    if !isPresented {
+                        model.dismissLookupPopover(source: source)
+                    }
+                }
+            ),
+            content: model.selectedLookup?.popoverItem(for: source).map {
+                DictionaryPopoverView(model: model, selected: $0)
+            }
+        )
     }
 
     /// Scrolls to the bottom marker on the next runloop tick, once the

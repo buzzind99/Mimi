@@ -193,18 +193,122 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// never shift the kanji. Off by default; `TranscriptRow` relies on it.
     var reservesAnnotationLine = false
     /// Click behavior for surfaces (sidebar "cursor mode"): `.copy` invokes
-    /// `onCopy` with the clicked run; `.none` leaves clicks inert.
+    /// `onCopy` with the clicked run; `.dictionary` opens a definition
+    /// lookup for the tapped word via `onLookup` (falling back to this
+    /// legacy path where the host passes no handler); `.none` leaves
+    /// clicks inert.
     var cursorMode: CursorMode = .none
     /// Invoked with the clicked surface text when `cursorMode == .copy`; the
     /// host owns the pasteboard write and the confirmation toast.
     var onCopy: ((String) -> Void)?
+    /// Invoked with the tapped word when `cursorMode == .dictionary` and a
+    /// token-derived surface is clicked; the host owns the lookup, its
+    /// result presentation, and error surfacing. When nil, `.dictionary`
+    /// renders the legacy path and taps stay inert (the HUD).
+    var onLookup: ((LookupToken) -> Void)?
+    /// Per-word popover presentation for the transcript host: invoked with
+    /// a word unit's segment index at render time; a non-nil result
+    /// attaches `.popover` to that word, and only the anchor word's
+    /// binding is true, so the arrow points at the word. nil — the HUD,
+    /// the live strip — keeps word units popover-free. Excluded from `==`
+    /// (closures carry no value identity); the host's anchor field covers
+    /// the data change that must re-render the row.
+    var lookupPopover: ((Int) -> LookupPopover?)?
+
+    /// One word unit's popover presentation, resolved by the host per
+    /// segment index: the binding presents only while that word is the
+    /// selection's anchor; the content is the shared entry view (nil until
+    /// a selection lands — the binding is false then, so nothing presents).
+    struct LookupPopover {
+        let isPresented: Binding<Bool>
+        let content: DictionaryPopoverView?
+    }
+
+    /// Dictionary mode is active only when the host handles lookups; with
+    /// `onLookup == nil` (the HUD) it falls back to the legacy path and
+    /// taps stay inert.
+    var dictionaryLookupActive: Bool {
+        cursorMode == .dictionary && onLookup != nil
+    }
+
+    /// One child of the dictionary-mode flow layout. Every annotator
+    /// segment is its own unit — token-derived words tappable, whitespace
+    /// and punctuation inert — with no plain-run folding, so the unit's
+    /// position in the array is the tapped segment index.
+    enum SegmentedUnit: Equatable {
+        /// A token-derived segment: tappable in dictionary mode, annotated
+        /// when `note` is set (furigana above / romaji beneath per mode).
+        case word(surface: String, note: String?)
+        /// Whitespace or punctuation: renders plain, never tappable.
+        case inert(surface: String)
+    }
+
+    /// Pure segment→child mapping for the dictionary path: a segment is
+    /// inert when it is whitespace-only or carries no letter or number
+    /// (punctuation); everything else is a tappable word — including
+    /// reading-less kanji, whose tap falls back to a surface query. The
+    /// note follows the annotation mode and is shown only when it differs
+    /// from the surface, matching the legacy path's annotated-unit rule.
+    static func segmentedUnits(
+        for segments: [ReadingSegment], annotation: ReadingAnnotation
+    ) -> [SegmentedUnit] {
+        segments.map { segment in
+            let surface = segment.surface
+            let inert = surface.allSatisfy { $0.isWhitespace }
+                || !surface.contains(where: { $0.isLetter || $0.isNumber })
+            guard !inert else { return .inert(surface: surface) }
+            let note: String?
+            switch annotation {
+            case .none: note = nil
+            case .furigana: note = segment.furigana
+            case .romaji: note = segment.romaji
+            }
+            return .word(surface: surface, note: note == surface ? nil : note)
+        }
+    }
+
+    /// The body the dictionary path renders for the resolved segments: the
+    /// flow of per-segment units, or the plain fallback when the annotator
+    /// yielded nothing at all (nil — unresolvable text — or empty, the
+    /// tokenizer-dictionary-unavailable case), so the row never blanks.
+    /// Pure for tests.
+    enum SegmentedBodyPlan: Equatable {
+        case flow([SegmentedUnit])
+        case plain
+    }
+
+    static func segmentedBodyPlan(
+        segments: [ReadingSegment]?, annotation: ReadingAnnotation
+    ) -> SegmentedBodyPlan {
+        guard let segments, !segments.isEmpty else { return .plain }
+        return .flow(segmentedUnits(for: segments, annotation: annotation))
+    }
+
+    /// The tap payload for segment `index`: surface, best-known reading,
+    /// lemma, segment index, and the full sentence text. Pure over the
+    /// resolved segments; the tap path re-resolves `segments(for: text)`
+    /// first (cached for unchanged text) so a live partial that grew
+    /// between render and tap yields its tap-time snapshot.
+    static func lookupToken(
+        at index: Int, text: String, segments: [ReadingSegment]?
+    ) -> LookupToken? {
+        guard let segments, segments.indices.contains(index) else { return nil }
+        let segment = segments[index]
+        return LookupToken(
+            surface: segment.surface,
+            reading: segment.furigana,
+            lemma: segment.lemma,
+            tokenIndex: index,
+            sentenceText: text
+        )
+    }
 
     private struct SurfaceText: View {
         let text: String
         let font: Font
         var italic = false
         var hoverColor = Theme.accentPink
-        var copyAction: (() -> Void)?
+        var action: (() -> Void)?
 
         @State private var hovering = false
 
@@ -215,20 +319,68 @@ struct RubyTextView: View, @preconcurrency Equatable {
                 .foregroundStyle(hovering ? AnyShapeStyle(hoverColor) : AnyShapeStyle(.primary))
                 .textSelection(.disabled)
                 .onHover { hovering = $0 }
-                .pointerStyle(copyAction == nil ? nil : .link)
-                .onTapGesture { copyAction?() }
+                .pointerStyle(action == nil ? nil : .link)
+                .onTapGesture { action?() }
                 .animation(.easeOut(duration: 0.12), value: hovering)
         }
     }
 
-    private func hoverableSurface(_ text: String) -> some View {
+    private func hoverableSurface(_ text: String, action: (() -> Void)? = nil) -> some View {
         SurfaceText(
             text: text, font: surfaceFont, italic: surfaceItalic,
-            copyAction: cursorMode == .copy ? { onCopy?(text) } : nil
+            action: action
         )
     }
 
+    /// The surface action on the legacy path: copy-on-click in `.copy`
+    /// mode, inert otherwise.
+    private func copyAction(_ text: String) -> (() -> Void)? {
+        guard cursorMode == .copy else { return nil }
+        return { onCopy?(text) }
+    }
+
+    /// The surface action for a dictionary-mode word unit: re-resolves the
+    /// segments at tap time (cached for unchanged text) and hands the host
+    /// the tapped word's payload.
+    private func lookupAction(at index: Int) -> (() -> Void)? {
+        guard let onLookup else { return nil }
+        let text = self.text
+        return {
+            guard let token = Self.lookupToken(
+                at: index, text: text, segments: ReadingAnnotator.segments(for: text)
+            ) else { return }
+            onLookup(token)
+        }
+    }
+
     var body: some View {
+        if dictionaryLookupActive {
+            segmentedBody
+        } else {
+            annotatedBody
+        }
+    }
+
+    /// Plain full-text rendering: nothing annotatable (legacy path) or no
+    /// segments at all (dictionary path — the tokenizer dictionary is
+    /// unavailable), so the raw text keeps the slot filled. Taps stay
+    /// inert outside `.copy`.
+    @ViewBuilder
+    private func plainFallback(_ text: String) -> some View {
+        if reservesAnnotationLine {
+            VStack(spacing: 0) {
+                reservedAnnotationLine
+                hoverableSurface(text, action: copyAction(text))
+            }
+        } else {
+            hoverableSurface(text, action: copyAction(text))
+        }
+    }
+
+    /// Legacy path: annotation-folded units, or plain text when nothing is
+    /// annotatable. The HUD and every non-dictionary mode render here.
+    @ViewBuilder
+    private var annotatedBody: some View {
         let units = displayUnits
         if annotation != .none, units.contains(where: \.isAnnotated) {
             FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
@@ -236,22 +388,74 @@ struct RubyTextView: View, @preconcurrency Equatable {
                     unitView(unit)
                 }
             }
-        } else if !units.isEmpty {
-            // Nothing annotatable: plain text keeps the slot filled.
-            if reservesAnnotationLine {
-                VStack(spacing: 0) {
-                    reservedAnnotationLine
-                    hoverableSurface(text)
-                }
-            } else {
-                hoverableSurface(text)
-            }
+        } else {
+            plainFallback(text)
         }
     }
 
-    /// Excludes `onCopy` (closures have no value identity). The witness stays
-    /// MainActor-isolated (SwiftUI diffs views on the main actor); the
-    /// conformance is `@preconcurrency` to permit that.
+    /// Dictionary path: one tappable unit per annotator segment — no
+    /// plain-run folding, so the flow child's index is the tapped segment
+    /// index. With no segments the plain fallback renders instead.
+    @ViewBuilder
+    private var segmentedBody: some View {
+        switch Self.segmentedBodyPlan(
+            segments: ReadingAnnotator.segments(for: text), annotation: annotation
+        ) {
+        case let .flow(units):
+            FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
+                ForEach(Array(units.enumerated()), id: \.offset) { index, unit in
+                    segmentedUnitView(unit, at: index)
+                }
+            }
+        case .plain:
+            plainFallback(text)
+        }
+    }
+
+    @ViewBuilder
+    private func segmentedUnitView(_ unit: SegmentedUnit, at index: Int) -> some View {
+        switch unit {
+        case let .word(surface, note):
+            wordUnit(surface, note: note, index: index)
+        case let .inert(surface):
+            plainUnit(surface, action: nil)
+        }
+    }
+
+    /// A tappable word unit, with the host's `.popover` attached when it
+    /// provides one. The modifier stays attached to every word unit for
+    /// stable identity — the binding is false (and the content nil) for
+    /// all but the anchor word.
+    @ViewBuilder
+    private func wordUnit(_ surface: String, note: String?, index: Int) -> some View {
+        let action = lookupAction(at: index)
+        if let popover = lookupPopover?(index) {
+            wordContent(surface, note: note, action: action)
+                .popover(isPresented: popover.isPresented) {
+                    if let content = popover.content {
+                        content
+                    }
+                }
+        } else {
+            wordContent(surface, note: note, action: action)
+        }
+    }
+
+    @ViewBuilder
+    private func wordContent(
+        _ surface: String, note: String?, action: (() -> Void)?
+    ) -> some View {
+        if let note {
+            annotatedUnit(surface, note: note, action: action)
+        } else {
+            plainUnit(surface, action: action)
+        }
+    }
+
+    /// Excludes `onCopy`, `onLookup`, and `lookupPopover` (closures have
+    /// no value identity). The witness stays MainActor-isolated (SwiftUI
+    /// diffs views on the main actor); the conformance is `@preconcurrency`
+    /// to permit that.
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.text == rhs.text
             && lhs.annotation == rhs.annotation
@@ -274,11 +478,12 @@ struct RubyTextView: View, @preconcurrency Equatable {
         }
     }
 
-    /// Pins FlowLayout's size cache: annotation mode and the italic flag
-    /// change child structure, the fonts change child sizes, the text changes
-    /// surfaces. Colors paint only, so they are excluded.
-    private var fingerprint: String {
-        "\(annotation)-\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
+    /// Pins FlowLayout's size cache: annotation and cursor mode change
+    /// child structure (the dictionary path drops plain-run folding), the
+    /// italic flag changes child structure, the fonts change child sizes,
+    /// the text changes surfaces. Colors paint only, so they are excluded.
+    var fingerprint: String {
+        "\(annotation)-\(cursorMode)-\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
     }
 
     /// Segments folded for rendering: consecutive runs without a distinct
@@ -323,30 +528,34 @@ struct RubyTextView: View, @preconcurrency Equatable {
     private func unitView(_ unit: DisplayUnit) -> some View {
         switch unit {
         case let .plain(run):
-            plainRun(run)
+            plainUnit(run, action: copyAction(run))
         case let .annotated(surface, note):
-            VStack(spacing: 0) {
-                // Furigana mode already renders the annotation line above
-                // the surface; the reservation is only needed for modes
-                // that would otherwise start the surface at the top.
-                if annotation != .furigana, reservesAnnotationLine {
-                    reservedAnnotationLine
-                }
-                if annotation == .furigana {
-                    Text(verbatim: note)
-                        .font(noteFont)
-                        .foregroundStyle(annotationColor)
-                        .lineLimit(1)
-                        .textSelection(.disabled)
-                    hoverableSurface(surface)
-                } else {
-                    hoverableSurface(surface)
-                    Text(verbatim: note)
-                        .font(noteFont)
-                        .foregroundStyle(annotationColor)
-                        .lineLimit(1)
-                        .textSelection(.disabled)
-                }
+            annotatedUnit(surface, note: note, action: copyAction(surface))
+        }
+    }
+
+    private func annotatedUnit(_ surface: String, note: String, action: (() -> Void)?) -> some View {
+        VStack(spacing: 0) {
+            // Furigana mode already renders the annotation line above
+            // the surface; the reservation is only needed for modes
+            // that would otherwise start the surface at the top.
+            if annotation != .furigana, reservesAnnotationLine {
+                reservedAnnotationLine
+            }
+            if annotation == .furigana {
+                Text(verbatim: note)
+                    .font(noteFont)
+                    .foregroundStyle(annotationColor)
+                    .lineLimit(1)
+                    .textSelection(.disabled)
+                hoverableSurface(surface, action: action)
+            } else {
+                hoverableSurface(surface, action: action)
+                Text(verbatim: note)
+                    .font(noteFont)
+                    .foregroundStyle(annotationColor)
+                    .lineLimit(1)
+                    .textSelection(.disabled)
             }
         }
     }
@@ -358,14 +567,14 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// unless `reservesAnnotationLine` asks for the line above as well, to
     /// pin the surface to the same height across all annotation modes.)
     @ViewBuilder
-    private func plainRun(_ surface: String) -> some View {
+    private func plainUnit(_ surface: String, action: (() -> Void)?) -> some View {
         if annotation == .furigana || reservesAnnotationLine {
             VStack(spacing: 0) {
                 reservedAnnotationLine
-                hoverableSurface(surface)
+                hoverableSurface(surface, action: action)
             }
         } else {
-            hoverableSurface(surface)
+            hoverableSurface(surface, action: action)
         }
     }
 }

@@ -32,9 +32,7 @@ struct SidebarView: View {
             cursorPicker
                 .padding(.bottom, 22)
 
-            enginesCard
-                .padding(.bottom, 12)
-            audioCard
+            modeCards
 
             Spacer()
 
@@ -146,7 +144,7 @@ struct SidebarView: View {
 
     private var cursorPicker: some View {
         ModePicker(
-            help: "Click behavior for Japanese text — Copy places the clicked word on the pasteboard",
+            help: "Click behavior for Japanese text — Copy places the clicked word on the pasteboard; Dictionary opens a lookup",
             modes: CursorMode.allCases, selection: $cursorMode,
             label: \.label
         )
@@ -156,6 +154,38 @@ struct SidebarView: View {
 // MARK: - Cards
 
 extension SidebarView {
+
+    /// Which cards the sidebar shows per cursor mode: `.dictionary` swaps
+    /// ENGINES + AUDIO for the DICTIONARY card; SESSION shows in every mode
+    /// (below the `Spacer`, outside this set). Pure for tests.
+    struct CardVisibility: Equatable {
+        let engines: Bool
+        let audio: Bool
+        let dictionary: Bool
+
+        static let enginePair = CardVisibility(engines: true, audio: true, dictionary: false)
+        static let dictionaryMode = CardVisibility(engines: false, audio: false, dictionary: true)
+    }
+
+    static func showsCards(for cursorMode: CursorMode) -> CardVisibility {
+        switch cursorMode {
+        case .dictionary: .dictionaryMode
+        default: .enginePair
+        }
+    }
+
+    @ViewBuilder
+    private var modeCards: some View {
+        let visibility = Self.showsCards(for: cursorMode)
+        if visibility.dictionary {
+            DictionaryCardView(model: model)
+                .padding(.bottom, 12)
+        } else {
+            enginesCard
+                .padding(.bottom, 12)
+            audioCard
+        }
+    }
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
@@ -271,76 +301,8 @@ extension SidebarView {
         AudioCardView(state: model.audioLevel)
     }
 
-    // MARK: - Session card
-
-    private var sessionCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("SESSION")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Theme.secondaryText)
-                .kerning(1.2)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                stat(value: "\(model.entries.count)", label: "Sentences")
-                durationStat
-                stat(value: "\(model.sessionCharacterCount)", label: "Characters")
-                stat(
-                    value: model.latency.seconds.formatted(.number.precision(.fractionLength(1)))
-                        + "s",
-                    label: "Lag"
-                )
-            }
-        }
-        .padding(12)
-        .background(cardChrome)
-    }
-
-    /// Duration ticks at 1 s while running (now − startedAt); frozen at
-    /// endedAt after stop, at captureLostAt during a source-lost outage
-    /// (the clock resumes on restart recovery); "—" before the first session.
-    @ViewBuilder
-    private var durationStat: some View {
-        if model.phase == .running {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                stat(
-                    value: Self.durationText(from: model.sessionStartedAt, to: context.date),
-                    label: "Duration"
-                )
-            }
-        } else {
-            stat(value: frozenDurationText, label: "Duration")
-        }
-    }
-
-    private var frozenDurationText: String {
-        guard let started = model.sessionStartedAt else { return "—" }
-        return Self.durationText(
-            from: started, to: model.sessionEndedAt ?? model.captureLostAt ?? Date()
-        )
-    }
-
-    static func durationText(from start: Date?, to end: Date) -> String {
-        guard let start else { return "—" }
-        let seconds = max(0, Int(end.timeIntervalSince(start)))
-        let h = seconds / 3600, m = seconds / 60 % 60, s = seconds % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-    }
-
-    private func stat(value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundStyle(Theme.secondaryText)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.tileFill))
-    }
+    // The SESSION card (and the MARK: - Session card block) lives in
+    // `SidebarSessionCard.swift` (file split for the lint gate).
 }
 
 // MARK: - Toolbar
@@ -520,9 +482,9 @@ extension SidebarView {
     }
 }
 
-/// Card chrome (fill + stroke) shared by the sidebar cards and the audio
-/// leaf below; fileprivate so `AudioCardView` can reuse it standalone.
-private var cardChrome: some View {
+/// Card chrome (fill + stroke) shared by the sidebar cards, the audio leaf
+/// below, and the DICTIONARY card (DictionaryLookupViews.swift).
+var cardChrome: some View {
     RoundedRectangle(cornerRadius: 14, style: .continuous)
         .fill(Theme.cardFill)
         .overlay(

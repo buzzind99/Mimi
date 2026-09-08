@@ -42,6 +42,20 @@ struct ContentView: View {
         }
     }
 
+    /// Whether the live strip owns the app's single dictionary
+    /// popover: true only while the selection is anchored to the strip.
+    /// Dismissal clears the selection only when the strip still owns it.
+    private var liveStripLookupPresented: Binding<Bool> {
+        Binding(
+            get: { model.selectedLookup?.source == .liveStrip },
+            set: { isPresented in
+                if !isPresented {
+                    model.dismissLookupPopover(source: .liveStrip)
+                }
+            }
+        )
+    }
+
     private var mainContent: some View {
         HStack(spacing: 0) {
             SidebarView(model: model)
@@ -51,7 +65,20 @@ struct ContentView: View {
                 .ignoresSafeArea()
             VStack(spacing: 0) {
                 TranscriptView(model: model)
-                LiveStripView(live: live, onCopy: { model.copySnippet($0) })
+                LiveStripView(
+                    live: live,
+                    onCopy: { model.copySnippet($0) },
+                    onLookup: { model.handleLookupTap($0, source: .liveStrip) }
+                )
+                // Strip-anchored popover: single non-virtualized view, so
+                // the strip owns it while the selection's anchor is the
+                // live strip. Source-keyed so a strip retap swaps content
+                // in place instead of a dismiss+replace.
+                .popover(isPresented: liveStripLookupPresented) {
+                    if let selected = model.selectedLookup?.popoverItem(for: .liveStrip) {
+                        DictionaryPopoverView(model: model, selected: selected)
+                    }
+                }
             }
             .overlay(alignment: .topTrailing) {
                 ToastStackView(center: model.toasts)

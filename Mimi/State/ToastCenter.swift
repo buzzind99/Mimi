@@ -19,6 +19,7 @@ enum ToastKey {
     static let sessionFailed = "session.failed"
     static let asrWarning = "asr.warning"
     static let exportFailed = "export.failed"
+    static let dictionaryLookup = "dictionary.lookup"
 }
 
 /// State behind the toast stack. Posts are deduped by key — a repeat event

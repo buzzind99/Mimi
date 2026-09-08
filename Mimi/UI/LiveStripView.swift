@@ -9,6 +9,9 @@ struct LiveStripView: View {
     /// Invoked with the clicked surface text when cursor mode is `.copy`;
     /// the owner (ContentView) supplies the pasteboard + toast path.
     var onCopy: ((String) -> Void)?
+    /// Invoked with the tapped word when cursor mode is `.dictionary`;
+    /// nil keeps `.dictionary` on the legacy rendering path.
+    var onLookup: ((LookupToken) -> Void)?
     @ReadingAnnotationSetting private var readingAnnotation
     @CursorModeSetting private var cursorMode
     @UIScaleSetting private var uiScale
@@ -75,7 +78,8 @@ struct LiveStripView: View {
                     annotationColor: Theme.annotationPink,
                     reservesAnnotationLine: true,
                     cursorMode: cursorMode,
-                    onCopy: onCopy
+                    onCopy: onCopy,
+                    onLookup: onLookup
                 )
                 .foregroundStyle(Theme.primaryText.opacity(0.9))
             }
