@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimi
+import SQLite3
 import Testing
 
 // MARK: - Fake FFI shims
@@ -19,8 +20,12 @@ private let fakeDicContents = "fake dic"
 /// The smoke word the store tokenizes; lives in the fake tokenize payloads.
 private let smokeWord = "学生"
 
-private nonisolated(unsafe) var fakePrepareCalls = 0
-private nonisolated(unsafe) var fakePrepareDelayMs = 0
+nonisolated(unsafe) var fakePrepareCalls = 0
+nonisolated(unsafe) var fakePrepareDelayMs = 0
+/// When set, the fake prepare copies this file (a real smoke-passing JMDict
+/// database for the JMDict tests) to the output path instead of the plain
+/// placeholder payload.
+nonisolated(unsafe) var fakePrepareCopySource: URL?
 
 private func fakePrepareWriteFile(
     _ zstPath: UnsafePointer<CChar>, _ outPath: UnsafePointer<CChar>
@@ -31,14 +36,18 @@ private func fakePrepareWriteFile(
     }
     let destination = URL(fileURLWithPath: String(cString: outPath))
     do {
-        try Data(fakeDicContents.utf8).write(to: destination)
+        if let source = fakePrepareCopySource {
+            try FileManager.default.copyItem(at: source, to: destination)
+        } else {
+            try Data(fakeDicContents.utf8).write(to: destination)
+        }
         return 0
     } catch {
         return 1
     }
 }
 
-private func fakePrepareFail(
+func fakePrepareFail(
     _ zstPath: UnsafePointer<CChar>, _ outPath: UnsafePointer<CChar>
 ) -> Int32 {
     fakePrepareCalls += 1
@@ -78,7 +87,7 @@ private func fakeFreeString(_ string: UnsafeMutablePointer<CChar>?) {
     free(string)
 }
 
-private func makeFakeFFI(
+func makeFakeFFI(
     prepare: DictionaryFFI.FnPrepare = fakePrepareWriteFile,
     open: DictionaryFFI.FnOpen = fakeOpenOK,
     tokenize: DictionaryFFI.FnTokenizeJSON = fakeTokenizeReading
@@ -92,18 +101,75 @@ private func makeFakeFFI(
     )
 }
 
+// MARK: - JMDict smoke database
+
+private enum SmokeDatabaseError: Error {
+    case sqlite(String)
+}
+
+/// Builds a minimal JMDict-schema SQLite database (the JMDict build's
+/// tables). With `includeSmokeWord` the `学生` headword hits one entry, which
+/// is exactly what the store's JMDict smoke query requires; without it the
+/// database is well-formed but the smoke word misses.
+func makeJMDictSmokeDatabase(includeSmokeWord: Bool = true) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("mimi-jmdict-smoke-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent("jmdict-smoke.sqlite")
+
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(
+        url.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
+    ) == SQLITE_OK, let db else {
+        let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "open failed"
+        sqlite3_close_v2(db)
+        throw SmokeDatabaseError.sqlite(message)
+    }
+    defer { sqlite3_close_v2(db) }
+
+    func exec(_ sql: String) throws {
+        var error: UnsafeMutablePointer<CChar>?
+        guard sqlite3_exec(db, sql, nil, nil, &error) == SQLITE_OK else {
+            let message = error.map { String(cString: $0) } ?? "unknown error"
+            sqlite3_free(error)
+            throw SmokeDatabaseError.sqlite(message)
+        }
+    }
+
+    try exec("""
+    CREATE TABLE entries(ent_seq INTEGER PRIMARY KEY, keb TEXT, reb TEXT, common INTEGER NOT NULL);
+    CREATE TABLE senses(entry_id INTEGER NOT NULL, ord INTEGER NOT NULL, pos TEXT,
+      gloss TEXT NOT NULL, misc TEXT, skeb TEXT, sreb TEXT);
+    CREATE TABLE headwords(entry_id INTEGER NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL,
+      jlpt INTEGER, hatsuon TEXT, acc TEXT, zo TEXT);
+    """)
+    if includeSmokeWord {
+        try exec("""
+        INSERT INTO entries VALUES (1000000, '学生', 'がくせい', 1);
+        INSERT INTO senses VALUES (1000000, 0, 'n', 'student', NULL, NULL, NULL);
+        INSERT INTO headwords VALUES (1000000, '学生', 'keb', NULL, NULL, NULL, NULL);
+        """)
+    }
+    return url
+}
+
 // MARK: - DictionaryStore
 
 @Suite("DictionaryStore", .serialized)
 final class DictionaryStoreTests {
 
-    private let tempRoot: URL
-    private let destination: URL
-    private let fixtureZst: URL
+    // Internal so the JMDict extension (DictionaryStoreJMDictTests.swift)
+    // shares the same serialized suite state.
+    let tempRoot: URL
+    let destination: URL
+    let fixtureZst: URL
+    /// Minimal well-formed JMDict database the fake prepare can leave where
+    /// the real artifact would land, so the store's JMDict smoke query passes.
+    let smokeDatabase: URL
 
     /// Contents left at the destination to simulate a dictionary prepared by
     /// an earlier launch.
-    private let previousDicContents = "previously prepared"
+    let previousDicContents = "previously prepared"
 
     /// Arbitrary payload for the process-env override file (only its presence
     /// matters).
@@ -116,23 +182,28 @@ final class DictionaryStoreTests {
         destination = tempRoot.appendingPathComponent("dictionaries", isDirectory: true)
         fixtureZst = tempRoot.appendingPathComponent("system.dic.zst")
         try Data("fake zst".utf8).write(to: fixtureZst)
+        smokeDatabase = try makeJMDictSmokeDatabase()
         fakePrepareCalls = 0
         fakePrepareDelayMs = 0
+        fakePrepareCopySource = nil
     }
 
     deinit {
         try? FileManager.default.removeItem(at: tempRoot)
+        try? FileManager.default.removeItem(at: smokeDatabase.deletingLastPathComponent())
     }
 
     // MARK: Helpers
 
-    private func makeStore(
+    func makeStore(
         ffi: DictionaryFFI? = makeFakeFFI(),
         bundledSource: URL? = nil,
+        bundledJMDictSource: URL? = nil,
         destinationDirectory: URL? = nil
     ) -> DictionaryStore {
         DictionaryStore(
             bundledSource: bundledSource ?? fixtureZst,
+            bundledJMDictSource: bundledJMDictSource ?? fixtureZst,
             destinationDirectory: destinationDirectory ?? destination,
             ffi: ffi
         )

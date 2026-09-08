@@ -1,0 +1,1091 @@
+{
+  "source": {
+    "upstream": "JMDict_Extended",
+    "tag": "1.4.1-auto-release-2026-09-01",
+    "asset": "jmdictExtended-2026-09-01.json",
+    "sha256": "4bee23eb7bd088d0a9c48301d0d25964b8ac9ecd6465c91b40adf8191d4b040a",
+    "version": "3.6.2",
+    "dictDate": "2026-08-31",
+    "note": "Eight real entries extracted verbatim from the pinned release. Covered: kanji word with pitch+JLPT (食べる), kana-only gairaigo with common on the kana object (アルバイト), appliesToKana-restricted sense (彼処), pitch-less entry (風呂敷), null jlptLevel (風通し), multi-spelling entries (食べる/喰べる, お土産/御土産), pitch spot-check homographs (橋, 飴). JMdict data © EDRDG, CC BY-SA 4.0; see THIRD_PARTY_NOTICES.md."
+  },
+  "words": [
+    {
+      "id": "1000320",
+      "kanji": [
+        {
+          "common": false,
+          "text": "彼処",
+          "tags": [
+            "rK"
+          ],
+          "furigana": [
+            {
+              "ruby": "彼処",
+              "rt": "あそこ"
+            }
+          ],
+          "jlptLevel": 1,
+          "pitchAccent": {
+            "hatsuon": "か[Dev]し'こ",
+            "accPatts": "1",
+            "zoPatts": "HLLL"
+          }
+        },
+        {
+          "common": false,
+          "text": "彼所",
+          "tags": [
+            "rK"
+          ],
+          "furigana": [
+            {
+              "ruby": "彼所",
+              "rt": "あそこ"
+            }
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "か[Dev]し'こ",
+            "accPatts": "1",
+            "zoPatts": "HLLL"
+          }
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "あそこ",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": 5,
+          "pitchAccent": {
+            "hatsuon": "あそ'こ",
+            "accPatts": "0",
+            "zoPatts": "LHHH"
+          }
+        },
+        {
+          "common": false,
+          "text": "あすこ",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "あ[Dev]すこ",
+            "accPatts": "0",
+            "zoPatts": "LHHH"
+          }
+        },
+        {
+          "common": false,
+          "text": "かしこ",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "か[Dev]し'こ",
+            "accPatts": "1",
+            "zoPatts": "HLLL"
+          }
+        },
+        {
+          "common": false,
+          "text": "アソコ",
+          "tags": [],
+          "appliesToKanji": [],
+          "jlptLevel": null,
+          "pitchAccent": []
+        },
+        {
+          "common": false,
+          "text": "あしこ",
+          "tags": [
+            "ok"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "あ[Dev]し･こ",
+            "accPatts": "0",
+            "zoPatts": "LHHH"
+          }
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "pn"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [
+            [
+              "どこ",
+              1
+            ],
+            [
+              "ここ",
+              1
+            ],
+            [
+              "そこ",
+              1
+            ]
+          ],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "uk"
+          ],
+          "info": [
+            "place physically distant from both speaker and listener"
+          ],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "there"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "over there"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "that place"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "yonder"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "you-know-where"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "あそこ",
+            "あすこ",
+            "アソコ"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "col",
+            "uk",
+            "euph"
+          ],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "genitals"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "private parts"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "nether regions"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [
+            [
+              "あれほど"
+            ]
+          ],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "uk"
+          ],
+          "info": [
+            "something psychologically distant from both speaker and listener"
+          ],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "that far"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "that much"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "that point"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1002500",
+      "kanji": [
+        {
+          "common": true,
+          "text": "お土産",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "お"
+            },
+            {
+              "ruby": "土産",
+              "rt": "みやげ"
+            }
+          ],
+          "jlptLevel": 4,
+          "pitchAccent": []
+        },
+        {
+          "common": false,
+          "text": "御土産",
+          "tags": [
+            "sK"
+          ],
+          "furigana": [
+            {
+              "ruby": "御",
+              "rt": "お"
+            },
+            {
+              "ruby": "土産",
+              "rt": "みやげ"
+            }
+          ],
+          "jlptLevel": null,
+          "pitchAccent": []
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "おみやげ",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "お･みやげ",
+            "accPatts": "0",
+            "zoPatts": "LHHHH"
+          }
+        },
+        {
+          "common": false,
+          "text": "おみあげ",
+          "tags": [
+            "sk"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": []
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [
+            [
+              "土産",
+              1
+            ]
+          ],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "pol"
+          ],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "local specialty or souvenir bought as a gift while traveling (travelling)"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "pol"
+          ],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "present brought by a visitor"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "pol"
+          ],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "something unpleasant that one is given (e.g. an illness while on vacation)"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "unwelcome gift"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "disservice"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1019420",
+      "kanji": [],
+      "kana": [
+        {
+          "common": true,
+          "text": "アルバイト",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": 4,
+          "pitchAccent": {
+            "hatsuon": "あるばいと",
+            "accPatts": "3",
+            "zoPatts": "LHHLLL"
+          }
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "n",
+            "vs",
+            "vi"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [
+            {
+              "lang": "ger",
+              "full": true,
+              "wasei": false,
+              "text": "Arbeit"
+            }
+          ],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "part-time job"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "side job"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "part-time worker"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1153520",
+      "kanji": [
+        {
+          "common": true,
+          "text": "飴",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "飴",
+              "rt": "あめ"
+            }
+          ],
+          "jlptLevel": 5,
+          "pitchAccent": {
+            "hatsuon": "あめ",
+            "accPatts": "0",
+            "zoPatts": "LHH"
+          }
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "あめ",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "あめ",
+            "accPatts": "1",
+            "zoPatts": "HLL"
+          }
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [
+            "food"
+          ],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "(hard) candy"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "toffee"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [
+            "food"
+          ],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "rice-sugar"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "sugar made from the starch of rice, potatoes, etc."
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [
+            [
+              "飴色"
+            ]
+          ],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [
+            "abbr"
+          ],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "amber"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "yellowish-brown"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1237410",
+      "kanji": [
+        {
+          "common": true,
+          "text": "橋",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "橋",
+              "rt": "はし"
+            }
+          ],
+          "jlptLevel": 5,
+          "pitchAccent": {
+            "hatsuon": "[Gr]はし",
+            "accPatts": "1",
+            "zoPatts": "HLL"
+          }
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "はし",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": 5,
+          "pitchAccent": {
+            "hatsuon": "はし",
+            "accPatts": "1",
+            "zoPatts": "HLL"
+          }
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "bridge"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1358280",
+      "kanji": [
+        {
+          "common": true,
+          "text": "食べる",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "食",
+              "rt": "た"
+            },
+            {
+              "ruby": "べる"
+            }
+          ],
+          "jlptLevel": 5,
+          "pitchAccent": {
+            "hatsuon": "た~べる",
+            "accPatts": "2",
+            "zoPatts": "LHLL"
+          }
+        },
+        {
+          "common": false,
+          "text": "喰べる",
+          "tags": [
+            "sK"
+          ],
+          "furigana": [
+            {
+              "ruby": "喰",
+              "rt": "た"
+            },
+            {
+              "ruby": "べる"
+            }
+          ],
+          "jlptLevel": null,
+          "pitchAccent": []
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "たべる",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "た~べる",
+            "accPatts": "2",
+            "zoPatts": "LHLL"
+          }
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "v1",
+            "vt"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "to eat"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "v1",
+            "vt"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "to live on (e.g. a salary)"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "to live off"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "to subsist on"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1500010",
+      "kanji": [
+        {
+          "common": true,
+          "text": "風通し",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "風",
+              "rt": "かぜ"
+            },
+            {
+              "ruby": "通",
+              "rt": "とお"
+            },
+            {
+              "ruby": "し"
+            }
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "かざ･とおし",
+            "accPatts": "0",
+            "zoPatts": "LHHHHH"
+          }
+        },
+        {
+          "common": false,
+          "text": "風とおし",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "風",
+              "rt": "かぜ"
+            },
+            {
+              "ruby": "とおし"
+            }
+          ],
+          "jlptLevel": null,
+          "pitchAccent": []
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "かぜとおし",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": []
+        },
+        {
+          "common": false,
+          "text": "かざとおし",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": []
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "ventilation"
+            }
+          ]
+        },
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "communication (within an organisation)"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "openness"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "1500150",
+      "kanji": [
+        {
+          "common": true,
+          "text": "風呂敷",
+          "tags": [],
+          "furigana": [
+            {
+              "ruby": "風",
+              "rt": "ふ"
+            },
+            {
+              "ruby": "呂",
+              "rt": "ろ"
+            },
+            {
+              "ruby": "敷",
+              "rt": "しき"
+            }
+          ],
+          "jlptLevel": 2,
+          "pitchAccent": []
+        }
+      ],
+      "kana": [
+        {
+          "common": true,
+          "text": "ふろしき",
+          "tags": [],
+          "appliesToKanji": [
+            "*"
+          ],
+          "jlptLevel": null,
+          "pitchAccent": {
+            "hatsuon": "ふろ'[Dev]しき",
+            "accPatts": "0",
+            "zoPatts": "LHHHH"
+          }
+        }
+      ],
+      "sense": [
+        {
+          "partOfSpeech": [
+            "n"
+          ],
+          "appliesToKanji": [
+            "*"
+          ],
+          "appliesToKana": [
+            "*"
+          ],
+          "related": [],
+          "antonym": [],
+          "field": [],
+          "dialect": [],
+          "misc": [],
+          "info": [],
+          "languageSource": [],
+          "gloss": [
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "furoshiki"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "wrapping cloth"
+            },
+            {
+              "lang": "eng",
+              "gender": null,
+              "type": null,
+              "text": "cloth wrapper"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

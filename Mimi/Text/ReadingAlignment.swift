@@ -16,6 +16,16 @@ enum ReadingAlignment {
         let kana: String
     }
 
+    /// The kana-folded form of `text`: katakana folds onto its hiragana
+    /// counterpart, everything else passes through. Shared with dictionary
+    /// lookup ranking so entry readings compare against furigana text the
+    /// same way alignment compares surface kana against reading kana.
+    static func foldedKana(_ text: String) -> String {
+        String(String.UnicodeScalarView(
+            text.precomposedStringWithCanonicalMapping.unicodeScalars.map(fold)
+        ))
+    }
+
     /// The aligned runs, or nil when `reading` doesn't walk `surface`: a
     /// surface kana missing from (or out of order in) the reading, leftover
     /// reading kana, or a non-kana character in the reading.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Package release DMG:
-#   build/pkg/Mimi.dmg   (~20–40 MB; IPADIC dictionary model bundled, ASR
-#                        model downloaded on first launch)
+#   build/pkg/Mimi.dmg   (~40–60 MB; IPADIC model + JMDict lookup DB bundled,
+#                        ASR model downloaded on first launch)
 #
 # Signed with the local self-signed "Mimi Dev" certificate so TCC
 # permission grants (Screen Recording) persist across rebuilds.
@@ -64,12 +64,23 @@ stage_runtime() {
   # Bundled dictionary model — decompressed once on first launch (never
   # bundled decompressed, never downloaded). Without it session start fails
   # with "Bundled system.dic.zst not found in the app bundle".
+  local resdir="${app}/Contents/Resources"
+  mkdir -p "${resdir}"
   if [[ -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" ]]; then
-    local resdir="${app}/Contents/Resources"
-    mkdir -p "${resdir}"
     cp -f "${REPO_ROOT}/local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst" "${resdir}/system.dic.zst"
   else
     echo "ERROR: system.dic.zst not fetched. Run scripts/build_dictionary.sh first." >&2
+    exit 1
+  fi
+  # JMDict lookup DB — versioned by pin tag (Mimi/Dictionary/JMDictPin.swift,
+  # produced by scripts/build_jmdict.sh). The versioned filename is the
+  # staleness key: a new pin ships a new file; the stale one is inert.
+  local jmdict_tag
+  jmdict_tag="$(sed -n 's/.*static let releaseTag = "\(.*\)"/\1/p' "${REPO_ROOT}/Mimi/Dictionary/JMDictPin.swift" | head -1)"
+  if [[ -n "${jmdict_tag}" && -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" ]]; then
+    cp -f "${REPO_ROOT}/local/dictionaries/jmdict-${jmdict_tag}.sqlite.zst" "${resdir}/jmdict-${jmdict_tag}.sqlite.zst"
+  else
+    echo "ERROR: jmdict-${jmdict_tag:-<tag>}.sqlite.zst not built. Run scripts/build_jmdict.sh first." >&2
     exit 1
   fi
   if [[ ! -d "${REPO_ROOT}/local/frameworks/crispasr" ]]; then

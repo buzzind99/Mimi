@@ -275,3 +275,82 @@ struct ReadingAnnotatorAnnotationTests {
         #expect(describe(segments) == [["そう", "sou", nil], ["言っ", "itsu", "いっ"]])
     }
 }
+
+// MARK: - Lemma carry-through
+
+@Suite("ReadingAnnotator lemma carry-through")
+struct ReadingAnnotatorLemmaTests {
+
+    @Test("carries the token's base form and part of speech onto the segment")
+    func lemmaAndPosCarriedThrough() throws {
+        let annotator = makeAnnotator([token("食べた", start: 0, reading: "たべた", base: "食べる", pos: "動詞")])
+
+        let segments = try #require(annotator.segments(for: "食べた"))
+
+        #expect(segments.map(\.lemma) == ["食べる"])
+        #expect(segments.map(\.pos) == ["動詞"])
+    }
+
+    @Test("the merged sokuon span carries the first token's lemma and part of speech")
+    func sokuonMergeCarriesLemma() throws {
+        let annotator = makeAnnotator([
+            token("言っ", start: 0, reading: "いっ", base: "言う", pos: "動詞"),
+            token("て", start: 2, reading: "て", base: "て", pos: "助詞")
+        ])
+
+        let segments = try #require(annotator.segments(for: "言って"))
+
+        #expect(segments.map(\.surface) == ["言って"])
+        #expect(segments.map(\.lemma) == ["言う"])
+        #expect(segments.map(\.pos) == ["動詞"])
+    }
+
+    @Test("a sokuon merge across a whitespace gap carries the first token's lemma")
+    func sokuonMergeAcrossWhitespaceCarriesLemma() throws {
+        let annotator = makeAnnotator([
+            token("言っ", start: 0, reading: "いっ", base: "言う", pos: "動詞"),
+            token("て", start: 3, reading: "て", base: "て", pos: "助詞")
+        ])
+
+        let segments = try #require(annotator.segments(for: "言っ て"))
+
+        #expect(segments.map(\.surface) == ["言っ て"])
+        #expect(segments.map(\.lemma) == ["言う"])
+    }
+
+    @Test("numeral runs stay lemma-less even with a lexicon base form")
+    func numeralRunStaysNil() throws {
+        let annotator = makeAnnotator([token("三", start: 0, reading: "さん", base: "三", pos: "名詞")])
+
+        let segments = try #require(annotator.segments(for: "三"))
+
+        #expect(describe(segments) == [["三", "san", "さん"]])
+        #expect(segments.map(\.lemma) == [nil])
+        #expect(segments.map(\.pos) == [nil])
+    }
+
+    @Test("entry-less tokens carry no lemma or part of speech")
+    func unknownTokenStaysNil() throws {
+        let annotator = makeAnnotator([token("𠮷", start: 0)])
+
+        let segments = try #require(annotator.segments(for: "𠮷"))
+
+        #expect(describe(segments) == [["𠮷", "𠮷", nil]])
+        #expect(segments.map(\.lemma) == [nil])
+        #expect(segments.map(\.pos) == [nil])
+    }
+
+    @Test("plain gap runs stay lemma-less while token segments keep theirs")
+    func whitespaceGapFoldingPreserved() throws {
+        let annotator = makeAnnotator([
+            token("そう", start: 0, reading: "そう", base: "そう", pos: "名詞"),
+            token("言っ", start: 3, reading: "いっ", base: "言う", pos: "動詞")
+        ])
+
+        let segments = try #require(annotator.segments(for: "そう 言っ"))
+
+        #expect(segments.map(\.surface) == ["そう", " ", "言っ"])
+        #expect(segments.map(\.lemma) == ["そう", nil, "言う"])
+        #expect(segments.map(\.pos) == ["名詞", nil, "動詞"])
+    }
+}

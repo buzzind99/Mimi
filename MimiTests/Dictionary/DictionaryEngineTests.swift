@@ -224,6 +224,36 @@ struct DictionaryEngineTests {
         #expect(tokens == payloadTokens)
     }
 
+    @Test("decodes base/pos keys on a conjugated token and leaves unknown surfaces nil")
+    func decodesBaseAndPosWhenPresent() throws {
+        // New payload shape: base and pos present on a conjugated token.
+        fakeTokenizeJSONText = #"""
+        [{"text":"言った","start":0,"end":3,"reading":"いった","base":"言う","pos":"動詞"},
+         {"text":"𠮷","start":3,"end":4,"reading":null}]
+        """#
+        let engine = makeEngine()
+
+        let tokens = try #require(engine.tokenize(anyText))
+
+        #expect(tokens[0].base == "言う")
+        #expect(tokens[0].pos == "動詞")
+        #expect(tokens[1].base == nil)
+        #expect(tokens[1].pos == nil)
+    }
+
+    @Test("decodes a legacy payload without base/pos keys to nil")
+    func legacyPayloadDecodesBaseAndPosToNil() throws {
+        // No base/pos keys at all — still decodes, to nil (the same shape
+        // every pinned test payload above uses).
+        fakeTokenizeJSONText = payloadMixed
+        let engine = makeEngine()
+
+        let tokens = try #require(engine.tokenize(anyText))
+
+        #expect(tokens == payloadTokens)
+        #expect(tokens.allSatisfy { $0.base == nil && $0.pos == nil })
+    }
+
     @Test("decodes an empty payload to no tokens")
     func emptyPayload() {
         fakeTokenizeJSONText = "[]"
@@ -311,6 +341,18 @@ struct DictionaryEngineLiveTests {
         )
     }
 
+    @Test("carries base form and coarse POS for conjugated tokens (食べました)")
+    func conjugatedBaseAndPos() throws {
+        let engine = try #require(LiveDictionaryRuntime.engine)
+
+        let tokens = try #require(engine.tokenize("食べました"))
+
+        #expect(
+            tokens.map { [$0.text, $0.base, $0.pos] }
+                == [["食べ", "食べる", "動詞"], ["まし", "ます", "助動詞"], ["た", "た", "助動詞"]]
+        )
+    }
+
     @Test("emits counters as token pairs for the Swift fusion pass (一回)")
     func counterTokenPair() throws {
         let engine = try #require(LiveDictionaryRuntime.engine)
@@ -326,7 +368,11 @@ struct DictionaryEngineLiveTests {
 
         let tokens = try #require(engine.tokenize("𠮷"))
 
-        #expect(tokens == [DictionaryToken(text: "𠮷", start: 0, end: 1, reading: nil)])
+        // 𠮷 resolves to IPADIC's unknown-word row: the coarse POS is 記号,
+        // but reading and base form are absent.
+        #expect(
+            tokens == [DictionaryToken(text: "𠮷", start: 0, end: 1, reading: nil, pos: "記号")]
+        )
     }
 
     @Test("leaves the space uncovered between tokens (A B)")
@@ -335,10 +381,12 @@ struct DictionaryEngineLiveTests {
 
         let tokens = try #require(engine.tokenize("A B"))
 
+        // Bare Latin resolves to IPADIC's unknown-word row (coarse POS 名詞,
+        // no reading, no base form); the space stays uncovered.
         #expect(
             tokens == [
-                DictionaryToken(text: "A", start: 0, end: 1, reading: nil),
-                DictionaryToken(text: "B", start: 2, end: 3, reading: nil)
+                DictionaryToken(text: "A", start: 0, end: 1, reading: nil, pos: "名詞"),
+                DictionaryToken(text: "B", start: 2, end: 3, reading: nil, pos: "名詞")
             ]
         )
     }

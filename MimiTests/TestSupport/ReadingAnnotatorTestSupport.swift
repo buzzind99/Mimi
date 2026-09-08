@@ -7,13 +7,16 @@ import Testing
 /// A token spanning `text` at the scalar offset `start`, carrying the given
 /// surface reading (nil means unknown/unreadable).
 func token(
-    _ text: String, start: Int, reading: String? = nil
+    _ text: String, start: Int, reading: String? = nil,
+    base: String? = nil, pos: String? = nil
 ) -> DictionaryToken {
     DictionaryToken(
         text: text,
         start: start,
         end: start + text.unicodeScalars.count,
-        reading: reading
+        reading: reading,
+        base: base,
+        pos: pos
     )
 }
 

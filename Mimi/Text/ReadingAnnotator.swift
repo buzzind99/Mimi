@@ -10,11 +10,23 @@ final class ReadingSegment {
     var surface: String
     var romaji: String?
     var furigana: String?
+    /// The token's dictionary base form (言った → 言う), or nil for
+    /// numerals, plain runs, and entry-less tokens — the dictionary
+    /// lookup's preferred query key, with surface/reading as fallbacks.
+    var lemma: String?
+    /// The token's coarse part of speech (名詞, 動詞, …), or nil when the
+    /// lexicon row has none.
+    var pos: String?
 
-    init(surface: String, romaji: String?, furigana: String? = nil) {
+    init(
+        surface: String, romaji: String?, furigana: String? = nil,
+        lemma: String? = nil, pos: String? = nil
+    ) {
         self.surface = surface
         self.romaji = romaji
         self.furigana = furigana
+        self.lemma = lemma
+        self.pos = pos
     }
 }
 
@@ -109,7 +121,9 @@ final class ReadingAnnotator: @unchecked Sendable {
                             text: merged.surface,
                             start: token.start,
                             end: tokens[merged.end].end,
-                            reading: merged.kana
+                            reading: merged.kana,
+                            base: token.base,
+                            pos: token.pos
                         ),
                         surface: merged.surface,
                         into: &segments
@@ -139,7 +153,10 @@ final class ReadingAnnotator: @unchecked Sendable {
         _ token: DictionaryToken, surface: String, into segments: inout [ReadingSegment]
     ) {
         guard var reading = token.reading ?? Self.selfReading(surface) else {
-            segments.append(ReadingSegment(surface: surface, romaji: surface, furigana: nil))
+            segments.append(ReadingSegment(
+                surface: surface, romaji: surface, furigana: nil,
+                lemma: token.base, pos: token.pos
+            ))
             return
         }
         reading = Self.lexicalKana[reading] ?? reading
@@ -152,7 +169,9 @@ final class ReadingAnnotator: @unchecked Sendable {
         segments.append(ReadingSegment(
             surface: surface,
             romaji: romaji,
-            furigana: Self.furigana(surface: surface, reading: reading)
+            furigana: Self.furigana(surface: surface, reading: reading),
+            lemma: token.base,
+            pos: token.pos
         ))
     }
 

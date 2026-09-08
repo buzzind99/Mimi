@@ -1,7 +1,7 @@
 import Foundation
 
 /// One token from the dictionary tokenizer, decoded from the runtime's JSON
-/// payload — `{text, start, end, reading}`.
+/// payload — `{text, start, end, reading, base, pos}`.
 ///
 /// `start`/`end` are Unicode-scalar indices into the **original** input
 /// (end-exclusive). The runtime performs no normalization, so spans must be
@@ -14,6 +14,30 @@ struct DictionaryToken: Codable, Equatable {
     /// 見た → 見/ミ + た/タ), or nil for unknown/unreadable surfaces (names,
     /// rare ideographs, punctuation, bare Latin).
     let reading: String?
+    /// The token's dictionary base form (IPADIC 基本形 — 言った → 言う), or nil
+    /// when the lexicon row has none (`*`, unknown/short rows) or the payload
+    /// predates the field.
+    let base: String?
+    /// The token's coarse part of speech (IPADIC's first feature column —
+    /// 名詞, 動詞, …), or nil when the lexicon row marks it `*` or the payload
+    /// predates the field.
+    let pos: String?
+
+    init(
+        text: String,
+        start: Int,
+        end: Int,
+        reading: String?,
+        base: String? = nil,
+        pos: String? = nil
+    ) {
+        self.text = text
+        self.start = start
+        self.end = end
+        self.reading = reading
+        self.base = base
+        self.pos = pos
+    }
 }
 
 /// Swift wrapper around the staged dictionary runtime. Opens one
