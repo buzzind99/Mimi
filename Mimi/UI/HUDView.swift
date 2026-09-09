@@ -114,14 +114,15 @@ struct HUDView: View {
     }
 
     /// The pinned entry while browsing history; otherwise (nil pin, or a pin
-    /// that no longer resolves) the latest translated entry.
+    /// that no longer resolves) the latest translated entry. Scans
+    /// newest-first: sentence indexes grow monotonically, so the match —
+    /// the newest entry in the common no-pin case — sits at the tail.
     private func displayedEntry(in entries: [SessionEntry]) -> SessionEntry {
-        guard let index = HUDHistory.displayedIndex(in: entries, pinned: model.hudPinnedIndex),
-              let entry = entries.first(where: { $0.sentence.index == index }) else
-        {
+        guard let index = HUDHistory.displayedIndex(in: entries, pinned: model.hudPinnedIndex) else {
             return entries[entries.count - 1]
         }
-        return entry
+        return entries.last(where: { $0.sentence.index == index })
+            ?? entries[entries.count - 1]
     }
 
     private func entryView(_ entry: SessionEntry) -> some View {
