@@ -44,8 +44,13 @@ func spacedTokens(
 }
 
 /// An annotator that replays canned tokens, independent of the runtime.
-func makeAnnotator(_ canned: [DictionaryToken]) -> ReadingAnnotator {
-    ReadingAnnotator(tokenize: { _ in canned })
+/// The reading fallback is inert by default so reading-less fixtures stay
+/// deterministically unannotated; fallback suites inject their own.
+func makeAnnotator(
+    _ canned: [DictionaryToken],
+    readingFallback: @escaping @Sendable (String) -> String? = { _ in nil }
+) -> ReadingAnnotator {
+    ReadingAnnotator(tokenize: { _ in canned }, readingFallback: readingFallback)
 }
 
 /// Compact [surface, romaji, furigana] rows for whole-segment assertions.

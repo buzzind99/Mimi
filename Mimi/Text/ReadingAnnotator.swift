@@ -34,13 +34,25 @@ final class ReadingSegment {
 /// furigana for Japanese text from the dictionary tokenizer's per-surface
 /// kana readings (`DictionaryEngine`), plus a numeral→counter fusion pass in
 /// kana space so Arabic-digit counters read correctly (`600回` →
-/// "roppyakkai"). The dictionary may still be preparing on first launch;
+/// "roppyakkai"). Kanji surfaces the tokenizer lexicon can't read (IPADIC has
+/// no standalone entry for 圧, 灼, …) fall back to the prepared JMDict
+/// database's reading. The dictionary may still be preparing on first launch;
 /// every failure degrades to plain text.
-/// Sendable by immutability contract: `cache` and `tokenize` are set in init
-/// and never mutated afterwards; `NSCache` is internally thread-safe.
+/// Sendable by immutability contract: `cache`, `tokenize`, and
+/// `readingFallback` are set in init and never mutated afterwards; `NSCache`
+/// is internally thread-safe.
 final class ReadingAnnotator: @unchecked Sendable {
     /// The process-wide annotator backing the static entry point.
     static let shared = ReadingAnnotator()
+
+    /// The default reading fallback: a process-wide JMDict lookup consulted
+    /// only for kanji surfaces the tokenizer left reading-less. One indexed
+    /// query per unknown token (the segment cache then amortizes it per
+    /// text); infrastructure failures degrade to a miss.
+    private static let jmDictReadingFallback: @Sendable (String) -> String? = {
+        let lookup = JMDictLookup()
+        return { (try? lookup.reading(forWriting: $0)) ?? nil }
+    }()
 
     private let cache: NSCache<NSString, NSArray> = {
         let cache = NSCache<NSString, NSArray>()
@@ -52,10 +64,20 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// dictionary runtime.
     private let tokenize: (String) -> [DictionaryToken]?
 
-    init(tokenize: @escaping (String) -> [DictionaryToken]? = {
-        DictionaryEngine.shared.tokenize($0)
-    }) {
+    /// The reading source for kanji surfaces the token stream carries no
+    /// reading for; injectable so tests drive the fallback without the JMDict
+    /// database. Consulted only for kanji-bearing surfaces — kana surfaces
+    /// read themselves and read tokens never reach it.
+    private let readingFallback: @Sendable (String) -> String?
+
+    init(
+        tokenize: @escaping (String) -> [DictionaryToken]? = {
+            DictionaryEngine.shared.tokenize($0)
+        },
+        readingFallback: @escaping @Sendable (String) -> String? = ReadingAnnotator.jmDictReadingFallback
+    ) {
         self.tokenize = tokenize
+        self.readingFallback = readingFallback
     }
 
     /// Returns per-run segments for `text` (surface + romaji + furigana), or
@@ -146,13 +168,18 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// Emits a non-numeral token: the dictionary's surface reading converted
     /// to romaji (with particle and lexical overrides), furigana only for
     /// kanji-bearing surfaces. Kana-only tokens without a dictionary reading
-    /// (unknown katakana, stray kana) read themselves by construction; other
-    /// entry-less tokens (names, rare ideographs, punctuation, bare Latin)
-    /// stay self-transcribed and unannotated.
+    /// (unknown katakana, stray kana) read themselves by construction; kanji
+    /// surfaces without one (IPADIC's standalone-kanji gaps) consult the
+    /// JMDict fallback. Tokens that survive both — names, rare ideographs,
+    /// punctuation, bare Latin — stay self-transcribed and unannotated.
     private func appendToken(
         _ token: DictionaryToken, surface: String, into segments: inout [ReadingSegment]
     ) {
-        guard var reading = token.reading ?? Self.selfReading(surface) else {
+        var reading = token.reading ?? Self.selfReading(surface)
+        if reading == nil, KanaClassification.containsKanji(surface) {
+            reading = readingFallback(surface)
+        }
+        guard var reading else {
             segments.append(ReadingSegment(
                 surface: surface, romaji: surface, furigana: nil,
                 lemma: token.base, pos: token.pos

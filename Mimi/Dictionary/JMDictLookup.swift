@@ -216,6 +216,40 @@ final class JMDictLookup: @unchecked Sendable {
         }
     }
 
+    // MARK: - Reading fallback
+
+    /// The kana reading of the best kanji-writing entry for `writing`, or nil
+    /// when no kanji-writing headword matches. The annotator's fallback for
+    /// kanji surfaces the tokenizer lexicon can't read (IPADIC has no
+    /// standalone entry for 圧, 灼, … — they tokenize as unknown words with a
+    /// `*` reading; JMDict covers them). Deliberately minimal — one indexed
+    /// `headwords` hit plus one `entries` row, no sense fetching — ranked
+    /// common-first then `ent_seq`, the same leading order the display lookup
+    /// ranks to. The entry reading folds to hiragana so the fallback meets
+    /// the annotator's kana contracts (IPADIC readings arrive hiragana via
+    /// the runtime; KanaRomaji and the furigana alignment fold anyway).
+    /// Throws on infrastructure failure; callers degrade to unannotated.
+    func reading(forWriting writing: String) throws -> String? {
+        try lock.withLock {
+            let db = try openedDatabase()
+            let statement = try prepare(
+                """
+                SELECT e.reb FROM entries e
+                JOIN headwords h ON h.entry_id = e.ent_seq
+                WHERE h.text = ? AND h.kind = 'keb'
+                ORDER BY e.common DESC, e.ent_seq
+                LIMIT 1
+                """, db
+            )
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_text(statement, 1, writing, -1, sqliteTransient)
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let reb = optionalText(statement, 0)
+            else { return nil }
+            return ReadingAlignment.foldedKana(reb)
+        }
+    }
+
     // MARK: - Core (lock-held)
 
     private func lookupResult(for candidate: LookupCandidate) throws -> LookupResult? {

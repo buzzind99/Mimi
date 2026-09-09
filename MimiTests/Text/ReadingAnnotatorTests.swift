@@ -1,5 +1,6 @@
 import Foundation
 @testable import Mimi
+import Synchronization
 import Testing
 
 // MARK: - Guards and caching
@@ -352,5 +353,83 @@ struct ReadingAnnotatorLemmaTests {
         #expect(segments.map(\.surface) == ["そう", " ", "言っ"])
         #expect(segments.map(\.lemma) == ["そう", nil, "言う"])
         #expect(segments.map(\.pos) == ["名詞", nil, "動詞"])
+    }
+}
+
+// MARK: - JMDict reading fallback
+
+/// Kanji surfaces the tokenizer lexicon can't read (IPADIC has no standalone
+/// entry for 圧, 灼, …) consult the injected fallback.
+@Suite("ReadingAnnotator JMDict reading fallback")
+struct ReadingAnnotatorFallbackTests {
+
+    @Test("annotates an entry-less kanji token with the fallback reading")
+    func fallbackReadingAnnotated() throws {
+        let annotator = makeAnnotator(
+            [token("圧", start: 0)],
+            readingFallback: { _ in "あつ" }
+        )
+
+        let segments = try #require(annotator.segments(for: "圧"))
+
+        #expect(describe(segments) == [["圧", "atsu", "あつ"]])
+    }
+
+    @Test("the fallback reading aligns across a multi-kanji surface")
+    func fallbackReadingAlignsMultiKanji() throws {
+        let annotator = makeAnnotator(
+            [token("灼熱", start: 0)],
+            readingFallback: { _ in "しゃくねつ" }
+        )
+
+        let segments = try #require(annotator.segments(for: "灼熱"))
+
+        #expect(describe(segments) == [["灼熱", "shakunetsu", "しゃくねつ"]])
+    }
+
+    @Test("a fallback miss stays self-transcribed and unannotated")
+    func fallbackMissStaysUnannotated() throws {
+        let annotator = makeAnnotator(
+            [token("圧", start: 0)],
+            readingFallback: { _ in nil }
+        )
+
+        let segments = try #require(annotator.segments(for: "圧"))
+
+        #expect(describe(segments) == [["圧", "圧", nil]])
+    }
+
+    @Test("tokens with a dictionary reading never consult the fallback")
+    func fallbackNotConsultedWhenRead() throws {
+        let consulted = Mutex(false)
+        let annotator = makeAnnotator(
+            [token("桜", start: 0, reading: "さくら")],
+            readingFallback: { _ in
+                consulted.withLock { $0 = true }
+                return nil
+            }
+        )
+
+        let segments = try #require(annotator.segments(for: "桜"))
+
+        #expect(describe(segments) == [["桜", "sakura", "さくら"]])
+        #expect(!consulted.withLock { $0 })
+    }
+
+    @Test("kana-only tokens without a reading read themselves, never the fallback")
+    func fallbackNotConsultedForKana() throws {
+        let consulted = Mutex(false)
+        let annotator = makeAnnotator(
+            [token("かな", start: 0)],
+            readingFallback: { _ in
+                consulted.withLock { $0 = true }
+                return "ゆき"
+            }
+        )
+
+        let segments = try #require(annotator.segments(for: "かな"))
+
+        #expect(describe(segments) == [["かな", "kana", nil]])
+        #expect(!consulted.withLock { $0 })
     }
 }

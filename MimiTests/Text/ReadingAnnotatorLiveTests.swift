@@ -452,3 +452,48 @@ struct ReadingAnnotatorLiveTests {
         #expect(segments.map(\.surface).joined() == text)
     }
 }
+
+// MARK: - Live JMDict fallback corpus
+
+/// The tokenizer lexicon's standalone-kanji gaps (圧, 灼, … tokenize as
+/// unknown words with a `*` reading) annotated through the real JMDict
+/// fallback. Gated on both live artifacts: the tokenizer runtime and a
+/// resolvable JMDict database — the same resolution chain as the live JMDict
+/// suite, plus a repo-root fallback for the test host's working directory.
+private let fallbackDatabaseURL: URL? = {
+    if let resolved = JMDictLookup.defaultDatabaseURL {
+        return resolved
+    }
+    let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let checkout = repoRoot.appendingPathComponent("build/\(JMDictPin.preparedFileName)")
+    return FileManager.default.fileExists(atPath: checkout.path) ? checkout : nil
+}()
+
+@Suite(
+    "ReadingAnnotator JMDict fallback corpus",
+    .enabled(if: LiveDictionaryRuntime.isAvailable && fallbackDatabaseURL != nil)
+)
+struct ReadingAnnotatorFallbackLiveTests {
+
+    private static let annotator = ReadingAnnotator(tokenize: {
+        LiveDictionaryRuntime.engine?.tokenize($0)
+    })
+
+    private func segments(_ text: String) throws -> [ReadingSegment] {
+        try #require(Self.annotator.segments(for: text))
+    }
+
+    @Test("annotates a standalone kanji IPADIC lacks through the JMDict fallback (圧)")
+    func standaloneKanjiFallback() throws {
+        let segments = try segments("圧をかけられています")
+
+        #expect(describe(segments) == [
+            ["圧", "atsu", "あつ"], ["を", "o", nil],
+            ["かけ", "kake", nil], ["られ", "rare", nil],
+            ["て", "te", nil], ["い", "i", nil], ["ます", "masu", nil]
+        ])
+    }
+}

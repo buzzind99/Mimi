@@ -541,4 +541,11 @@ struct JMDictLookupLiveTests {
         #expect(result.entries.first?.entSeq == 2_029_120)
         #expect(result.entries.first?.keb == nil)
     }
+
+    @Test("reading resolves a standalone kanji IPADIC lacks (圧 → あつ)")
+    func readingForStandaloneKanji() throws {
+        let reading = try #require(try engine.reading(forWriting: "圧"))
+
+        #expect(reading == "あつ")
+    }
 }
