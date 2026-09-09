@@ -129,6 +129,13 @@ final class JMDictLookup: @unchecked Sendable {
     /// database may still be preparing). `close()` is permanent for this
     /// instance — subsequent queries throw `.databaseClosed`.
     private var state: State = .idle
+    /// Guarded by `lock` (every query runs under it). Compiled once per SQL
+    /// against the long-lived handle and reset between uses — lookups run
+    /// several statements per tap, and `sqlite3_prepare_v2` dominates a
+    /// repeat query's cost. Callers fully consume each statement (step to
+    /// `SQLITE_DONE` or return) before returning, so reuse is safe; a
+    /// statement left mid-step is reset before its next use anyway.
+    private var preparedStatements: [String: OpaquePointer] = [:]
 
     /// Where the prepared JMDict database lives: the Application Support
     /// location `DictionaryStore` promotes into, or — debug checkouts only —
@@ -167,6 +174,7 @@ final class JMDictLookup: @unchecked Sendable {
 
     deinit {
         if case let .open(handle) = state {
+            releasePreparedStatements()
             sqlite3_close_v2(handle)
         }
     }
@@ -210,6 +218,7 @@ final class JMDictLookup: @unchecked Sendable {
     func close() {
         lock.withLock {
             if case let .open(handle) = state {
+                releasePreparedStatements()
                 sqlite3_close_v2(handle)
             }
             state = .closed
@@ -241,7 +250,6 @@ final class JMDictLookup: @unchecked Sendable {
                 LIMIT 1
                 """, db
             )
-            defer { sqlite3_finalize(statement) }
             sqlite3_bind_text(statement, 1, writing, -1, sqliteTransient)
             guard sqlite3_step(statement) == SQLITE_ROW,
                   let reb = optionalText(statement, 0)
@@ -320,7 +328,6 @@ final class JMDictLookup: @unchecked Sendable {
         let statement = try prepare(
             "SELECT entry_id, jlpt, hatsuon, acc, zo FROM headwords WHERE text = ?", db
         )
-        defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, text, -1, sqliteTransient)
         var rows: [HeadwordRow] = []
         while true {
@@ -347,7 +354,6 @@ final class JMDictLookup: @unchecked Sendable {
         let entryStatement = try prepare(
             "SELECT keb, reb, common FROM entries WHERE ent_seq = ?", db
         )
-        defer { sqlite3_finalize(entryStatement) }
         sqlite3_bind_int64(entryStatement, 1, Int64(entSeq))
         guard sqlite3_step(entryStatement) == SQLITE_ROW else {
             // A headword row always references an existing entry; a missing
@@ -361,7 +367,6 @@ final class JMDictLookup: @unchecked Sendable {
         let senseStatement = try prepare(
             "SELECT pos, gloss, misc, skeb, sreb FROM senses WHERE entry_id = ? ORDER BY ord", db
         )
-        defer { sqlite3_finalize(senseStatement) }
         sqlite3_bind_int64(senseStatement, 1, Int64(entSeq))
         var senses: [JMDictSense] = []
         while true {
@@ -438,11 +443,28 @@ final class JMDictLookup: @unchecked Sendable {
     // MARK: - SQLite plumbing
 
     private func prepare(_ sql: String, _ db: OpaquePointer) throws -> OpaquePointer {
+        if let cached = preparedStatements[sql] {
+            // Reset unwinds any prior step (a row-loop that returned early or
+            // an error) and drops its bindings; the statement is then ready
+            // for fresh binds.
+            sqlite3_reset(cached)
+            sqlite3_clear_bindings(cached)
+            return cached
+        }
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw sqliteError(db)
         }
+        preparedStatements[sql] = statement
         return statement
+    }
+
+    /// Finalizes every cached statement — must run before the handle closes.
+    private func releasePreparedStatements() {
+        for statement in preparedStatements.values {
+            sqlite3_finalize(statement)
+        }
+        preparedStatements.removeAll()
     }
 
     private func optionalText(_ statement: OpaquePointer, _ index: Int32) -> String? {
