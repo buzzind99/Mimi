@@ -24,8 +24,15 @@ struct LookupSegment: Equatable, Sendable {
 
 /// Forward expansion for a dictionary tap: from the tapped segment it walks
 /// the same segments array the tap rendered from, joining up to `maxTokens`
-/// consecutive word segments into longest-first lookup candidates
-/// (お+土産 → お土産 queried before 土産).
+/// consecutive word segments into lookup-candidate fallbacks (お+土産 →
+/// お土産 offered when the tapped piece alone misses).
+///
+/// The tapped segment's own candidates lead — surface, then lemma — so the
+/// word the user tapped always takes the display result and a longer join
+/// that also hits lands in the outcome's "also:" list. Conjugated forms
+/// fall back to their lemma (base form) when the surface itself isn't a
+/// headword. The joins follow in longest-first order for taps whose own
+/// text isn't a dictionary headword.
 ///
 /// Join rules mirror the annotator's own span-merge guards: whitespace-only
 /// segments between words are skipped, while numeral runs, the
@@ -48,17 +55,25 @@ enum JMDictExpansion {
     /// (`ReadingAnnotator.particleRomaji`): expansion never bridges them.
     private static let particleOverrides: Set<String> = ["は", "へ", "を"]
 
-    /// Longest-first candidates for a tap on `index`: the validated forward
-    /// joins, then the tapped segment's lemma (preferred over the surface —
-    /// conjugated forms query their base form) and surface. Truncated to
-    /// `maxCandidates`, joins first, so the longest hit always wins display
-    /// and a tap costs at most three indexed queries.
+    /// Candidates for a tap on `index`: the tapped segment's surface first,
+    /// then its lemma (conjugated forms fall back to their base form), then
+    /// the validated forward joins longest-first. Truncated to
+    /// `maxCandidates`, tapped candidates first, so the word the user tapped
+    /// always leads the display result and a tap costs at most three indexed
+    /// queries.
     static func candidates(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
     ) -> [LookupCandidate] {
         guard segments.indices.contains(index) else { return [] }
 
         var candidates: [LookupCandidate] = []
+        let tapped = segments[index]
+        if !tapped.surface.isEmpty {
+            candidates.append(LookupCandidate(text: tapped.surface, reading: tapped.reading))
+        }
+        if let lemma = tapped.lemma, !lemma.isEmpty, lemma != tapped.surface {
+            candidates.append(LookupCandidate(text: lemma, reading: tapped.reading))
+        }
         let members = joinedSegments(
             segments: segments, tappedAt: index, sentenceText: sentenceText
         )
@@ -67,13 +82,6 @@ enum JMDictExpansion {
             if !text.isEmpty {
                 candidates.append(LookupCandidate(text: text, reading: joinedReading(members[..<count])))
             }
-        }
-        let tapped = segments[index]
-        if let lemma = tapped.lemma, !lemma.isEmpty, lemma != tapped.surface {
-            candidates.append(LookupCandidate(text: lemma, reading: tapped.reading))
-        }
-        if !tapped.surface.isEmpty {
-            candidates.append(LookupCandidate(text: tapped.surface, reading: tapped.reading))
         }
         return Array(candidates.prefix(maxCandidates))
     }
@@ -160,12 +168,13 @@ enum JMDictExpansion {
 // MARK: - Engine entry point
 
 extension JMDictLookup {
-    /// Looks up a tap with forward expansion: builds the longest-first
-    /// candidates from the rendered segments (`JMDictExpansion.candidates`)
-    /// and resolves them in order. The longest candidate with a hit is the
-    /// display result; shorter hits that add new entries are retained as
-    /// "also:" results. Every candidate missing → nil; an infrastructure
-    /// error on any query aborts the tap as a throw — never a miss.
+    /// Looks up a tap with forward expansion: builds the candidates from the
+    /// rendered segments (`JMDictExpansion.candidates`) and resolves them in
+    /// order. The first candidate with a hit is the display result — the
+    /// tapped segment's own candidates lead, so the tapped word displays and
+    /// longer joins that also hit are retained as "also:" results. Every
+    /// candidate missing → nil; an infrastructure error on any query aborts
+    /// the tap as a throw — never a miss.
     func lookup(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
     ) throws -> LookupOutcome? {

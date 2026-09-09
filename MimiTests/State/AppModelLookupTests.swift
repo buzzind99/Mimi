@@ -36,8 +36,8 @@ final class AppModelLookupTests {
         )
     }
 
-    /// お in お土産: forward expansion joins お土産, then queries the lemma
-    /// 土産 and the bare surface お — all three hit in the fixture.
+    /// お in お土産: the tapped surface お leads, then the forward joins
+    /// お土産 and the lemma 土産 — all three hit in the fixture.
     private func lookupO() -> [LookupSegment] {
         [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")]
     }
@@ -88,7 +88,7 @@ final class AppModelLookupTests {
 
         await runHit(model, source: .transcript(sentenceIndex: 0, tokenIndex: 0))
         let transcriptID = try #require(model.selectedLookup?.id)
-        #expect(transcriptID.hasSuffix("-お土産"))
+        #expect(transcriptID.hasSuffix("-お"))
 
         await model.runLookup(
             segments: lookupO(), tappedAt: 0, sentenceText: "お土産",
@@ -100,7 +100,7 @@ final class AppModelLookupTests {
 
     // MARK: - Hit: select + pin
 
-    @Test("a hit selects the popover and pins the card with the retained shorter hits")
+    @Test("a hit selects the popover and pins the card with the retained expansion hits")
     func hitSelectsAndPins() async {
         let model = makeModel()
 
@@ -108,16 +108,16 @@ final class AppModelLookupTests {
 
         let selected = model.selectedLookup
         #expect(selected?.source == .liveStrip)
-        #expect(selected?.result.matched == "お土産")
+        #expect(selected?.result.matched == "お")
         #expect(selected?.entryIndex == 0)
 
         let pinned = model.pinnedLookup
-        #expect(pinned?.result.matched == "お土産")
+        #expect(pinned?.result.matched == "お")
         #expect(pinned?.entryIndex == 0)
-        // The bare お surface hits 尾 — new entries after the compound hit,
-        // retained as the "also:" shorter hit (the tapped お segment has no
-        // distinct lemma, so the expansion yields two candidates).
-        #expect(pinned?.also.map(\.matched) == ["お"])
+        // The tapped surface お displays; the join お土産 hits new entries
+        // and is retained as the "also:" hit (the 土産 lemma candidate only
+        // re-hits the compound's entries, so it is skipped).
+        #expect(pinned?.also.map(\.matched) == ["お土産"])
     }
 
     // MARK: - Miss: warning pill, state persists
@@ -133,7 +133,7 @@ final class AppModelLookupTests {
             sentenceText: "無語", surface: "無語", source: .liveStrip
         )
 
-        #expect(model.selectedLookup?.result.matched == "お土産", "the popover stays up")
+        #expect(model.selectedLookup?.result.matched == "お", "the popover stays up")
         #expect(model.pinnedLookup == pinnedBefore)
         #expect(model.notices.message == "No dictionary entry for \"無語\"")
         #expect(model.notices.tone == .warning)
@@ -267,18 +267,18 @@ final class AppModelLookupTests {
         let model = makeModel()
         await runHit(model, source: .liveStrip)
 
-        let shorter = try #require(model.pinnedLookup?.also[0])
-        model.selectAlsoPill(shorter)
+        let expansion = try #require(model.pinnedLookup?.also[0])
+        model.selectAlsoPill(expansion)
 
-        #expect(model.selectedLookup?.result.matched == "お")
+        #expect(model.selectedLookup?.result.matched == "お土産")
         #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")
         #expect(model.selectedLookup?.entryIndex == 0)
 
-        // The pill row recomputes from the results relative to お: the
-        // previous selection (お土産) becomes its "also:".
+        // The pill row recomputes from the results relative to お土産: the
+        // previous selection (お) becomes its "also:".
         let pinned = try #require(model.pinnedLookup)
-        #expect(pinned.result.matched == "お")
-        #expect(pinned.also.map(\.matched) == ["お土産"])
+        #expect(pinned.result.matched == "お土産")
+        #expect(pinned.also.map(\.matched) == ["お"])
     }
 
     // MARK: - Entry pager

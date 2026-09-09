@@ -10,7 +10,7 @@ final class JMDictExpansionCandidateTests {
         pairs.map { LookupSegment(surface: $0.surface, lemma: $0.lemma) }
     }
 
-    @Test("joins forward segments longest-first around the tap")
+    @Test("joins forward segments longest-first behind the tapped candidate")
     func compoundJoin() {
         let candidates = JMDictExpansion.candidates(
             segments: segments(("お", nil), ("土産", "土産")),
@@ -18,7 +18,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "お土産"
         )
 
-        #expect(candidates.map(\.text) == ["お土産", "お"])
+        #expect(candidates.map(\.text) == ["お", "お土産"])
     }
 
     @Test("a tap mid-sentence expands forward only")
@@ -32,17 +32,28 @@ final class JMDictExpansionCandidateTests {
         #expect(candidates.map(\.text) == ["土産"])
     }
 
-    @Test("prefers the lemma over the surface for the single-token candidate")
-    func lemmaFirstPreference() {
+    @Test("the surface leads the lemma for the single-token candidates")
+    func surfaceFirstPreference() {
         let candidates = JMDictExpansion.candidates(
             segments: segments(("食べ", "食べる"), ("ま", nil), ("した", nil)),
             tappedAt: 0,
             sentenceText: "食べました"
         )
 
-        // The joins miss first; the truncated surface candidate would only
-        // re-hit the lemma's entries — the cap keeps the queries at three.
-        #expect(candidates.map(\.text) == ["食べました", "食べま", "食べる"])
+        // The tapped surface leads, the lemma follows as the miss fallback,
+        // and the joins come last — three queries total.
+        #expect(candidates.map(\.text) == ["食べ", "食べる", "食べました"])
+    }
+
+    @Test("a surface that is itself a headword leads its lemma (な tap shows な, not だ)")
+    func surfaceLeadsCopulaLemma() {
+        let candidates = JMDictExpansion.candidates(
+            segments: segments(("な", "だ")),
+            tappedAt: 0,
+            sentenceText: "な"
+        )
+
+        #expect(candidates.map(\.text) == ["な", "だ"])
     }
 
     @Test("never queries more than the candidate cap")
@@ -54,7 +65,7 @@ final class JMDictExpansionCandidateTests {
         )
 
         #expect(candidates.count <= JMDictExpansion.maxCandidates)
-        #expect(candidates.map(\.text) == ["あいう", "あい", "あ"])
+        #expect(candidates.map(\.text) == ["あ", "あいう", "あい"])
     }
 
     @Test("skips whitespace-only segments and still joins across them")
@@ -65,7 +76,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "お 土産"
         )
 
-        #expect(candidates.map(\.text) == ["お土産", "お"])
+        #expect(candidates.map(\.text) == ["お", "お土産"])
     }
 
     @Test("a non-whitespace gap in the sentence text stops expansion")
@@ -160,8 +171,8 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "前の"
         )
 
-        #expect(candidates.map(\.text) == ["前の", "前"])
-        #expect(candidates.map(\.reading) == ["まえの", "まえ"])
+        #expect(candidates.map(\.text) == ["前", "前の"])
+        #expect(candidates.map(\.reading) == ["まえ", "まえの"])
     }
 
     @Test("a join member without a reading drops the joined reading")
@@ -175,9 +186,9 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "前の"
         )
 
-        #expect(candidates.map(\.text) == ["前の", "前"])
-        #expect(candidates[0].reading == nil)
-        #expect(candidates[1].reading == "まえ")
+        #expect(candidates.map(\.text) == ["前", "前の"])
+        #expect(candidates[0].reading == "まえ")
+        #expect(candidates[1].reading == nil)
     }
 
     @Test("a lemma candidate carries the tapped segment's reading")
@@ -192,8 +203,10 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "食べました"
         )
 
-        #expect(candidates.last?.text == "食べる")
-        #expect(candidates.last?.reading == "たべ")
+        #expect(candidates[0].text == "食べ")
+        #expect(candidates[0].reading == "たべ")
+        #expect(candidates[1].text == "食べる")
+        #expect(candidates[1].reading == "たべ")
     }
 }
 
@@ -214,10 +227,22 @@ final class JMDictExpansionTests {
         JMDictFixtureDatabase.Built(url: databaseURL).remove()
     }
 
-    @Test("displays the longest join: お+土産 resolves お土産")
+    @Test("displays the tapped piece: お resolves お, お土産 lands in also")
     func compoundHit() throws {
         let outcome = try #require(try engine.lookup(
             segments: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")],
+            tappedAt: 0,
+            sentenceText: "お土産"
+        ))
+
+        #expect(outcome.display.matched == "お")
+        #expect(outcome.display.entries.map(\.entSeq) == [9_990_040])
+    }
+
+    @Test("displays the join when the tapped piece alone misses")
+    func joinFallbackHit() throws {
+        let outcome = try #require(try engine.lookup(
+            segments: [LookupSegment(surface: "お土"), LookupSegment(surface: "産", lemma: "産")],
             tappedAt: 0,
             sentenceText: "お土産"
         ))
@@ -238,7 +263,8 @@ final class JMDictExpansionTests {
             sentenceText: "お 土産"
         ))
 
-        #expect(outcome.display.matched == "お土産")
+        #expect(outcome.display.matched == "お")
+        #expect(outcome.also.map(\.matched) == ["お土産"])
     }
 
     @Test("falls back to the lemma when the joins miss")
@@ -257,7 +283,7 @@ final class JMDictExpansionTests {
         #expect(outcome.display.entries.map(\.entSeq) == [1_358_280])
     }
 
-    @Test("retains shorter hits that add new entries as results")
+    @Test("retains the longer-join hits that add new entries as results")
     func shorterHitsRetained() throws {
         let outcome = try #require(try engine.lookup(
             segments: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")],
@@ -265,8 +291,8 @@ final class JMDictExpansionTests {
             sentenceText: "お土産"
         ))
 
-        #expect(outcome.also.map(\.matched) == ["お"])
-        #expect(outcome.also[0].entries.map(\.entSeq) == [9_990_040])
+        #expect(outcome.also.map(\.matched) == ["お土産"])
+        #expect(outcome.also[0].entries.map(\.entSeq) == [1_002_500])
     }
 
     @Test("the tap's furigana ranks the matching entry first in the display result")

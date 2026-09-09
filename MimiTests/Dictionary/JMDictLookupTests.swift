@@ -142,6 +142,31 @@ final class JMDictLookupTests {
         #expect(result.entries.map(\.common) == [true, false])
     }
 
+    // MARK: Surface-match ranking
+
+    @Test("ranks the kana-written entry first when the tap is kana")
+    func kanaSurfaceRanksFirst() throws {
+        let result = try #require(try engine.lookup(LookupCandidate(text: "さご")))
+
+        #expect(result.entries.map(\.entSeq) == [9_990_080, 9_990_070])
+        #expect(result.entries.map(\.keb) == [nil, "叉語"])
+    }
+
+    @Test("a katakana tap folds onto the hiragana-written kana-only entry")
+    func katakanaSurfaceFolds() throws {
+        let result = try #require(try engine.lookup(LookupCandidate(text: "サゴ")))
+
+        #expect(result.entries.map(\.entSeq) == [9_990_080, 9_990_070])
+    }
+
+    @Test("ranks the tapped kanji writing's entry first without a reading")
+    func kanjiSurfaceRanksFirst() throws {
+        let result = try #require(try engine.lookup(LookupCandidate(text: "前")))
+
+        #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
+        #expect(result.entries.map(\.common) == [false, true])
+    }
+
     // MARK: Reading-match ranking
 
     @Test("ranks the furigana-matching entry first across the shared headword")
@@ -166,12 +191,14 @@ final class JMDictLookupTests {
         #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
     }
 
-    @Test("without a reading the homographs keep the common-first ent_seq order")
-    func noReadingKeepsPriorOrder() throws {
-        let result = try #require(try engine.lookup(LookupCandidate(text: "前")))
+    @Test("with a reading the surface match still leads, then reading-match ranks")
+    func readingRefinesBelowSurface() throws {
+        let result = try #require(try engine.lookup(
+            LookupCandidate(text: "前", reading: "まえ")
+        ))
 
-        #expect(result.entries.map(\.entSeq) == [9_990_050, 9_990_060])
-        #expect(result.entries.map(\.common) == [true, false])
+        #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
+        #expect(result.entries.map(\.reb) == ["まえ", "さき"])
     }
 
     // MARK: Misses
@@ -505,5 +532,13 @@ struct JMDictLookupLiveTests {
 
         #expect(result.entries.count >= 2)
         #expect(result.entries.first?.reb == "まえ")
+    }
+
+    @Test("ranks the kana-only さ entry first when the tap is kana")
+    func kanaSurfaceRanksFirstLive() throws {
+        let result = try #require(try engine.lookup(LookupCandidate(text: "さ")))
+
+        #expect(result.entries.first?.entSeq == 2_029_120)
+        #expect(result.entries.first?.keb == nil)
     }
 }

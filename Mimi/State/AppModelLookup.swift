@@ -2,8 +2,8 @@ import Foundation
 
 /// The app's single dictionary popover anchor: which surface owns it, the
 /// result it shows, and the paged entry index (a candidate can match
-/// several entries — the pager walks them reading-match first, then
-/// common-first, then `ent_seq`).
+/// several entries — the pager walks them surface-writing match first,
+/// then reading-match, then common-first, then `ent_seq`).
 struct SelectedLookup: Equatable, Identifiable, Sendable {
     /// Where the popover is anchored. One popover app-wide: only the
     /// surface whose source matches presents it. The transcript anchor is

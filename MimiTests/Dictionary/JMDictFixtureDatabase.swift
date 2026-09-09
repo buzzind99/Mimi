@@ -24,7 +24,13 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// `9990050` 先/さき — carries 前 as an alternate kanji writing (the real
 /// JMDict shape that makes 先 a homograph of 前), common;
 /// `9990060` 前/まえ — uncommon, so the reading-match-first ranking can
-/// pin itself above commonness on the shared 前 headword.
+/// pin itself above commonness on the shared 前 headword;
+/// `9990070` 叉語/さご — a kanji-written homophone of the kana-only entry
+/// below, common; both entries also carry the katakana shape サゴ the way
+/// the build script stores both reading shapes;
+/// `9990080` さご — kana-only, so the surface-match-first ranking can pin
+/// the kana-written entry above the kanji homophone on the shared さご
+/// headword.
 enum JMDictFixtureDatabase {
     /// The built database plus the directory it owns — `remove()` deletes
     /// both (test suites call it from `deinit`).
@@ -246,6 +252,34 @@ enum JMDictFixtureDatabase {
                     FixtureSense(
                         partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
                         gloss: [FixtureGloss(lang: "eng", text: "front; before")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990070",
+                kanji: [FixtureKanji(text: "叉語", common: true, jlptLevel: nil, pitchAccent: nil)],
+                kana: [
+                    FixtureKana(text: "さご", common: true, appliesToKanji: ["*"], jlptLevel: nil, pitchAccent: nil),
+                    FixtureKana(text: "サゴ", common: true, appliesToKanji: nil, jlptLevel: nil, pitchAccent: nil)
+                ],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "kanji-written homophone")]
+                    )
+                ]
+            ),
+            FixtureWord(
+                id: "9990080",
+                kanji: nil,
+                kana: [
+                    FixtureKana(text: "さご", common: true, appliesToKanji: nil, jlptLevel: nil, pitchAccent: nil),
+                    FixtureKana(text: "サゴ", common: true, appliesToKanji: nil, jlptLevel: nil, pitchAccent: nil)
+                ],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "kana-written homophone")]
                     )
                 ]
             )

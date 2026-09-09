@@ -17,10 +17,11 @@ struct LookupCandidate: Equatable, Sendable {
 
     let text: String
     let kind: Kind
-    /// The kana reading the tap's furigana (or kana surface) shows — entries
-    /// whose entry reading matches rank first within the result, since the
-    /// displayed furigana reflects the reading in context. nil when the tap
-    /// carries no readable kana; the ranking then ignores it.
+    /// The kana reading the tap's furigana (or kana surface) shows — after
+    /// the surface-writing match, entries whose entry reading matches rank
+    /// first within the result, since the displayed furigana reflects the
+    /// reading in context. nil when the tap carries no readable kana; the
+    /// ranking then ignores it.
     let reading: String?
 
     /// `kind` defaults to a script derivation: any ideographic scalar makes
@@ -69,9 +70,10 @@ struct JMDictEntry: Equatable, Sendable {
 }
 
 /// One candidate's lookup outcome: the exact string that matched and every
-/// entry sharing that headword, ranked reading-match first when the
-/// candidate carries a furigana reading, then common-first, then
-/// `ent_seq` — the stable order an entry pager walks.
+/// entry sharing that headword, ranked surface-writing match first (the
+/// entry written the way the tap is written leads), then furigana
+/// reading-match, then common-first, then `ent_seq` — the stable order an
+/// entry pager walks.
 struct LookupResult: Equatable, Sendable {
     let matched: String
     let entries: [JMDictEntry]
@@ -239,15 +241,25 @@ final class JMDictLookup: @unchecked Sendable {
             // An entry whose every sense was restriction-filtered away has
             // no displayable definition and contributes nothing.
             guard !entries.isEmpty else { return nil }
-            // The tap's furigana names the reading in context, so the
-            // entry pronounced that way leads the pager; commonness and
-            // ent_seq break the remaining ties.
+            // The tapped surface names the writing in context, so the entry
+            // written the way the tap is written leads the pager (a kana
+            // tap leads with the kana-only entry, a kanji tap with its own
+            // kanji writing); the furigana names the reading, and
+            // commonness and ent_seq break the remaining ties.
+            let surface = Self.foldedKana(candidate.text)
+            func matchesSurface(_ entry: JMDictEntry) -> Bool {
+                guard let written = entry.keb ?? entry.reb else { return false }
+                return Self.foldedKana(written) == surface
+            }
             let expected = candidate.reading.map(Self.foldedKana)
             func matchesReading(_ entry: JMDictEntry) -> Bool {
                 guard let expected, let reb = entry.reb else { return false }
                 return Self.foldedKana(reb) == expected
             }
             entries.sort {
+                if matchesSurface($0) != matchesSurface($1) {
+                    return matchesSurface($0)
+                }
                 let lhsMatch = matchesReading($0)
                 let rhsMatch = matchesReading($1)
                 if lhsMatch != rhsMatch {
