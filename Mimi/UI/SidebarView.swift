@@ -178,7 +178,11 @@ extension SidebarView {
     private var modeCards: some View {
         let visibility = Self.showsCards(for: cursorMode)
         if visibility.dictionary {
+            // The card's internal GeometryReader slot claims the free
+            // sidebar space (its senses list scrolls within it); priority
+            // keeps the trailing `Spacer` at its minimum.
             DictionaryCardView(model: model)
+                .layoutPriority(1)
                 .padding(.bottom, 12)
         } else {
             enginesCard
