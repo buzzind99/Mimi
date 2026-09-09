@@ -156,6 +156,12 @@ final class AppModel {
     /// the process-warm ASR engine; the default drives the real factory.
     private let retireWarmEngine: @Sendable () -> Void
 
+    /// Sentence index → position in `entries`. Entries are append-only within
+    /// a session (positions never shift), so translations resolve in O(1)
+    /// instead of scanning the transcript per arrival. Cleared with
+    /// `entries` on session begin.
+    private var entryPositionBySentence: [Int: Int] = [:]
+
     /// Injectable HTTP transport for the external engines (tests); nil drives
     /// the real per-provider `URLSession` transports.
     let translationTransport: HTTPTranslationTransport?
@@ -230,6 +236,8 @@ final class AppModel {
         sessionController.onSessionBegin = { [weak self] in
             guard let self else { return }
             entries.removeAll()
+            entryPositionBySentence.removeAll()
+            sessionCharacterCount = 0
             hudPinnedIndex = nil
             sessionStartedAt = Date()
             sessionEndedAt = nil
@@ -518,7 +526,9 @@ final class AppModel {
     // MARK: - Event handling (main actor)
 
     private func handleSentence(_ sentence: Sentence) {
+        entryPositionBySentence[sentence.index] = entries.count
         entries.append(SessionEntry(sentence: sentence))
+        sessionCharacterCount += sentence.text.count
         // Synchronous main-actor enqueue: by the time `stop` drains, every
         // emitted sentence is observably in the queue.
         translationQueue.enqueue(sentence)
@@ -526,13 +536,13 @@ final class AppModel {
 
     /// Internal (not private) so tests can exercise known/unknown indexes.
     func applyTranslation(index: Int, translation: SentenceTranslation) {
-        if let at = entries.firstIndex(where: { $0.sentence.index == index }) {
+        if let at = entryPositionBySentence[index] {
             entries[at].appendTranslation(translation)
         }
     }
 
-    /// SESSION-card character total: Σ sentence text lengths.
-    var sessionCharacterCount: Int {
-        entries.reduce(0) { $0 + $1.sentence.text.count }
-    }
+    /// SESSION-card character total: Σ sentence text lengths (translations
+    /// excluded), maintained incrementally on sentence append / session
+    /// clear instead of re-summing the transcript per render.
+    private(set) var sessionCharacterCount = 0
 }
