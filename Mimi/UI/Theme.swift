@@ -185,6 +185,12 @@ enum Theme {
     /// Audio meter bar colors (also the translation bar's gradient stops).
     static let meterTeal = Color(light: 0x0D9488, dark: 0x5EEAD4)
     static let meterBlue = Color(light: 0x0284C7, dark: 0x38BDF8)
+
+    // MARK: HUD
+
+    /// HUD annotations: `annotationPink`'s dark palette value, pinned because
+    /// the HUD surface is always dark regardless of the app appearance.
+    static let hudAnnotation = Color(hex: 0xFF9DBB)
 }
 
 /// The notice pill's color pair for one tone.

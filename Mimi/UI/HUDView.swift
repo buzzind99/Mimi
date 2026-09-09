@@ -73,7 +73,7 @@ struct HUDView: View {
                     annotation: readingAnnotation,
                     surfaceFont: .system(size: 15 * uiScale.factor),
                     annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
-                    annotationColor: .secondary,
+                    annotationColor: Theme.hudAnnotation,
                     reservesAnnotationLine: true
                 )
                 .foregroundStyle(.white)
@@ -155,7 +155,7 @@ struct HUDView: View {
             annotation: readingAnnotation,
             surfaceFont: .system(size: 14 * uiScale.factor),
             annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
-            annotationColor: .secondary.opacity(0.8),
+            annotationColor: Theme.hudAnnotation,
             cursorMode: cursorMode,
             onCopy: { model.copySnippet($0) }
         )
