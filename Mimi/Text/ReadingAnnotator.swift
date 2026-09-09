@@ -48,10 +48,23 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// The default reading fallback: a process-wide JMDict lookup consulted
     /// only for kanji surfaces the tokenizer left reading-less. One indexed
     /// query per unknown token (the segment cache then amortizes it per
-    /// text); infrastructure failures degrade to a miss.
+    /// text); infrastructure failures degrade to a miss. A small per-surface
+    /// cache sits in front so the same unknown surface across different
+    /// sentences (names, rare kanji) queries once — misses included, since
+    /// they re-query most often.
     private static let jmDictReadingFallback: @Sendable (String) -> String? = {
         let lookup = JMDictLookup()
-        return { (try? lookup.reading(forWriting: $0)) ?? nil }
+        let fallbackCache = ReadingFallbackCache()
+        return { surface in
+            switch fallbackCache.cachedReading(for: surface) {
+            case .hit(let reading): return reading
+            case .miss: return nil
+            case .notCached: break
+            }
+            let reading = (try? lookup.reading(forWriting: surface)) ?? nil
+            fallbackCache.store(reading, for: surface)
+            return reading
+        }
     }()
 
     /// Sized to hold a full transcription session's finalized sentences
@@ -309,6 +322,36 @@ final class ReadingAnnotator: @unchecked Sendable {
     }
 
     // MARK: - Overrides
+
+    /// Per-surface memo in front of the JMDict reading fallback, sized for
+    /// the unknown-kanji vocabulary of a session. `NSCache` is internally
+    /// thread-safe but not marked `Sendable`, so it hides behind this box.
+    /// Misses are cached as a distinct outcome — names and rare kanji miss
+    /// most often and would otherwise re-query every sentence.
+    private final class ReadingFallbackCache: @unchecked Sendable {
+        enum CachedReading {
+            case notCached
+            case miss
+            case hit(String)
+        }
+
+        private let cache = NSCache<NSString, NSString>()
+
+        init() {
+            cache.countLimit = 256
+        }
+
+        func cachedReading(for surface: String) -> CachedReading {
+            guard let hit = cache.object(forKey: surface as NSString) else { return .notCached }
+            // An empty string marks a miss; a real reading is never empty
+            // (the DB's `reb` is a non-empty kana spelling).
+            return hit.length == 0 ? .miss : .hit(hit as String)
+        }
+
+        func store(_ reading: String?, for surface: String) {
+            cache.setObject(reading as NSString? ?? "", forKey: surface as NSString)
+        }
+    }
 
     /// Topic/directional/object particles read by function, not by their
     /// dictionary reading (は → "wa", not "ha").
