@@ -60,7 +60,7 @@ final class AppModel {
     /// session with its "also:" shorter hits and paged entry index.
     /// Persists after the popover dismisses; cleared on session clear.
     /// Setter stays in `AppModelLookup.swift` (lookup lifecycle only).
-    internal(set) var pinnedLookup: PinnedLookup?
+    var pinnedLookup: PinnedLookup?
     /// Staleness token for in-flight lookups: each new tap invalidates the
     /// previous one, so a slow lookup that lands after a newer tap (or a
     /// session clear) never presents stale state. Mutated only by the

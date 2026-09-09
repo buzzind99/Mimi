@@ -259,7 +259,8 @@ final class CrispASRLibrary {
             fnDetectBackend(path.baseAddress, &name, Int32(name.count))
         }
         guard rc > 0 else { return nil }
-        return String(cString: name)
+        let end = name.firstIndex(of: 0) ?? name.count
+        return String(bytes: name[..<end].map(UInt8.init(bitPattern:)), encoding: .utf8)
     }
 
     // MARK: - Library binding

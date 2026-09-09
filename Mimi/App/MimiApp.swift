@@ -65,11 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chromeObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
-            guard let window = note.object as? NSWindow,
-                  window.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true,
-                  window.titleVisibility != .hidden
-            else { return }
-            self?.hideTitleChrome(of: window)
+            let window = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let window,
+                      window.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true,
+                      window.titleVisibility != .hidden
+                else { return }
+                self?.hideTitleChrome(of: window)
+            }
         }
     }
 
