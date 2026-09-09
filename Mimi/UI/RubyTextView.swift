@@ -192,6 +192,13 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// vertical position in None, Romaji, and Furigana modes, so mode toggles
     /// never shift the kanji. Off by default; `TranscriptRow` relies on it.
     var reservesAnnotationLine = false
+    /// Whether render-time segment resolutions go through the annotator's
+    /// cache. Hosts rendering a live partial — a growing 6–10 Hz revision of
+    /// the in-flight sentence — opt out: every revision is a distinct string
+    /// that will never be queried again, so caching it only churns the
+    /// store. The tap-time re-resolution (`lookupAction`) stays cached
+    /// regardless. Excluded from `==` (no effect on rendered output).
+    var cachesSegments = true
     /// Click behavior for surfaces (sidebar "cursor mode"): `.copy` invokes
     /// `onCopy` with the clicked run; `.dictionary` opens a definition
     /// lookup for the tapped word via `onLookup` (falling back to this
@@ -399,7 +406,8 @@ struct RubyTextView: View, @preconcurrency Equatable {
     @ViewBuilder
     private var segmentedBody: some View {
         switch Self.segmentedBodyPlan(
-            segments: ReadingAnnotator.segments(for: text), annotation: annotation
+            segments: ReadingAnnotator.segments(for: text, caching: cachesSegments),
+            annotation: annotation
         ) {
         case let .flow(units):
             FlowLayout(spacing: 4, lineSpacing: 1, fingerprint: fingerprint) {
@@ -490,7 +498,9 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// reading merge into one `.plain` child (whitespace and punctuation
     /// arrive as separate segments from the annotator).
     private var displayUnits: [DisplayUnit] {
-        guard let segments = ReadingAnnotator.segments(for: text) else { return [] }
+        guard let segments = ReadingAnnotator.segments(for: text, caching: cachesSegments) else {
+            return []
+        }
         var units: [DisplayUnit] = []
         units.reserveCapacity(segments.count)
         for segment in segments {

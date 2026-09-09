@@ -77,6 +77,9 @@ struct LiveStripView: View {
                     annotationFont: .system(size: 13 * uiScale.factor, design: .monospaced),
                     annotationColor: Theme.annotationPink,
                     reservesAnnotationLine: true,
+                    // Growing partial revisions never repeat — don't churn
+                    // the annotator cache with them.
+                    cachesSegments: false,
                     cursorMode: cursorMode,
                     onCopy: onCopy,
                     onLookup: onLookup

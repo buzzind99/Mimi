@@ -51,6 +51,52 @@ struct ReadingAnnotatorGuardTests {
 
         #expect(segments != nil)
     }
+
+    @Test("the static caching entry point routes through the shared annotator")
+    func staticCachingEntryPoint() {
+        let segments = ReadingAnnotator.segments(for: "こんにちは", caching: false)
+
+        #expect(segments != nil)
+    }
+
+    @Test("cached requests tokenize once and replay the identical segments")
+    func cachedPathTokenizesOnce() throws {
+        let calls = Mutex(0)
+        let canned = tokens(["桜"], readings: ["さくら"])
+        let annotator = ReadingAnnotator(tokenize: { _ in
+            calls.withLock { $0 += 1 }
+            return canned
+        })
+
+        let first = try #require(annotator.segments(for: "桜"))
+        let second = try #require(annotator.segments(for: "桜"))
+
+        #expect(calls.withLock { $0 } == 1)
+        #expect(first.first === second.first)
+    }
+
+    @Test("uncached requests re-run the pipeline and skip the store")
+    func uncachedPathReexecutes() throws {
+        let calls = Mutex(0)
+        let canned = tokens(["桜"], readings: ["さくら"])
+        let annotator = ReadingAnnotator(tokenize: { _ in
+            calls.withLock { $0 += 1 }
+            return canned
+        })
+
+        let first = try #require(annotator.segments(for: "桜", caching: false))
+        let second = try #require(annotator.segments(for: "桜", caching: false))
+
+        #expect(calls.withLock { $0 } == 2)
+        #expect(first.first !== second.first)
+    }
+
+    @Test("empty input stays nil on the uncached path", arguments: ["", "   "])
+    func uncachedEmptyInput(text: String) {
+        let annotator = makeAnnotator([])
+
+        #expect(annotator.segments(for: text, caching: false) == nil)
+    }
 }
 
 // MARK: - Annotations

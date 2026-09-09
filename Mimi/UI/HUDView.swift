@@ -74,7 +74,10 @@ struct HUDView: View {
                     surfaceFont: .system(size: 15 * uiScale.factor),
                     annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
                     annotationColor: Theme.hudAnnotation,
-                    reservesAnnotationLine: true
+                    reservesAnnotationLine: true,
+                    // Growing partial revisions never repeat — don't churn
+                    // the annotator cache with them.
+                    cachesSegments: false
                 )
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)

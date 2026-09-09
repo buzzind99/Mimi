@@ -54,9 +54,12 @@ final class ReadingAnnotator: @unchecked Sendable {
         return { (try? lookup.reading(forWriting: $0)) ?? nil }
     }()
 
+    /// Sized to hold a full transcription session's finalized sentences
+    /// so scroll-back re-renders hit instead of re-tokenizing.
+    /// Soft cap only — NSCache still evicts under real memory pressure.
     private let cache: NSCache<NSString, NSArray> = {
         let cache = NSCache<NSString, NSArray>()
-        cache.countLimit = 500
+        cache.countLimit = 2000
         return cache
     }()
 
@@ -86,16 +89,26 @@ final class ReadingAnnotator: @unchecked Sendable {
         shared.segments(for: text)
     }
 
-    func segments(for text: String) -> [ReadingSegment]? {
+    /// Cache-controllable variant. Live partials — growing 6–10 Hz revisions
+    /// of the in-flight sentence — pass `caching: false`: every revision is a
+    /// distinct string that will never be queried again, so caching them only
+    /// churns the store and evicts finalized sentences' entries.
+    static func segments(for text: String, caching: Bool) -> [ReadingSegment]? {
+        shared.segments(for: text, caching: caching)
+    }
+
+    func segments(for text: String, caching: Bool = true) -> [ReadingSegment]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        if let cached = cache.object(forKey: trimmed as NSString) as? [ReadingSegment] {
+        if caching, let cached = cache.object(forKey: trimmed as NSString) as? [ReadingSegment] {
             return cached
         }
 
         let result = transcribe(trimmed)
-        cache.setObject(result as NSArray, forKey: trimmed as NSString)
+        if caching {
+            cache.setObject(result as NSArray, forKey: trimmed as NSString)
+        }
         return result
     }
 
