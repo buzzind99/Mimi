@@ -18,7 +18,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "お土産"
         )
 
-        #expect(candidates.map(\.text) == ["お", "お土産"])
+        #expect(candidates.map(\.candidate.text) == ["お", "お土産"])
     }
 
     @Test("a tap mid-sentence expands forward only")
@@ -30,7 +30,7 @@ final class JMDictExpansionCandidateTests {
         )
 
         // The kanji splits trail (the 土産 surface itself is deduplicated).
-        #expect(candidates.map(\.text) == ["土産", "土", "産"])
+        #expect(candidates.map(\.candidate.text) == ["土産", "土", "産"])
     }
 
     @Test("the surface leads the lemma for the single-token candidates")
@@ -43,7 +43,7 @@ final class JMDictExpansionCandidateTests {
 
         // The tapped surface leads, the lemma follows as the miss fallback,
         // the joins come longest-first, and the kanji split trails them all.
-        #expect(candidates.map(\.text) == ["食べ", "食べる", "食べました", "食べま", "食"])
+        #expect(candidates.map(\.candidate.text) == ["食べ", "食べる", "食べました", "食べま", "食"])
     }
 
     @Test("a surface that is itself a headword leads its lemma (な tap shows な, not だ)")
@@ -54,7 +54,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "な"
         )
 
-        #expect(candidates.map(\.text) == ["な", "だ"])
+        #expect(candidates.map(\.candidate.text) == ["な", "だ"])
     }
 
     @Test("never queries more than the candidate cap")
@@ -66,7 +66,7 @@ final class JMDictExpansionCandidateTests {
         )
 
         #expect(candidates.count <= JMDictExpansion.maxCandidates)
-        #expect(candidates.map(\.text) == ["あ", "あいう", "あい"])
+        #expect(candidates.map(\.candidate.text) == ["あ", "あいう", "あい"])
     }
 
     @Test("skips whitespace-only segments and still joins across them")
@@ -77,7 +77,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "お 土産"
         )
 
-        #expect(candidates.map(\.text) == ["お", "お土産"])
+        #expect(candidates.map(\.candidate.text) == ["お", "お土産"])
     }
 
     @Test("a non-whitespace gap in the sentence text stops expansion")
@@ -88,7 +88,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "お、土産"
         )
 
-        #expect(candidates.map(\.text) == ["お"])
+        #expect(candidates.map(\.candidate.text) == ["お"])
     }
 
     @Test("a punctuation-only segment stops expansion")
@@ -99,7 +99,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "本、読む"
         )
 
-        #expect(candidates.map(\.text) == ["本"])
+        #expect(candidates.map(\.candidate.text) == ["本"])
     }
 
     @Test("a numeral-run segment stops expansion")
@@ -110,7 +110,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "本 3冊"
         )
 
-        #expect(candidates.map(\.text) == ["本"])
+        #expect(candidates.map(\.candidate.text) == ["本"])
     }
 
     @Test("an overridden-particle segment stops expansion")
@@ -121,7 +121,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "では"
         )
 
-        #expect(candidates.map(\.text) == ["で"])
+        #expect(candidates.map(\.candidate.text) == ["で"])
     }
 
     @Test("does not duplicate the single candidate when the lemma equals the surface")
@@ -134,7 +134,7 @@ final class JMDictExpansionCandidateTests {
 
         // The split matching the surface is deduplicated; the shorter
         // substrings trail.
-        #expect(candidates.map(\.text) == ["土産", "土", "産"])
+        #expect(candidates.map(\.candidate.text) == ["土産", "土", "産"])
     }
 
     @Test("an out-of-bounds tap index yields no candidates")
@@ -158,7 +158,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "違う文です"
         )
 
-        #expect(candidates.map(\.text) == ["お"])
+        #expect(candidates.map(\.candidate.text) == ["お"])
     }
 
     // MARK: Kanji splits
@@ -172,7 +172,7 @@ final class JMDictExpansionCandidateTests {
         )
 
         // The longest split (映画) is the surface itself and is deduplicated.
-        #expect(candidates.map(\.text) == ["映画", "映", "画"])
+        #expect(candidates.map(\.candidate.text) == ["映画", "映", "画"])
     }
 
     @Test("kana breaks a kanji run: only the runs split, longest substrings first")
@@ -183,7 +183,7 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "食べ物"
         )
 
-        #expect(candidates.map(\.text) == ["食べ物", "食", "物"])
+        #expect(candidates.map(\.candidate.text) == ["食べ物", "食", "物"])
     }
 
     @Test("substring splits honor the split-length cap and the candidate cap")
@@ -196,7 +196,7 @@ final class JMDictExpansionCandidateTests {
 
         // Length-3 substrings, then 2, then 1 — truncated at the candidate
         // cap before the single-kanji tail completes.
-        #expect(candidates.map(\.text) == [
+        #expect(candidates.map(\.candidate.text) == [
             "東京駅前", "東京駅", "京駅前", "東京", "京駅", "駅前", "東", "京", "駅"
         ])
     }
@@ -206,10 +206,10 @@ final class JMDictExpansionCandidateTests {
         // A single-kanji surface's only substring is itself (deduplicated).
         #expect(JMDictExpansion.candidates(
             segments: segments(("本", nil)), tappedAt: 0, sentenceText: "本"
-        ).map(\.text) == ["本"])
+        ).map(\.candidate.text) == ["本"])
         #expect(JMDictExpansion.candidates(
             segments: segments(("あめ", nil)), tappedAt: 0, sentenceText: "あめ"
-        ).map(\.text) == ["あめ"])
+        ).map(\.candidate.text) == ["あめ"])
     }
 
     @Test("split candidates carry no reading and derive the kanji kind")
@@ -222,9 +222,9 @@ final class JMDictExpansionCandidateTests {
 
         let splits = candidates.dropFirst()
 
-        #expect(splits.map(\.text) == ["映", "画"])
-        #expect(splits.map(\.reading).allSatisfy { $0 == nil })
-        #expect(splits.map(\.kind).allSatisfy { $0 == .kanji })
+        #expect(splits.map(\.candidate.text) == ["映", "画"])
+        #expect(splits.map(\.candidate.reading).allSatisfy { $0 == nil })
+        #expect(splits.map(\.candidate.kind).allSatisfy { $0 == .kanji })
     }
 
     @Test("splits trail the joins and never duplicate an earlier candidate")
@@ -238,7 +238,7 @@ final class JMDictExpansionCandidateTests {
         // The join comes before the splits; the 生徒 split (the surface
         // itself) is deduplicated away and the joined text contributes the
         // boundary-crossing 徒会 (the neighbor's 会 stays one tap away).
-        #expect(candidates.map(\.text) == ["生徒", "生徒会", "生", "徒", "徒会"])
+        #expect(candidates.map(\.candidate.text) == ["生徒", "生徒会", "生", "徒", "徒会"])
     }
 
     @Test("the joined text's boundary-crossing splits trail the tapped surface's")
@@ -252,7 +252,7 @@ final class JMDictExpansionCandidateTests {
         // The tapped surface's splits (風, 呂) lead; the joined text adds
         // only the boundary-crossing 呂敷 — the neighbor's 敷 stays one
         // tap away on the 敷 segment, and the join itself deduplicates.
-        #expect(candidates.map(\.text) == ["風呂", "風呂敷", "風", "呂", "呂敷"])
+        #expect(candidates.map(\.candidate.text) == ["風呂", "風呂敷", "風", "呂", "呂敷"])
     }
 
     @Test("a kana tap gains no boundary-crossing splits across a kanji neighbor")
@@ -265,7 +265,7 @@ final class JMDictExpansionCandidateTests {
 
         // The kanji run starts inside the neighbor, so no substring of
         // お土産 straddles the tap boundary: the join alone remains.
-        #expect(candidates.map(\.text) == ["お", "お土産"])
+        #expect(candidates.map(\.candidate.text) == ["お", "お土産"])
     }
 
     @Test("joined-text splits truncate behind the tapped surface's under the cap")
@@ -280,7 +280,7 @@ final class JMDictExpansionCandidateTests {
         // rank above splits), so the tapped surface's eight splits leave
         // one slot and the joined text's boundary-crossing splits fall to
         // the cap before emitting.
-        #expect(candidates.map(\.text) == [
+        #expect(candidates.map(\.candidate.text) == [
             "東京駅前", "東京駅前駅", "東京駅", "京駅前", "東京", "京駅", "駅前", "東", "京"
         ])
     }
@@ -298,8 +298,8 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "前の"
         )
 
-        #expect(candidates.map(\.text) == ["前", "前の"])
-        #expect(candidates.map(\.reading) == ["まえ", "まえの"])
+        #expect(candidates.map(\.candidate.text) == ["前", "前の"])
+        #expect(candidates.map(\.candidate.reading) == ["まえ", "まえの"])
     }
 
     @Test("a join member without a reading drops the joined reading")
@@ -313,9 +313,9 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "前の"
         )
 
-        #expect(candidates.map(\.text) == ["前", "前の"])
-        #expect(candidates[0].reading == "まえ")
-        #expect(candidates[1].reading == nil)
+        #expect(candidates.map(\.candidate.text) == ["前", "前の"])
+        #expect(candidates[0].candidate.reading == "まえ")
+        #expect(candidates[1].candidate.reading == nil)
     }
 
     @Test("a lemma candidate carries the tapped segment's reading")
@@ -330,10 +330,26 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "食べました"
         )
 
-        #expect(candidates[0].text == "食べ")
-        #expect(candidates[0].reading == "たべ")
-        #expect(candidates[1].text == "食べる")
-        #expect(candidates[1].reading == "たべ")
+        #expect(candidates[0].candidate.text == "食べ")
+        #expect(candidates[0].candidate.reading == "たべ")
+        #expect(candidates[1].candidate.text == "食べる")
+        #expect(candidates[1].candidate.reading == "たべ")
+    }
+
+    @Test("candidates carry the expansion origin in build order")
+    func originTagging() {
+        let candidates = JMDictExpansion.candidates(
+            segments: segments(("食べ", "食べる"), ("ま", nil), ("した", nil)),
+            tappedAt: 0,
+            sentenceText: "食べました"
+        )
+
+        // The surface leads, the lemma follows, the joins longest-first,
+        // the kanji splits trail — each tagged with its role so the
+        // resolution can demote split-only taps to not-found.
+        #expect(candidates.map(\.origin) == [
+            .tappedSurface, .tappedLemma, .join, .join, .split
+        ])
     }
 }
 
@@ -354,33 +370,48 @@ final class JMDictExpansionTests {
         JMDictFixtureDatabase.Built(url: databaseURL).remove()
     }
 
+    private struct ResolutionMismatch: Error {}
+
+    /// Unwraps a found resolution — recording a failure for a not-found
+    /// one (the split-only demotion) so the expectation stays in the
+    /// assertion that asked for it.
+    private func foundOutcome(_ resolution: LookupResolution) throws -> LookupOutcome {
+        guard case let .found(outcome) = resolution else {
+            Issue.record("expected .found, got \(resolution)")
+            throw ResolutionMismatch()
+        }
+        return outcome
+    }
+
     @Test("displays the tapped piece: お resolves お, お土産 lands in also")
     func compoundHit() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")],
             tappedAt: 0,
             sentenceText: "お土産"
         ))
 
         #expect(outcome.display.matched == "お")
+        #expect(outcome.displayOrigin == .tappedSurface)
         #expect(outcome.display.entries.map(\.entSeq) == [9_990_040])
     }
 
-    @Test("displays the join when the tapped piece alone misses")
+    @Test("displays the join when the tapped piece alone misses, labeled by the join origin")
     func joinFallbackHit() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "お土"), LookupSegment(surface: "産", lemma: "産")],
             tappedAt: 0,
             sentenceText: "お土産"
         ))
 
         #expect(outcome.display.matched == "お土産")
+        #expect(outcome.displayOrigin == .join)
         #expect(outcome.display.entries.map(\.entSeq) == [1_002_500])
     }
 
     @Test("joins across a whitespace gap the segments carry")
     func whitespaceGapHit() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [
                 LookupSegment(surface: "お"),
                 LookupSegment(surface: " "),
@@ -396,7 +427,7 @@ final class JMDictExpansionTests {
 
     @Test("falls back to the lemma when the joins miss")
     func lemmaFallbackHit() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [
                 LookupSegment(surface: "食べ", lemma: "食べる"),
                 LookupSegment(surface: "ま"),
@@ -407,12 +438,13 @@ final class JMDictExpansionTests {
         ))
 
         #expect(outcome.display.matched == "食べる")
+        #expect(outcome.displayOrigin == .tappedLemma)
         #expect(outcome.display.entries.map(\.entSeq) == [1_358_280])
     }
 
     @Test("retains the longer-join hits that add new entries as results")
     func shorterHitsRetained() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "お"), LookupSegment(surface: "土産", lemma: "土産")],
             tappedAt: 0,
             sentenceText: "お土産"
@@ -422,19 +454,43 @@ final class JMDictExpansionTests {
         #expect(outcome.also[0].entries.map(\.entSeq) == [1_002_500])
     }
 
-    @Test("split fallback surfaces the single-kanji entries of a whole-word miss")
-    func splitFallbackHit() throws {
-        let outcome = try #require(try engine.lookup(
+    @Test("a whole-word miss resolved only by splits is not-found with related hits")
+    func splitOnlyResolutionIsNotFound() throws {
+        let resolution = try engine.lookup(
             segments: [LookupSegment(surface: "雨尾")],
             tappedAt: 0,
             sentenceText: "雨尾"
-        ))
+        )
 
-        // 雨尾 is no headword: the split candidates resolve both kanji.
-        #expect(outcome.display.matched == "雨")
-        #expect(outcome.display.entries.map(\.entSeq) == [9_990_030])
-        #expect(outcome.also.map(\.matched) == ["尾"])
-        #expect(outcome.also[0].entries.map(\.entSeq) == [9_990_040])
+        // 雨尾 is no headword: the split candidates resolve both kanji —
+        // but neither leads the display result. The demoted hits travel
+        // as related, longest match first (ties keep candidate order).
+        guard case let .notFound(related) = resolution else {
+            Issue.record("expected .notFound, got \(resolution)")
+            return
+        }
+
+        #expect(related.map(\.matched) == ["雨", "尾"])
+        #expect(related.map { $0.entries.map(\.entSeq) } == [[9_990_030], [9_990_040]])
+    }
+
+    @Test("related drops a later split hit that only re-resolves known entries")
+    func relatedDeduplicatesByEntries() throws {
+        let resolution = try engine.lookup(
+            segments: [LookupSegment(surface: "前先")],
+            tappedAt: 0,
+            sentenceText: "前先"
+        )
+
+        // 前先 is no headword: both single-kanji splits resolve — but 先 is
+        // an alternate writing of the entry 前 already resolved, so it is a
+        // duplicate pill, not a new one.
+        guard case let .notFound(related) = resolution else {
+            Issue.record("expected .notFound, got \(resolution)")
+            return
+        }
+        #expect(related.map(\.matched) == ["前"])
+        #expect(related.map { $0.entries.map(\.entSeq) } == [[9_990_060, 9_990_050]])
     }
 
     @Test("a compound hit displays and its split hits trail in also")
@@ -442,7 +498,7 @@ final class JMDictExpansionTests {
         // 風通し keeps the also-list empty — the 風通 / 風 / 通 splits all
         // miss the fixture (風呂敷 can't: the boundary-crossing 呂敷 split
         // resolves the synthetic entry).
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "風通し")],
             tappedAt: 0,
             sentenceText: "風通し"
@@ -455,16 +511,17 @@ final class JMDictExpansionTests {
 
     @Test("a cross-boundary split of the join trails in also")
     func joinedSplitCrossBoundaryHit() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "風呂"), LookupSegment(surface: "敷")],
             tappedAt: 0,
             sentenceText: "風呂敷"
         ))
 
-        // The join 風呂敷 displays; the tapped surface's splits (風, 呂)
-        // miss the fixture and the boundary-crossing 呂敷 split resolves
-        // the compound's inner word as an "also:" result.
+        // The join 風呂敷 displays (origin .join); the tapped surface's
+        // splits (風, 呂) miss the fixture and the boundary-crossing 呂敷
+        // split resolves the compound's inner word as an "also:" result.
         #expect(outcome.display.matched == "風呂敷")
+        #expect(outcome.displayOrigin == .join)
         #expect(outcome.display.entries.map(\.entSeq) == [1_500_150])
         #expect(outcome.also.map(\.matched) == ["呂敷"])
         #expect(outcome.also[0].entries.map(\.entSeq) == [9_990_090])
@@ -472,7 +529,7 @@ final class JMDictExpansionTests {
 
     @Test("the tap's furigana ranks the matching entry first in the display result")
     func furiganaRanksEntryFirst() throws {
-        let outcome = try #require(try engine.lookup(
+        let outcome = try foundOutcome(engine.lookup(
             segments: [LookupSegment(surface: "前", reading: "まえ")],
             tappedAt: 0,
             sentenceText: "前"
@@ -481,15 +538,15 @@ final class JMDictExpansionTests {
         #expect(outcome.display.entries.map(\.entSeq) == [9_990_060, 9_990_050])
     }
 
-    @Test("every candidate missing is a miss, not an error")
-    func noHitReturnsNil() throws {
-        let outcome = try engine.lookup(
+    @Test("every candidate missing is an empty not-found, not an error")
+    func noHitReturnsEmptyNotFound() throws {
+        let resolution = try engine.lookup(
             segments: [LookupSegment(surface: "きのこっぷ")],
             tappedAt: 0,
             sentenceText: "きのこっぷ"
         )
 
-        #expect(outcome == nil)
+        #expect(resolution == .notFound(related: []))
     }
 
     @Test("an infrastructure error on any query aborts the tap as a throw")

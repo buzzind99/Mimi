@@ -3,14 +3,16 @@ import Foundation
 import Testing
 
 /// Tests the dictionary lookup UI state on `AppModel`: a hit selects and
-/// pins, the miss posts the warning pill while state persists, empty
-/// annotator segments and infrastructure errors post the toast instead
-/// (never the pill), the popover anchor is exclusive to its surface,
-/// "also:" pills fully re-select, the entry pager pages popover and card
-/// together, and session clear resets everything. Lookups run over the
-/// committed JMDict fixture database; the async core (`runLookup`) is
-/// awaited directly with injected segments. One end-to-end tap test runs
-/// the real annotator and is gated on a prepared tokenizer.
+/// pins, a split-only resolution pins the not-found state with its related
+/// hits (a related-pill tap promotes it to found), the bare miss posts the
+/// warning pill while state persists, empty annotator segments and
+/// infrastructure errors post the toast instead (never the pill), the
+/// popover anchor is exclusive to its surface, fallback pills fully
+/// re-select, the entry pager pages popover and card together, and session
+/// clear resets everything. Lookups run over the committed JMDict fixture
+/// database; the async core (`runLookup`) is awaited directly with
+/// injected segments. One end-to-end tap test runs the real annotator and
+/// is gated on a prepared tokenizer.
 @MainActor
 @Suite("AppModel dictionary lookup")
 final class AppModelLookupTests {
@@ -101,23 +103,83 @@ final class AppModelLookupTests {
     // MARK: - Hit: select + pin
 
     @Test("a hit selects the popover and pins the card with the retained expansion hits")
-    func hitSelectsAndPins() async {
+    func hitSelectsAndPins() async throws {
         let model = makeModel()
 
         await runHit(model, source: .liveStrip)
 
         let selected = model.selectedLookup
         #expect(selected?.source == .liveStrip)
-        #expect(selected?.result.matched == "お")
+        #expect(selected?.content.displayResult?.matched == "お")
         #expect(selected?.entryIndex == 0)
 
-        let pinned = model.pinnedLookup
-        #expect(pinned?.result.matched == "お")
-        #expect(pinned?.entryIndex == 0)
+        let pinned = try #require(model.pinnedLookup)
+        #expect(pinned.content.displayResult?.matched == "お")
+        #expect(pinned.entryIndex == 0)
         // The tapped surface お displays; the join お土産 hits new entries
         // and is retained as the "also:" hit (the 土産 lemma candidate only
         // re-hits the compound's entries, so it is skipped).
-        #expect(pinned?.also.map(\.matched) == ["お土産"])
+        #expect(pinned.content.fallbackResults.map(\.matched) == ["お土産"])
+        // A tapped-surface lead is never labeled a fallback match.
+        guard case let .found(_, _, origin) = pinned.content else {
+            Issue.record("expected found content")
+            return
+        }
+        #expect(origin == .tappedSurface)
+    }
+
+    // MARK: - Not found: related fallback hits
+
+    @Test("a split-only resolution pins the not-found state with related hits, not the pill")
+    func notFoundPinsRelatedHits() async {
+        let model = makeModel()
+
+        // 雨尾 is no fixture headword; only its kanji-split fallbacks hit.
+        await model.runLookup(
+            segments: [LookupSegment(surface: "雨尾")], tappedAt: 0,
+            sentenceText: "雨尾", surface: "雨尾", source: .liveStrip
+        )
+
+        #expect(model.notices.message == nil, "related hits suppress the miss pill")
+        #expect(model.selectedLookup?.source == .liveStrip)
+        guard case let .notFound(surface, related)? = model.selectedLookup?.content else {
+            Issue.record("expected not-found selection, got \(String(describing: model.selectedLookup))")
+            return
+        }
+        #expect(surface == "雨尾")
+        #expect(related.map(\.matched) == ["雨", "尾"])
+
+        guard case let .notFound(pinnedSurface, pinnedRelated)? = model.pinnedLookup?.content
+        else {
+            Issue.record("expected not-found pin")
+            return
+        }
+        #expect(pinnedSurface == "雨尾")
+        #expect(pinnedRelated.map(\.matched) == ["雨", "尾"])
+    }
+
+    @Test("a related-pill tap promotes the hit: card and popover switch to found")
+    func relatedPillPromotes() async throws {
+        let model = makeModel()
+        await model.runLookup(
+            segments: [LookupSegment(surface: "雨尾")], tappedAt: 0,
+            sentenceText: "雨尾", surface: "雨尾", source: .liveStrip
+        )
+
+        let rain = try #require(model.pinnedLookup?.content.fallbackResults.first)
+        model.selectAlsoPill(rain)
+
+        #expect(model.selectedLookup?.content.displayResult?.matched == "雨")
+        #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")
+        let pinned = try #require(model.pinnedLookup)
+        #expect(pinned.content.displayResult?.matched == "雨")
+        #expect(pinned.content.fallbackResults.map(\.matched) == ["尾"])
+        // An explicitly chosen hit is never labeled a fallback lead.
+        guard case let .found(_, _, origin) = pinned.content else {
+            Issue.record("expected found content")
+            return
+        }
+        #expect(origin == .tappedSurface)
     }
 
     // MARK: - Miss: warning pill, state persists
@@ -133,7 +195,7 @@ final class AppModelLookupTests {
             sentenceText: "無語", surface: "無語", source: .liveStrip
         )
 
-        #expect(model.selectedLookup?.result.matched == "お", "the popover stays up")
+        #expect(model.selectedLookup?.content.displayResult?.matched == "お", "the popover stays up")
         #expect(model.pinnedLookup == pinnedBefore)
         #expect(model.notices.message == "No dictionary entry for \"無語\"")
         #expect(model.notices.tone == .warning)
@@ -225,7 +287,7 @@ final class AppModelLookupTests {
         )
 
         #expect(model.selectedLookup?.source == .transcript(sentenceIndex: 1, tokenIndex: 2))
-        #expect(model.selectedLookup?.result.matched == "あめ")
+        #expect(model.selectedLookup?.content.displayResult?.matched == "あめ")
     }
 
     @Test("a second tap on a different word of the same row moves the anchor")
@@ -240,7 +302,7 @@ final class AppModelLookupTests {
         )
 
         #expect(model.selectedLookup?.source == .transcript(sentenceIndex: 1, tokenIndex: 5))
-        #expect(model.selectedLookup?.result.matched == "あめ")
+        #expect(model.selectedLookup?.content.displayResult?.matched == "あめ")
     }
 
     @Test("dismissal clears the selection only when the dismissing surface owns it; pinned persists")
@@ -267,18 +329,18 @@ final class AppModelLookupTests {
         let model = makeModel()
         await runHit(model, source: .liveStrip)
 
-        let expansion = try #require(model.pinnedLookup?.also[0])
+        let expansion = try #require(model.pinnedLookup?.content.fallbackResults.first)
         model.selectAlsoPill(expansion)
 
-        #expect(model.selectedLookup?.result.matched == "お土産")
+        #expect(model.selectedLookup?.content.displayResult?.matched == "お土産")
         #expect(model.selectedLookup?.source == .liveStrip, "the anchor follows the re-select")
         #expect(model.selectedLookup?.entryIndex == 0)
 
         // The pill row recomputes from the results relative to お土産: the
         // previous selection (お) becomes its "also:".
         let pinned = try #require(model.pinnedLookup)
-        #expect(pinned.result.matched == "お土産")
-        #expect(pinned.also.map(\.matched) == ["お"])
+        #expect(pinned.content.displayResult?.matched == "お土産")
+        #expect(pinned.content.fallbackResults.map(\.matched) == ["お"])
     }
 
     // MARK: - Entry pager
@@ -293,7 +355,7 @@ final class AppModelLookupTests {
             source: .transcript(sentenceIndex: 0, tokenIndex: 0)
         )
 
-        let count = try #require(model.selectedLookup?.result.entries.count)
+        let count = try #require(model.selectedLookup?.content.displayResult?.entries.count)
         #expect(count == 2)
 
         model.stepLookupEntry(to: 1)

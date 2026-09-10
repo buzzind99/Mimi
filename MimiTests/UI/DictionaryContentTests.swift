@@ -146,7 +146,7 @@ struct DictionaryContentTests {
     @Test("popoverItem scopes the selection to its owning surface")
     func popoverScoping() {
         let selected = SelectedLookup(
-            result: result("お土産"),
+            content: .found(result: result("お土産"), also: [], origin: .tappedSurface),
             source: .transcript(sentenceIndex: 2, tokenIndex: 1),
             entryIndex: 0
         )
@@ -160,5 +160,51 @@ struct DictionaryContentTests {
             selected.popoverItem(for: .transcript(sentenceIndex: 3, tokenIndex: 1)) == nil
         )
         #expect(selected.popoverItem(for: .liveStrip) == nil)
+    }
+
+    // MARK: - Pinned content states
+
+    @Test("the joined-match badge names only join leads")
+    func joinedBadge() {
+        #expect(DictionaryContent.joinedMatchBadge(for: .join) == "JOINED MATCH")
+        #expect(DictionaryContent.joinedMatchBadge(for: .tappedSurface) == nil)
+        #expect(DictionaryContent.joinedMatchBadge(for: .tappedLemma) == nil)
+        #expect(DictionaryContent.joinedMatchBadge(for: .split) == nil)
+    }
+
+    @Test("content accessors expose the display result and the fallback pills per state")
+    func contentAccessors() {
+        let found = LookupContent.found(
+            result: result("お"), also: [result("お土産")], origin: .tappedSurface
+        )
+        #expect(found.displayResult?.matched == "お")
+        #expect(found.fallbackResults.map(\.matched) == ["お土産"])
+
+        let notFound = LookupContent.notFound(surface: "雨尾", related: [result("雨")])
+        #expect(notFound.displayResult == nil)
+        #expect(notFound.fallbackResults.map(\.matched) == ["雨"])
+    }
+
+    @Test("the selection identity follows the matched headword and the not-found surface")
+    func identityToken() {
+        let found = SelectedLookup(
+            content: .found(result: result("お"), also: [], origin: .tappedSurface),
+            source: .liveStrip,
+            entryIndex: 0
+        )
+        let promoted = SelectedLookup(
+            content: .found(result: result("お土産"), also: [], origin: .tappedSurface),
+            source: .liveStrip,
+            entryIndex: 0
+        )
+        let notFound = SelectedLookup(
+            content: .notFound(surface: "雨尾", related: []),
+            source: .liveStrip,
+            entryIndex: 0
+        )
+
+        #expect(found.id.hasSuffix("-お"))
+        #expect(found.id != promoted.id, "a pill promotion swaps the content identity")
+        #expect(notFound.id.contains("not-found:雨尾"))
     }
 }
