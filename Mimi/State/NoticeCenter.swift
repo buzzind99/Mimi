@@ -1,15 +1,6 @@
 import Foundation
 import Observation
 
-/// Schedules a notice's auto-dismissal; injectable so tests fire (and cancel)
-/// dismissals deterministically instead of sleeping. Returns a cancel
-/// closure — invoked when the same notice re-fires (timer reset) or the
-/// notice is dismissed before the delay elapses.
-typealias NoticeScheduler = @Sendable (
-    _ delay: Duration,
-    _ fire: @escaping @MainActor () -> Void
-) -> @Sendable () -> Void
-
 /// State behind the transient notice pill (e.g. the copy confirmation).
 /// Holds a single message at a time: re-posting replaces it in place and
 /// resets the auto-dismiss timer instead of stacking duplicates. Owned by
@@ -32,10 +23,10 @@ final class NoticeCenter {
     /// Auto-dismiss delay (timer resets when the notice re-fires).
     static let autoDismissDelay: Duration = .seconds(2)
 
-    private let scheduler: NoticeScheduler
+    private let scheduler: AutoDismissScheduler
     private var timer: (@Sendable () -> Void)?
 
-    init(scheduler: @escaping NoticeScheduler = NoticeCenter.defaultScheduler) {
+    init(scheduler: @escaping AutoDismissScheduler = AutoDismiss.timerScheduler) {
         self.scheduler = scheduler
     }
 
@@ -57,19 +48,5 @@ final class NoticeCenter {
         timer = nil
         message = nil
         tone = .confirm
-    }
-
-    /// Real-time scheduler: sleeps off-main, then hops the dismissal to the
-    /// main actor. Cancellation makes the sleep throw before firing.
-    private static let defaultScheduler: NoticeScheduler = { delay, fire in
-        let task = Task {
-            do {
-                try await Task.sleep(for: delay)
-            } catch {
-                return
-            }
-            await MainActor.run { fire() }
-        }
-        return { task.cancel() }
     }
 }

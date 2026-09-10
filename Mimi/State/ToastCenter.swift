@@ -1,15 +1,6 @@
 import Foundation
 import Observation
 
-/// Schedules a toast's auto-dismissal; injectable so tests fire (and cancel)
-/// dismissals deterministically instead of sleeping. Returns a cancel
-/// closure — invoked when the same key re-fires (timer reset) or the toast
-/// is dismissed/evicted before the delay elapses.
-typealias ToastScheduler = @Sendable (
-    _ delay: Duration,
-    _ fire: @escaping @MainActor () -> Void
-) -> @Sendable () -> Void
-
 /// Toast keys wired by `AppModel` (one per error surface).
 enum ToastKey {
     static let translationRetry = "translation.retry"
@@ -79,13 +70,13 @@ final class ToastCenter {
     static let maxVisible = 3
 
     private let autoDismissAfter: Duration
-    private let scheduler: ToastScheduler
+    private let scheduler: AutoDismissScheduler
     /// Live auto-dismiss timers by toast key (cancel closures).
     private var timers: [String: @Sendable () -> Void] = [:]
 
     init(
         autoDismissAfter: Duration = ToastCenter.autoDismissDelay,
-        scheduler: @escaping ToastScheduler = ToastCenter.defaultScheduler
+        scheduler: @escaping AutoDismissScheduler = AutoDismiss.timerScheduler
     ) {
         self.autoDismissAfter = autoDismissAfter
         self.scheduler = scheduler
@@ -133,12 +124,11 @@ final class ToastCenter {
         toasts.removeAll()
     }
 
-    /// Arms the auto-dismiss timer for transient cards (`.yellowAuto`,
-    /// `.neutralAuto`). Dismissal is
-    /// keyed on the toast's `id`; the guard is defense-in-depth — the timer
-    /// is always cancelled before a replacement is scheduled, so a stale
-    /// firing should not occur, and with the replaced card's id preserved a
-    /// late fire would simply be a correct dismissal.
+    /// Arms the auto-dismiss timer for transient cards (`.yellowAuto`).
+    /// Dismissal is keyed on the toast's `id`; the guard is defense-in-depth
+    /// — the timer is always cancelled before a replacement is scheduled, so
+    /// a stale firing should not occur, and with the replaced card's id
+    /// preserved a late fire would simply be a correct dismissal.
     private func scheduleAutoDismiss(of toast: Toast) {
         timers.removeValue(forKey: toast.key)?()
         guard toast.style.autoDismisses else { return }
@@ -148,22 +138,7 @@ final class ToastCenter {
     }
 
     private func dismiss(id: UUID) {
-        guard let at = toasts.firstIndex(where: { $0.id == id }) else { return }
-        timers.removeValue(forKey: toasts[at].key)
-        toasts.remove(at: at)
-    }
-
-    /// Real-time scheduler: sleeps off-main, then hops the dismissal to the
-    /// main actor. Cancellation makes the sleep throw before firing.
-    private static let defaultScheduler: ToastScheduler = { delay, fire in
-        let task = Task {
-            do {
-                try await Task.sleep(for: delay)
-            } catch {
-                return
-            }
-            await MainActor.run { fire() }
-        }
-        return { task.cancel() }
+        guard let toast = toasts.first(where: { $0.id == id }) else { return }
+        dismiss(key: toast.key)
     }
 }
