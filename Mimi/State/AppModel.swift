@@ -54,10 +54,10 @@ final class AppModel {
 
     /// The popover's current anchor: the surface (transcript row or live
     /// strip) whose tap owns the app's single dictionary popover, with the
-    /// result shown and the paged entry index. Nil when no popover is up.
+    /// content shown and the paged entry index. Nil when no popover is up.
     var selectedLookup: SelectedLookup?
     /// The pinned sidebar DICTIONARY card content: the last lookup of the
-    /// session with its "also:" shorter hits and paged entry index.
+    /// session — found or not-found — with the paged entry index.
     /// Persists after the popover dismisses; cleared on session clear.
     /// Setter stays in `AppModelLookup.swift` (lookup lifecycle only).
     var pinnedLookup: PinnedLookup?

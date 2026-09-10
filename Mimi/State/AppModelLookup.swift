@@ -1,7 +1,35 @@
 import Foundation
 
+/// The content a finished lookup pins, shared by the popover selection and
+/// the sidebar card: a hit with its display result, the retained "also:"
+/// fallback hits, and the origin the display result came from (a join lead
+/// is labeled; a tap-promoted pill reads as the tapped word); or a
+/// not-found tap — the tapped word has no entry — with the deep split
+/// fallback hits demoted to "related:" suggestions.
+enum LookupContent: Equatable, Sendable {
+    case found(result: LookupResult, also: [LookupResult], origin: ExpansionOrigin)
+    case notFound(surface: String, related: [LookupResult])
+
+    /// The display result when found.
+    var displayResult: LookupResult? {
+        switch self {
+        case let .found(result, _, _): result
+        case .notFound: nil
+        }
+    }
+
+    /// The demoted fallback hits: "also:" for a found state, "related:"
+    /// for a not-found one.
+    var fallbackResults: [LookupResult] {
+        switch self {
+        case let .found(_, also, _): also
+        case let .notFound(_, related): related
+        }
+    }
+}
+
 /// The app's single dictionary popover anchor: which surface owns it, the
-/// result it shows, and the paged entry index (a candidate can match
+/// content it shows, and the paged entry index (a candidate can match
 /// several entries — the pager walks them surface-writing match first,
 /// then reading-match, then common-first, then `ent_seq`).
 struct SelectedLookup: Equatable, Identifiable, Sendable {
@@ -15,7 +43,7 @@ struct SelectedLookup: Equatable, Identifiable, Sendable {
         case liveStrip
     }
 
-    var result: LookupResult
+    var content: LookupContent
     var source: Source
     var entryIndex: Int
 
@@ -24,7 +52,11 @@ struct SelectedLookup: Equatable, Identifiable, Sendable {
     /// distinguishes results for debugging and tests, and stays stable
     /// across entry paging (a page turn updates contents, not identity).
     var id: String {
-        "\(source)-\(result.matched)"
+        let token: String = switch content {
+        case let .found(result, _, _): result.matched
+        case let .notFound(surface, _): "not-found:\(surface)"
+        }
+        return "\(source)-\(token)"
     }
 }
 
@@ -38,11 +70,10 @@ extension SelectedLookup {
 }
 
 /// The pinned sidebar DICTIONARY card content: the last lookup of the
-/// session plus its "also:" fallback hits (longest match first). Persists
-/// after the popover dismisses; cleared on session clear.
+/// session — hit or not-found — with the paged entry index. Persists after
+/// the popover dismisses; cleared on session clear.
 struct PinnedLookup: Equatable, Sendable {
-    var result: LookupResult
-    var also: [LookupResult]
+    var content: LookupContent
     var entryIndex: Int
 }
 
@@ -105,9 +136,9 @@ extension AppModel {
     }
 
     /// Runs the expansion + database queries off-main and applies the
-    /// outcome on main. Internal and fully parameterized so tests await it
-    /// directly over an injected fixture engine (`generation` nil skips the
-    /// staleness check). nil segments (empty tapped text) end at the
+    /// resolution on main. Internal and fully parameterized so tests await
+    /// it directly over an injected fixture engine (`generation` nil skips
+    /// the staleness check). nil segments (empty tapped text) end at the
     /// no-hit pill; empty segments (the annotator ran without its
     /// dictionary) surface the annotator-unavailable error instead.
     func runLookup(
@@ -115,7 +146,7 @@ extension AppModel {
         surface: String, source: SelectedLookup.Source, generation: Int? = nil
     ) async {
         let engine = jmDictLookup
-        let outcome: Result<LookupOutcome?, Error> = await Task.detached(
+        let resolution: Result<LookupResolution?, Error> = await Task.detached(
             priority: .userInitiated
         ) {
             guard let segments else { return .success(nil) }
@@ -133,34 +164,54 @@ extension AppModel {
         if let generation, generation != lookupGeneration {
             return
         }
-        finishLookup(outcome, surface: surface, source: source)
+        finishLookup(resolution, surface: surface, source: source)
     }
 
-    /// Applies a finished lookup: a hit selects + pins (popover anchor and
-    /// sidebar card update together), a miss posts the amber warning pill
-    /// (popover stays nil, pinned untouched), an infrastructure error posts
-    /// the `dictionaryLookup` toast (never the pill).
+    /// Applies a finished lookup: a found tap selects + pins (popover
+    /// anchor and sidebar card update together); a not-found tap with
+    /// related fallback hits pins the not-found state the same way — only
+    /// a tap nothing resolved (no hit at all) posts the amber warning pill;
+    /// an infrastructure error posts the `dictionaryLookup` toast (never
+    /// the pill).
     private func finishLookup(
-        _ outcome: Result<LookupOutcome?, Error>, surface: String,
+        _ resolution: Result<LookupResolution?, Error>, surface: String,
         source: SelectedLookup.Source
     ) {
-        switch outcome {
-        case .success(nil):
-            notices.post(
-                message: "No dictionary entry for \"\(surface)\"", tone: .warning
-            )
-        case let .success(.some(outcome)):
-            selectedLookup = SelectedLookup(
-                result: outcome.display, source: source, entryIndex: 0
-            )
-            pinnedLookup = PinnedLookup(
-                result: outcome.display, also: outcome.also, entryIndex: 0
-            )
+        switch resolution {
+        case let .success(resolved):
+            // A resolved tap pins when anything resolved at all — a found
+            // hit, or a not-found with related fallback hits; a bare miss
+            // (nothing resolved) posts the amber warning pill instead.
+            if let content = resolved.flatMap({ Self.lookupContent(for: $0, surface: surface) }) {
+                selectedLookup = SelectedLookup(content: content, source: source, entryIndex: 0)
+                pinnedLookup = PinnedLookup(content: content, entryIndex: 0)
+            } else {
+                notices.post(
+                    message: "No dictionary entry for \"\(surface)\"", tone: .warning
+                )
+            }
         case let .failure(error):
             toasts.post(
                 key: ToastKey.dictionaryLookup, style: .yellowAuto,
                 title: "Dictionary lookup failed", body: error.localizedDescription
             )
+        }
+    }
+
+    /// The content a resolved tap pins, or nil when nothing resolved at
+    /// all — a not-found resolution without related hits is a bare miss,
+    /// and posts the warning pill instead of pinning an empty card.
+    private static func lookupContent(
+        for resolved: LookupResolution, surface: String
+    ) -> LookupContent? {
+        switch resolved {
+        case let .found(outcome):
+            .found(
+                result: outcome.display, also: outcome.also,
+                origin: outcome.displayOrigin
+            )
+        case let .notFound(related):
+            related.isEmpty ? nil : .notFound(surface: surface, related: related)
         }
     }
 
@@ -176,32 +227,40 @@ extension AppModel {
         }
     }
 
-    // MARK: - "also:" pills
+    // MARK: - Fallback pills
 
-    /// Re-selects an "also:" candidate: the pinned card and the live
-    /// popover (when one is up) switch to the tapped result, and the pill
-    /// row recomputes from the retained expansion results relative to the
-    /// new selection — no new query runs.
+    /// Selects a fallback pill — an "also:" hit on a found card, or a
+    /// "related:" suggestion on a not-found one (its promotion): the
+    /// pinned card and the live popover (when one is up) switch to that
+    /// result as found, and the pill row recomputes from the retained
+    /// results relative to the new selection — no new query runs. The
+    /// promoted result carries the tapped-surface origin: an explicitly
+    /// chosen hit is never labeled a fallback lead.
     func selectAlsoPill(_ result: LookupResult) {
         guard let pinned = pinnedLookup else { return }
         let source = selectedLookup?.source
         let hadSelection = selectedLookup != nil
-        let others = ([pinned.result] + pinned.also).filter { $0 != result }
-        pinnedLookup = PinnedLookup(result: result, also: others, entryIndex: 0)
+        let others = ([pinned.content.displayResult] + pinned.content.fallbackResults)
+            .compactMap { $0 }
+            .filter { $0 != result }
+        let content = LookupContent.found(
+            result: result, also: others, origin: .tappedSurface
+        )
+        pinnedLookup = PinnedLookup(content: content, entryIndex: 0)
         if hadSelection, let source {
-            selectedLookup = SelectedLookup(
-                result: result, source: source, entryIndex: 0
-            )
+            selectedLookup = SelectedLookup(content: content, source: source, entryIndex: 0)
         }
     }
 
     // MARK: - Entry pager
 
     /// Turns the `◀ i/N ▶` pager to `index` (clamped): popover and pinned
-    /// card page together, both showing the selected entry.
+    /// card page together, both showing the selected entry. A not-found
+    /// pin has no entries; the pager is inert.
     func stepLookupEntry(to index: Int) {
-        guard let count = selectedLookup?.result.entries.count ?? pinnedLookup?.result.entries.count,
-              count > 0
+        guard let count = selectedLookup?.content.displayResult?.entries.count
+            ?? pinnedLookup?.content.displayResult?.entries.count,
+            count > 0
         else { return }
         let clamped = min(max(index, 0), count - 1)
         selectedLookup?.entryIndex = clamped
