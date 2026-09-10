@@ -28,7 +28,10 @@ enum ReadingAlignment {
 
     /// The aligned runs, or nil when `reading` doesn't walk `surface`: a
     /// surface kana missing from (or out of order in) the reading, leftover
-    /// reading kana, or a non-kana character in the reading.
+    /// reading kana, or a non-kana character in the reading. A kanji chunk
+    /// tries its anchor kana at each remaining-reading occurrence in order,
+    /// backtracking when a choice dead-ends (歌う/うたう — the first う
+    /// belongs to the kanji itself, so 歌 must consume うた).
     static func runs(surface: String, reading: String) -> [Run]? {
         let surfaceScalars = Array(
             surface.precomposedStringWithCanonicalMapping.unicodeScalars
@@ -37,59 +40,66 @@ enum ReadingAlignment {
             reading.precomposedStringWithCanonicalMapping.unicodeScalars
         )
         guard !surfaceScalars.isEmpty, !readingScalars.isEmpty else { return nil }
-
-        var chunks: [Chunk] = []
-        var readingIndex = 0
-
-        for (index, scalar) in surfaceScalars.enumerated() {
-            if KanaClassification.isKana(scalar) {
-                guard readingIndex < readingScalars.count,
-                      fold(readingScalars[readingIndex]) == fold(scalar)
-                else { return nil }
-                append(
-                    surface: scalar, kana: [readingScalars[readingIndex]],
-                    matched: true, into: &chunks
-                )
-                readingIndex += 1
-            } else if KanaClassification.isKanji(scalar) {
-                // The kanji consumes the reading up to the next surface kana
-                // anchor; a trailing kanji consumes everything left.
-                if let anchor = surfaceScalars[(index + 1)...].firstIndex(
-                    where: KanaClassification.isKana
-                ) {
-                    let target = fold(surfaceScalars[anchor])
-                    guard
-                        let match = readingScalars[readingIndex...].firstIndex(where: {
-                            fold($0) == target
-                        }),
-                        consumesKanaOnly(readingScalars[readingIndex ..< match])
-                    else { return nil }
-                    append(
-                        surface: scalar, kana: readingScalars[readingIndex ..< match],
-                        matched: false, into: &chunks
-                    )
-                    readingIndex = match
-                } else {
-                    guard consumesKanaOnly(readingScalars[readingIndex...]) else {
-                        return nil
-                    }
-                    append(
-                        surface: scalar, kana: readingScalars[readingIndex...],
-                        matched: false, into: &chunks
-                    )
-                    readingIndex = readingScalars.count
-                }
-            } else {
-                // Punctuation, Latin, or digits inside a read token: the
-                // kana reading can't walk through them.
-                return nil
-            }
+        guard let chunks = walk(surfaceScalars, from: 0, over: readingScalars[...]) else {
+            return nil
         }
-        guard readingIndex == readingScalars.count else { return nil }
         return chunks.map { Run(surface: $0.surface, kana: $0.kana) }
     }
 
     // MARK: - Internals
+
+    /// Walks `surface[index...]` against `reading` and returns the chunks
+    /// for the consumed span, or nil. Surface kana match the reading head
+    /// one-for-one; each kanji consumes the reading up to an occurrence of
+    /// the next surface kana (its anchor) — occurrences are tried left to
+    /// right so the remainder's walk can send the choice back here — and a
+    /// kanji with no kana after it consumes everything left.
+    private static func walk(
+        _ surface: [Unicode.Scalar], from index: Int,
+        over reading: ArraySlice<Unicode.Scalar>
+    ) -> [Chunk]? {
+        guard index < surface.count else { return reading.isEmpty ? [] : nil }
+        let scalar = surface[index]
+        if KanaClassification.isKana(scalar) {
+            guard let head = reading.first, fold(head) == fold(scalar),
+                  let rest = walk(surface, from: index + 1, over: reading.dropFirst())
+            else { return nil }
+            return prepend(surface: scalar, kana: [head], matched: true, onto: rest)
+        }
+        guard KanaClassification.isKanji(scalar) else {
+            // Punctuation, Latin, or digits inside a read token: the
+            // kana reading can't walk through them.
+            return nil
+        }
+        guard let anchor = surface[(index + 1)...].firstIndex(
+            where: KanaClassification.isKana
+        ) else {
+            // A kanji with no kana after it consumes the whole remaining
+            // reading; the trailing surface must be kanji all the way down
+            // (学校) — leftover reading kana or a trailing non-kanji scalar
+            // (学校。, AB) leaves the walk.
+            guard surface[index...].allSatisfy(KanaClassification.isKanji),
+                  consumesKanaOnly(reading)
+            else { return nil }
+            return [Chunk(
+                surface: String(String.UnicodeScalarView(surface[index...])),
+                kana: String(String.UnicodeScalarView(reading)),
+                matched: false
+            )]
+        }
+        let target = fold(surface[anchor])
+        var searchStart = reading.startIndex
+        while let match = reading[searchStart...].firstIndex(where: { fold($0) == target }) {
+            let consumed = reading[reading.startIndex ..< match]
+            if consumesKanaOnly(consumed),
+               let rest = walk(surface, from: index + 1, over: reading[match...])
+            {
+                return prepend(surface: scalar, kana: consumed, matched: false, onto: rest)
+            }
+            searchStart = reading.index(after: match)
+        }
+        return nil
+    }
 
     /// A run under construction; `matched` chunks (surface kana mapping to
     /// their own kana) never merge with `consumed` chunks (kanji taking the
@@ -100,20 +110,28 @@ enum ReadingAlignment {
         let matched: Bool
     }
 
-    private static func append(
+    /// Fuses the chunk under construction into the walk result built for
+    /// the remainder: the recursion completes right-to-left, so an incoming
+    /// same-kind chunk merges into `rest`'s head (a `matched` chunk —
+    /// surface kana mapping to their own kana — never merges with a
+    /// `consumed` chunk — kanji taking the reading between anchors).
+    private static func prepend(
         surface: Unicode.Scalar, kana: some Sequence<Unicode.Scalar>,
-        matched: Bool, into chunks: inout [Chunk]
-    ) {
+        matched: Bool, onto rest: [Chunk]
+    ) -> [Chunk] {
         let kanaString = String(String.UnicodeScalarView(kana))
-        if var last = chunks.last, last.matched == matched {
-            last.surface.append(String(surface))
-            last.kana += kanaString
-            chunks[chunks.count - 1] = last
+        var chunks = rest
+        if var first = chunks.first, first.matched == matched {
+            first.surface = String(surface) + first.surface
+            first.kana = kanaString + first.kana
+            chunks[0] = first
         } else {
-            chunks.append(
-                Chunk(surface: String(surface), kana: kanaString, matched: matched)
+            chunks.insert(
+                Chunk(surface: String(surface), kana: kanaString, matched: matched),
+                at: 0
             )
         }
+        return chunks
     }
 
     private static func consumesKanaOnly<C: Collection>(

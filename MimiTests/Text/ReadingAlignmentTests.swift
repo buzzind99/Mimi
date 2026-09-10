@@ -76,6 +76,45 @@ struct ReadingAlignmentTests {
         ])
     }
 
+    @Test(
+        "a kanji anchor dead-ending on its first reading occurrence retries later ones",
+        arguments: [
+            ("歌う", "うたう", [
+                ReadingAlignment.Run(surface: "歌", kana: "うた"),
+                ReadingAlignment.Run(surface: "う", kana: "う")
+            ]),
+            ("可愛い", "かわいい", [
+                ReadingAlignment.Run(surface: "可愛", kana: "かわい"),
+                ReadingAlignment.Run(surface: "い", kana: "い")
+            ]),
+            ("聞き", "きき", [
+                ReadingAlignment.Run(surface: "聞", kana: "き"),
+                ReadingAlignment.Run(surface: "き", kana: "き")
+            ]),
+            ("最も", "もっとも", [
+                ReadingAlignment.Run(surface: "最", kana: "もっと"),
+                ReadingAlignment.Run(surface: "も", kana: "も")
+            ]),
+            ("短かっ", "みじかかっ", [
+                ReadingAlignment.Run(surface: "短", kana: "みじか"),
+                ReadingAlignment.Run(surface: "かっ", kana: "かっ")
+            ]),
+            ("刺さ", "ささ", [
+                ReadingAlignment.Run(surface: "刺", kana: "さ"),
+                ReadingAlignment.Run(surface: "さ", kana: "さ")
+            ]),
+            ("寒サ", "さむさ", [
+                ReadingAlignment.Run(surface: "寒", kana: "さむ"),
+                ReadingAlignment.Run(surface: "サ", kana: "さ")
+            ])
+        ]
+    )
+    func anchorRetriesLaterOccurrences(
+        surface: String, reading: String, expected: [ReadingAlignment.Run]
+    ) {
+        #expect(runs(surface: surface, reading: reading) == expected)
+    }
+
     // MARK: non-walking readings
 
     @Test("dictionary-form readings that overshoot the surface fail (見た/みる)")
