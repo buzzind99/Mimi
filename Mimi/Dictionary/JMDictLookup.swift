@@ -216,30 +216,33 @@ final class JMDictLookup: @unchecked Sendable {
                 // kanji writing); the furigana names the reading, and
                 // commonness and ent_seq break the remaining ties.
                 let surface = ReadingAlignment.foldedKana(candidate.text)
-                func matchesSurface(_ entry: JMDictEntry) -> Bool {
-                    guard let written = entry.keb ?? entry.reb else { return false }
-                    return ReadingAlignment.foldedKana(written) == surface
-                }
-                let expected = candidate.reading.map { ReadingAlignment.foldedKana($0) }
-                func matchesReading(_ entry: JMDictEntry) -> Bool {
-                    guard let expected, let reb = entry.reb else { return false }
-                    return ReadingAlignment.foldedKana(reb) == expected
-                }
-                entries.sort {
-                    if matchesSurface($0) != matchesSurface($1) {
-                        return matchesSurface($0)
+                let expected = candidate.reading.map(ReadingAlignment.foldedKana)
+                let ranked = entries.map { entry -> RankedEntry in
+                    let matchesSurface = (entry.keb ?? entry.reb).map {
+                        ReadingAlignment.foldedKana($0) == surface
+                    } ?? false
+                    let matchesReading: Bool
+                    if let expected, let reb = entry.reb {
+                        matchesReading = ReadingAlignment.foldedKana(reb) == expected
+                    } else {
+                        matchesReading = false
                     }
-                    let lhsMatch = matchesReading($0)
-                    let rhsMatch = matchesReading($1)
-                    if lhsMatch != rhsMatch {
-                        return lhsMatch
+                    return RankedEntry(
+                        surface: matchesSurface, reading: matchesReading, entry: entry
+                    )
+                }.sorted {
+                    if $0.surface != $1.surface {
+                        return $0.surface
                     }
-                    if $0.common != $1.common {
-                        return $0.common
+                    if $0.reading != $1.reading {
+                        return $0.reading
                     }
-                    return $0.entSeq < $1.entSeq
+                    if $0.entry.common != $1.entry.common {
+                        return $0.entry.common
+                    }
+                    return $0.entry.entSeq < $1.entry.entSeq
                 }
-                return LookupResult(matched: candidate.text, entries: entries)
+                return LookupResult(matched: candidate.text, entries: ranked.map(\.entry))
             }
         } catch let error as SQLiteDatabase.Error {
             throw JMDictLookupError(error)
@@ -252,6 +255,12 @@ final class JMDictLookup: @unchecked Sendable {
         let hatsuon: String?
         let accPatts: String?
         let zoPatts: String?
+    }
+
+    private struct RankedEntry {
+        let surface: Bool
+        let reading: Bool
+        let entry: JMDictEntry
     }
 
     private func headwordRows(matching text: String, db: SQLiteDatabase) throws -> [HeadwordRow] {
@@ -284,27 +293,7 @@ final class JMDictLookup: @unchecked Sendable {
         let reb = entryStatement.optionalText(1)
         let common = entryStatement.bool(2)
 
-        let senseStatement = try db.statement(Self.senseSQL)
-        senseStatement.bind(entSeq, at: 1)
-        var senses: [JMDictSense] = []
-        while try senseStatement.step() {
-            let pos = senseStatement.optionalText(0)
-            let glossText = senseStatement.optionalText(1) ?? ""
-            let misc = senseStatement.optionalText(2)
-            let restrictedKanji = Self.restrictedWritings(senseStatement.optionalText(3))
-            let restrictedKana = Self.restrictedWritings(senseStatement.optionalText(4))
-            let restricted = candidate.kind == .kanji ? restrictedKanji : restrictedKana
-            if let restricted, !restricted.contains(candidate.text) {
-                continue
-            }
-            senses.append(JMDictSense(
-                pos: pos,
-                glosses: glossText.isEmpty ? [] : glossText.components(separatedBy: "; "),
-                misc: misc,
-                restrictedKanji: restrictedKanji,
-                restrictedKana: restrictedKana
-            ))
-        }
+        let senses = try self.senses(entSeq: entSeq, candidate: candidate, db: db)
         if senses.isEmpty {
             return nil
         }
@@ -319,6 +308,33 @@ final class JMDictLookup: @unchecked Sendable {
             zoPatts: headword.zoPatts,
             senses: senses
         )
+    }
+
+    private func senses(
+        entSeq: Int, candidate: LookupCandidate, db: SQLiteDatabase
+    ) throws -> [JMDictSense] {
+        let statement = try db.statement(Self.senseSQL)
+        statement.bind(entSeq, at: 1)
+        var senses: [JMDictSense] = []
+        while try statement.step() {
+            let pos = statement.optionalText(0)
+            let glossText = statement.optionalText(1) ?? ""
+            let misc = statement.optionalText(2)
+            let restrictedKanji = Self.restrictedWritings(statement.optionalText(3))
+            let restrictedKana = Self.restrictedWritings(statement.optionalText(4))
+            let restricted = candidate.kind == .kanji ? restrictedKanji : restrictedKana
+            if let restricted, !restricted.contains(candidate.text) {
+                continue
+            }
+            senses.append(JMDictSense(
+                pos: pos,
+                glosses: glossText.isEmpty ? [] : glossText.components(separatedBy: "; "),
+                misc: misc,
+                restrictedKanji: restrictedKanji,
+                restrictedKana: restrictedKana
+            ))
+        }
+        return senses
     }
 
     // MARK: - Database lifecycle (lock-held)
