@@ -57,7 +57,7 @@ final class ReadingAnnotator: @unchecked Sendable {
         let fallbackCache = ReadingFallbackCache()
         return { surface in
             switch fallbackCache.cachedReading(for: surface) {
-            case .hit(let reading): return reading
+            case let .hit(reading): return reading
             case .miss: return nil
             case .notCached: break
             }
@@ -323,18 +323,18 @@ final class ReadingAnnotator: @unchecked Sendable {
 
     // MARK: - Overrides
 
+    private enum CachedReading {
+        case notCached
+        case miss
+        case hit(String)
+    }
+
     /// Per-surface memo in front of the JMDict reading fallback, sized for
     /// the unknown-kanji vocabulary of a session. `NSCache` is internally
     /// thread-safe but not marked `Sendable`, so it hides behind this box.
     /// Misses are cached as a distinct outcome — names and rare kanji miss
     /// most often and would otherwise re-query every sentence.
     private final class ReadingFallbackCache: @unchecked Sendable {
-        enum CachedReading {
-            case notCached
-            case miss
-            case hit(String)
-        }
-
         private let cache = NSCache<NSString, NSString>()
 
         init() {
