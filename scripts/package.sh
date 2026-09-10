@@ -4,8 +4,9 @@
 #   build/pkg/Mimi.dmg   (~40–60 MB; IPADIC model + JMDict lookup DB bundled,
 #                        ASR model downloaded on first launch)
 #
-# Signed with the local self-signed "Mimi Dev" certificate so TCC
-# permission grants (Screen Recording) persist across rebuilds.
+# Signed with the local self-signed "Mimi Dev" certificate (when present) so
+# TCC permission grants (Screen Recording) persist across rebuilds; falls
+# back to ad-hoc signing otherwise, like scripts/bootstrap.sh.
 # Launch locally after "Open Anyway" / xattr -cr.
 # Usage: scripts/package.sh
 
@@ -13,7 +14,16 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${REPO_ROOT}/build/pkg"
-SIGN_IDENTITY="${SIGN_IDENTITY:-Mimi Dev}"
+PREFERRED_IDENTITY="Mimi Dev"
+if [[ -n "${SIGN_IDENTITY:-}" ]]; then
+  : # explicit override wins
+elif security find-identity -v -p codesigning 2>/dev/null | grep -qF "\"${PREFERRED_IDENTITY}\""; then
+  SIGN_IDENTITY="${PREFERRED_IDENTITY}"
+else
+  SIGN_IDENTITY="-"
+  echo "==> No \"${PREFERRED_IDENTITY}\" certificate found — signing the DMG ad-hoc" >&2
+  echo "    (Screen Recording grants will not persist across rebuilds)" >&2
+fi
 
 cd "${REPO_ROOT}"
 

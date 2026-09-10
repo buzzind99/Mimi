@@ -11,11 +11,18 @@ settings:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "15.0"
     CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "Mimi Dev"
     DEVELOPMENT_TEAM: ""
     GENERATE_INFOPLIST_FILE: YES
     CURRENT_PROJECT_VERSION: 1
     MARKETING_VERSION: "1.0"
+
+# Signing identity comes from local/signing.xcconfig (gitignored), written by
+# scripts/bootstrap.sh: "Mimi Dev" when that certificate exists, ad-hoc (-)
+# otherwise. project.yml deliberately does not set CODE_SIGN_IDENTITY —
+# explicit build settings would override the xcconfig.
+configFiles:
+  Debug: local/signing.xcconfig
+  Release: local/signing.xcconfig
 
 targets:
   Mimi:
