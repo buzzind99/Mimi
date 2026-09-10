@@ -79,12 +79,25 @@ struct LookupResult: Equatable, Sendable {
     let entries: [JMDictEntry]
 }
 
-/// Ordered-candidate outcome: the first candidate that hit is the display
-/// result; later candidates whose entries add something new are retained as
-/// the "also:" hits, longest match first (ties keep candidate order).
+/// Ordered-candidate outcome: the first hit leads the display result — its
+/// `displayOrigin` names the candidate role that produced it (a join lead
+/// carries `.join` so the UI can label the compound match); later
+/// candidates whose entries add something new are retained as the "also:"
+/// hits, longest match first (ties keep candidate order).
 struct LookupOutcome: Equatable, Sendable {
     let display: LookupResult
+    let displayOrigin: ExpansionOrigin
     let also: [LookupResult]
+}
+
+/// A tap's resolution: found — the tapped word's own surface or lemma, or
+/// the join it leads, matched an entry — or not-found, where the tapped
+/// word itself has no entry and only the deep kanji-split fallbacks hit.
+/// A not-found resolution never promotes a split to the display result;
+/// its hits travel as `related`, which the UI demotes to suggestions.
+enum LookupResolution: Equatable, Sendable {
+    case found(LookupOutcome)
+    case notFound(related: [LookupResult])
 }
 
 /// Lookup infrastructure failures. Deliberately typed throws (not the
@@ -186,42 +199,79 @@ final class JMDictLookup: @unchecked Sendable {
         try lookup([candidate])?.display
     }
 
-    /// Looks up candidates in order (per tap: the tapped segment's surface
-    /// and lemma, the forward-expansion joins longest-first, then the kanji
-    /// substring splits — see `JMDictExpansion.candidates`). The first
-    /// candidate that hit is the display result; later candidates whose
-    /// entries add something new are retained as "also:" results, sorted
-    /// longest match first (ties keep candidate order) so the most specific
-    /// fallback leads the pager and the capped "also:" pills — a candidate
-    /// that only re-hits already-returned entries is redundant and skipped.
-    /// Every candidate missing → nil; any infrastructure error aborts the
-    /// whole lookup as a throw (never downgraded to a miss).
+    /// Looks up candidates in order; the first hit is the display result and
+    /// later hits adding entries are kept as "also". The expansion-aware
+    /// typed variant (`lookup(_ candidates: [ExpansionCandidate])`)
+    /// additionally classifies a split-only tap as not-found; this untyped
+    /// entry treats every candidate as the tapped word itself, so its
+    /// outcome's `displayOrigin` is always `.tappedSurface`.
     func lookup(_ candidates: [LookupCandidate]) throws -> LookupOutcome? {
-        guard !candidates.isEmpty else { return nil }
+        guard case let .found(outcome) = try lookup(candidates.map { ExpansionCandidate(
+            candidate: $0, origin: .tappedSurface
+        ) }) else { return nil }
+        return outcome
+    }
+
+    /// Resolves expansion candidates in order, classifying by origin: the
+    /// tapped word's surface or lemma — or the join it leads — makes the
+    /// found outcome (first hit displays; later hits adding new entries are
+    /// retained as "also:", longest match first with ties keeping candidate
+    /// order, and a candidate that only re-hits already-returned entries is
+    /// redundant and skipped). A split can never lead: a tap whose first
+    /// hit is a split resolves not-found, every split hit demoted to the
+    /// related list (same redundancy rule — a hit only re-resolving known
+    /// entries is skipped), longest match first. Every candidate missing →
+    /// `.notFound(related: [])`; any infrastructure error aborts the whole
+    /// lookup as a throw (never downgraded to a miss).
+    func lookup(_ candidates: [ExpansionCandidate]) throws -> LookupResolution {
         var display: LookupResult?
+        var displayOrigin: ExpansionOrigin?
         var also: [LookupResult] = []
+        var related: [LookupResult] = []
         var seenEntryIDs: Set<Int> = []
-        for candidate in candidates {
-            guard let result = try lookupResult(for: candidate) else { continue }
+        for expansion in candidates {
+            guard let result = try lookupResult(for: expansion.candidate) else { continue }
             let entryIDs = Set(result.entries.map(\.entSeq))
-            if display == nil {
+            if display == nil, expansion.origin == .split {
+                // Same redundancy rule as "also": a hit whose every entry
+                // was already resolved is a duplicate pill, not new
+                // information.
+                if !entryIDs.isSubset(of: seenEntryIDs) {
+                    related.append(result)
+                }
+            } else if display == nil {
+                // Expansion order guarantees every non-split candidate
+                // precedes the splits, so this branch can never strand
+                // collected related hits (they would be dropped by the
+                // found return below).
+                assert(related.isEmpty, "non-split hit after split hits: \(expansion)")
                 display = result
+                displayOrigin = expansion.origin
             } else if !entryIDs.isSubset(of: seenEntryIDs) {
                 also.append(result)
             }
             seenEntryIDs.formUnion(entryIDs)
         }
-        guard let display else { return nil }
-        // Longest match first, explicitly stable: candidates arrive in
-        // expansion order (longest-first joins, then splits), so equal
-        // lengths keep that order.
-        let ordered = also.enumerated().sorted { lhs, rhs in
+        if let display, let displayOrigin {
+            return .found(LookupOutcome(
+                display: display, displayOrigin: displayOrigin,
+                also: Self.longestFirst(also)
+            ))
+        }
+        return .notFound(related: Self.longestFirst(related))
+    }
+
+    /// Longest match first, explicitly stable: candidates arrive in
+    /// expansion order (longest-first joins, then splits), so equal lengths
+    /// keep that order.
+    private static func longestFirst(_ results: [LookupResult]) -> [LookupResult] {
+        results.enumerated().sorted { lhs, rhs in
             if lhs.element.matched.count != rhs.element.matched.count {
                 return lhs.element.matched.count > rhs.element.matched.count
             }
             return lhs.offset < rhs.offset
         }
-        return LookupOutcome(display: display, also: ordered.map(\.element))
+        .map(\.element)
     }
 
     /// Releases the database handle. The instance stays closed permanently —

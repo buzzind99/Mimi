@@ -22,6 +22,29 @@ struct LookupSegment: Equatable, Sendable {
     }
 }
 
+/// The role a candidate played in the tap's expansion — the resolution
+/// classifies the outcome by it: a join hit still leads the card (labeled
+/// as a joined match, since the compound isn't the tapped word itself),
+/// while a split hit never leads — split-only resolutions come back
+/// not-found with their hits demoted to related suggestions.
+enum ExpansionOrigin: Equatable, Sendable {
+    /// The tapped segment's own surface.
+    case tappedSurface
+    /// The tapped segment's dictionary base form.
+    case tappedLemma
+    /// The tapped segment joined with forward neighbors.
+    case join
+    /// A kanji substring of the tapped surface, or a boundary-crossing
+    /// substring of the joined text — the deep fallback.
+    case split
+}
+
+/// One expansion candidate with the role it played for the tap.
+struct ExpansionCandidate: Equatable, Sendable {
+    let candidate: LookupCandidate
+    let origin: ExpansionOrigin
+}
+
 /// Forward expansion for a dictionary tap: from the tapped segment it walks
 /// the same segments array the tap rendered from, joining up to `maxTokens`
 /// consecutive word segments into lookup-candidate fallbacks (お+土産 →
@@ -71,26 +94,32 @@ enum JMDictExpansion {
     /// (`ReadingAnnotator.particleRomaji`): expansion never bridges them.
     private static let particleOverrides: Set<String> = ["は", "へ", "を"]
 
-    /// Candidates for a tap on `index`: the tapped segment's surface first,
-    /// then its lemma (conjugated forms fall back to their base form), then
-    /// the validated forward joins longest-first, then the tapped surface's
-    /// kanji-substring splits, then the joined expansion text's splits —
-    /// the boundary-crossing substrings. Truncated to `maxCandidates`,
-    /// tapped candidates first, so the word the user tapped always leads
-    /// the display result and a tap costs at most `maxCandidates` indexed
-    /// queries.
+    /// Candidates for a tap on `index`, each tagged with the role it played:
+    /// the tapped segment's surface first, then its lemma (conjugated forms
+    /// fall back to their base form), then the validated forward joins
+    /// longest-first, then the tapped surface's kanji-substring splits, then
+    /// the joined expansion text's splits — the boundary-crossing
+    /// substrings. Truncated to `maxCandidates`, tapped candidates first, so
+    /// the word the user tapped always leads the display result and a tap
+    /// costs at most `maxCandidates` indexed queries.
     static func candidates(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
-    ) -> [LookupCandidate] {
+    ) -> [ExpansionCandidate] {
         guard segments.indices.contains(index) else { return [] }
 
-        var candidates: [LookupCandidate] = []
+        var candidates: [ExpansionCandidate] = []
         let tapped = segments[index]
         if !tapped.surface.isEmpty {
-            candidates.append(LookupCandidate(text: tapped.surface, reading: tapped.reading))
+            candidates.append(ExpansionCandidate(
+                candidate: LookupCandidate(text: tapped.surface, reading: tapped.reading),
+                origin: .tappedSurface
+            ))
         }
         if let lemma = tapped.lemma, !lemma.isEmpty, lemma != tapped.surface {
-            candidates.append(LookupCandidate(text: lemma, reading: tapped.reading))
+            candidates.append(ExpansionCandidate(
+                candidate: LookupCandidate(text: lemma, reading: tapped.reading),
+                origin: .tappedLemma
+            ))
         }
         let members = joinedSegments(
             segments: segments, tappedAt: index, sentenceText: sentenceText
@@ -98,7 +127,12 @@ enum JMDictExpansion {
         for count in stride(from: min(maxTokens, members.count), to: 1, by: -1) {
             let text = members[..<count].map(\.surface).joined()
             if !text.isEmpty {
-                candidates.append(LookupCandidate(text: text, reading: joinedReading(members[..<count])))
+                candidates.append(ExpansionCandidate(
+                    candidate: LookupCandidate(
+                        text: text, reading: joinedReading(members[..<count])
+                    ),
+                    origin: .join
+                ))
             }
         }
         // Split candidates trail the joins, deduplicated against everything
@@ -110,17 +144,21 @@ enum JMDictExpansion {
         // the first pass, and ones wholly inside a neighbor stay one tap
         // away on that neighbor. The deep fallback never evicts the tapped
         // surface's own splits.
-        var emitted = Set(candidates.map(\.text))
+        var emitted = Set(candidates.map(\.candidate.text))
         let tappedSplits = splitCandidates(for: tapped.surface).filter {
             !emitted.contains($0.text)
         }
-        candidates.append(contentsOf: tappedSplits)
+        candidates.append(contentsOf: tappedSplits.map {
+            ExpansionCandidate(candidate: $0, origin: .split)
+        })
         emitted.formUnion(tappedSplits.map(\.text))
         let crossingSplits = splitCandidates(
             for: members.map(\.surface).joined(),
             crossing: tapped.surface.unicodeScalars.count
         ).filter { !emitted.contains($0.text) }
-        candidates.append(contentsOf: crossingSplits)
+        candidates.append(contentsOf: crossingSplits.map {
+            ExpansionCandidate(candidate: $0, origin: .split)
+        })
         return Array(candidates.prefix(maxCandidates))
     }
 
@@ -258,18 +296,20 @@ enum JMDictExpansion {
 // MARK: - Engine entry point
 
 extension JMDictLookup {
-    /// Looks up a tap with forward expansion: builds the candidates from the
-    /// rendered segments (`JMDictExpansion.candidates`) and resolves them in
-    /// order. The first candidate with a hit is the display result — the
-    /// tapped segment's own candidates lead, so the tapped word displays and
-    /// longer joins and kanji splits that also hit are retained as "also:"
-    /// results. Every candidate missing → nil; an infrastructure error on
-    /// any query aborts the tap as a throw — never a miss.
+    /// Looks up a tap with forward expansion: builds the expansion
+    /// candidates from the rendered segments (`JMDictExpansion.candidates`)
+    /// and resolves them in order. The tapped word's own surface or lemma
+    /// hit leads the found outcome; a join hit also leads, its outcome
+    /// carrying the join origin so the UI can label the compound match; a
+    /// tap whose only hits are kanji splits resolves not-found with the
+    /// split hits demoted to the related list — never displayed as the
+    /// tapped word. An infrastructure error on any query aborts the tap as
+    /// a throw — never a miss.
     func lookup(
-        segments: [LookupSegment], tappedAt index: Int, sentenceText: String
-    ) throws -> LookupOutcome? {
+        segments: [LookupSegment], tappedAt: Int, sentenceText: String
+    ) throws -> LookupResolution {
         try lookup(JMDictExpansion.candidates(
-            segments: segments, tappedAt: index, sentenceText: sentenceText
+            segments: segments, tappedAt: tappedAt, sentenceText: sentenceText
         ))
     }
 }
