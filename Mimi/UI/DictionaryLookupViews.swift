@@ -450,6 +450,7 @@ struct DictionaryBadgeView: View {
     var body: some View {
         Text(text)
             .font(.system(size: compact ? 9 : 10, weight: .semibold))
+            .fixedSize()
             .padding(.horizontal, compact ? 5 : 7)
             .padding(.vertical, compact ? 2 : 3)
             .background(
