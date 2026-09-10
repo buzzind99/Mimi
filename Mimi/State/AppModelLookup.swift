@@ -26,6 +26,12 @@ enum LookupContent: Equatable, Sendable {
         case let .notFound(_, related): related
         }
     }
+
+    /// The display result followed by the demoted fallback hits — the full
+    /// result set a fallback-pill re-selection filters against.
+    var allResults: [LookupResult] {
+        ([displayResult] + fallbackResults).compactMap { $0 }
+    }
 }
 
 /// The app's single dictionary popover anchor: which surface owns it, the
@@ -183,8 +189,7 @@ extension AppModel {
             // hit, or a not-found with related fallback hits; a bare miss
             // (nothing resolved) posts the amber warning pill instead.
             if let content = resolved.flatMap({ Self.lookupContent(for: $0, surface: surface) }) {
-                selectedLookup = SelectedLookup(content: content, source: source, entryIndex: 0)
-                pinnedLookup = PinnedLookup(content: content, entryIndex: 0)
+                presentLookup(content: content, source: source)
             } else {
                 notices.post(
                     message: "No dictionary entry for \"\(surface)\"", tone: .warning
@@ -215,6 +220,16 @@ extension AppModel {
         }
     }
 
+    /// Presents a resolved lookup: pins the sidebar card and, when a source
+    /// is supplied (a popover is up), anchors the popover to the same content.
+    /// Both start at entry 0, keeping the two surfaces from drifting apart.
+    private func presentLookup(content: LookupContent, source: SelectedLookup.Source?) {
+        pinnedLookup = PinnedLookup(content: content, entryIndex: 0)
+        if let source {
+            selectedLookup = SelectedLookup(content: content, source: source, entryIndex: 0)
+        }
+    }
+
     // MARK: - Popover lifecycle
 
     /// The popover's set-nil path (dismiss, Escape): clears the selection
@@ -239,17 +254,11 @@ extension AppModel {
     func selectAlsoPill(_ result: LookupResult) {
         guard let pinned = pinnedLookup else { return }
         let source = selectedLookup?.source
-        let hadSelection = selectedLookup != nil
-        let others = ([pinned.content.displayResult] + pinned.content.fallbackResults)
-            .compactMap { $0 }
-            .filter { $0 != result }
+        let others = pinned.content.allResults.filter { $0 != result }
         let content = LookupContent.found(
             result: result, also: others, origin: .tappedSurface
         )
-        pinnedLookup = PinnedLookup(content: content, entryIndex: 0)
-        if hadSelection, let source {
-            selectedLookup = SelectedLookup(content: content, source: source, entryIndex: 0)
-        }
+        presentLookup(content: content, source: source)
     }
 
     // MARK: - Entry pager
@@ -258,9 +267,8 @@ extension AppModel {
     /// card page together, both showing the selected entry. A not-found
     /// pin has no entries; the pager is inert.
     func stepLookupEntry(to index: Int) {
-        guard let count = selectedLookup?.content.displayResult?.entries.count
-            ?? pinnedLookup?.content.displayResult?.entries.count,
-            count > 0
+        let content = selectedLookup?.content ?? pinnedLookup?.content
+        guard let count = content?.displayResult?.entries.count, count > 0
         else { return }
         let clamped = min(max(index, 0), count - 1)
         selectedLookup?.entryIndex = clamped
