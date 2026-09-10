@@ -13,8 +13,16 @@ final class AudioLevelState {
     /// Full-scale floor: RMS at or below this level maps to 0.
     static let floorDB: Double = -60
 
+    /// Ring backing store: fixed-size, written at `writeIndex`. `levels`
+    /// reads it in ring order so the meter always sees oldest → newest.
+    private var storage: [Double] = Array(repeating: 0, count: AudioLevelState.slotCount)
+    /// Next slot to overwrite; wraps at `slotCount`.
+    private var writeIndex = 0
+
     /// Rolling ring, oldest first (index 0) … newest last. Normalized 0…1.
-    private(set) var levels: [Double] = Array(repeating: 0, count: AudioLevelState.slotCount)
+    var levels: [Double] {
+        Array(storage[writeIndex...]) + Array(storage[..<writeIndex])
+    }
 
     /// Latest chunk RMS in dBFS (−∞ before the first chunk and for true
     /// silence, i.e. zero-amplitude chunks).
@@ -26,14 +34,15 @@ final class AudioLevelState {
         let db = rms > 0 ? 20 * log10(Double(rms)) : -.infinity
         dBFS = db
         let normalized = min(max((db - Self.floorDB) / -Self.floorDB, 0), 1)
-        levels.removeFirst()
-        levels.append(normalized)
+        storage[writeIndex] = normalized
+        writeIndex = (writeIndex + 1) % Self.slotCount
     }
 
     /// Clears the ring (session begin/stop): the meter flatlines until the
     /// next chunk arrives.
     func reset() {
-        levels = Array(repeating: 0, count: Self.slotCount)
+        storage = Array(repeating: 0, count: Self.slotCount)
+        writeIndex = 0
         dBFS = -.infinity
     }
 
