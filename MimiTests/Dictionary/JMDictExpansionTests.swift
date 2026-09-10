@@ -41,9 +41,12 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "食べました"
         )
 
-        // The tapped surface leads, the lemma follows as the miss fallback,
-        // the joins come longest-first, and the kanji split trails them all.
-        #expect(candidates.map(\.candidate.text) == ["食べ", "食べる", "食べました", "食べま", "食"])
+        // The tapped surface leads, the lemma follows as the miss fallback
+        // (the potential-shaped tail adds the unwrapped 食ぶ), the joins
+        // come longest-first, and the kanji split trails them all.
+        #expect(candidates.map(\.candidate.text) == [
+            "食べ", "食べる", "食ぶ", "食べました", "食べま", "食"
+        ])
     }
 
     @Test("a surface that is itself a headword leads its lemma (な tap shows な, not だ)")
@@ -344,11 +347,12 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "食べました"
         )
 
-        // The surface leads, the lemma follows, the joins longest-first,
-        // the kanji splits trail — each tagged with its role so the
-        // resolution can demote split-only taps to not-found.
+        // The surface leads, the lemma follows with its potential unwrap
+        // behind it, the joins longest-first, the kanji splits trail —
+        // each tagged with its role so the resolution can demote
+        // split-only taps to not-found.
         #expect(candidates.map(\.origin) == [
-            .tappedSurface, .tappedLemma, .join, .join, .split
+            .tappedSurface, .tappedLemma, .tappedLemma, .join, .join, .split
         ])
     }
 }
@@ -435,6 +439,19 @@ final class JMDictExpansionTests {
             ],
             tappedAt: 0,
             sentenceText: "食べました"
+        ))
+
+        #expect(outcome.display.matched == "食べる")
+        #expect(outcome.displayOrigin == .tappedLemma)
+        #expect(outcome.display.entries.map(\.entSeq) == [1_358_280])
+    }
+
+    @Test("a potential-form lemma resolves through the unwrapped source verb")
+    func potentialLemmaResolutionHit() throws {
+        let outcome = try foundOutcome(engine.lookup(
+            segments: [LookupSegment(surface: "食べられ", lemma: "食べられる")],
+            tappedAt: 0,
+            sentenceText: "食べられ"
         ))
 
         #expect(outcome.display.matched == "食べる")

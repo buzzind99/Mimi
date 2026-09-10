@@ -94,14 +94,46 @@ enum JMDictExpansion {
     /// (`ReadingAnnotator.particleRomaji`): expansion never bridges them.
     private static let particleOverrides: Set<String> = ["は", "へ", "を"]
 
+    /// The え-row kana a potential tail ends on, mapped onto its う-row
+    /// counterpart (作れる → 作, 書ける → く).
+    private static let potentialTailShift: [Character: Character] = [
+        "え": "う", "け": "く", "げ": "ぐ", "せ": "す", "ぜ": "ず",
+        "て": "つ", "で": "づ", "ね": "ぬ", "へ": "ふ", "べ": "ぶ",
+        "ぺ": "ぷ", "め": "む", "れ": "る"
+    ]
+
+    /// The dictionary form a potential-form lemma unwraps to, or nil when
+    /// the lemma doesn't shape like one. IPADIC lexicalizes potential forms
+    /// as standalone verbs whose base is the potential itself (作れる), and
+    /// JMDict headwords only carry the source verb (作る) — without this
+    /// rewrite the lemma candidate misses and the tap falls through to the
+    /// kanji splits. A られる tail unwraps plain (作られる → 作る, 食べられる →
+    /// 食べる); otherwise the え-row tail kana shifts onto its う-row
+    /// counterpart (作れる → 作る, 書ける → 書く). A wrong guess is inert — it
+    /// merely misses the headword index, and any lemma that exists still
+    /// hits on its own candidate first.
+    static func dictionaryForm(ofPotential lemma: String) -> String? {
+        let characters = Array(lemma)
+        if characters.count > 3, characters.suffix(3).elementsEqual(["ら", "れ", "る"]) {
+            return String(characters.dropLast(3)) + "る"
+        }
+        guard characters.count > 2, characters.last == "る",
+              let shifted = potentialTailShift[characters[characters.count - 2]]
+        else { return nil }
+        return String(characters.dropLast(2)) + String(shifted)
+    }
+
     /// Candidates for a tap on `index`, each tagged with the role it played:
     /// the tapped segment's surface first, then its lemma (conjugated forms
-    /// fall back to their base form), then the validated forward joins
-    /// longest-first, then the tapped surface's kanji-substring splits, then
-    /// the joined expansion text's splits — the boundary-crossing
-    /// substrings. Truncated to `maxCandidates`, tapped candidates first, so
-    /// the word the user tapped always leads the display result and a tap
-    /// costs at most `maxCandidates` indexed queries.
+    /// fall back to their base form) followed by the dictionary form that
+    /// lemma unwraps to when it shapes like a potential (IPADIC's
+    /// standalone-potential lexicalization misses the headword index), then
+    /// the validated forward joins longest-first, then the tapped surface's
+    /// kanji-substring splits, then the joined expansion text's splits — the
+    /// boundary-crossing substrings. Truncated to `maxCandidates`, tapped
+    /// candidates first, so the word the user tapped always leads the
+    /// display result and a tap costs at most `maxCandidates` indexed
+    /// queries.
     static func candidates(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
     ) -> [ExpansionCandidate] {
@@ -115,11 +147,24 @@ enum JMDictExpansion {
                 origin: .tappedSurface
             ))
         }
-        if let lemma = tapped.lemma, !lemma.isEmpty, lemma != tapped.surface {
-            candidates.append(ExpansionCandidate(
-                candidate: LookupCandidate(text: lemma, reading: tapped.reading),
-                origin: .tappedLemma
-            ))
+        if let lemma = tapped.lemma, !lemma.isEmpty {
+            if lemma != tapped.surface {
+                candidates.append(ExpansionCandidate(
+                    candidate: LookupCandidate(text: lemma, reading: tapped.reading),
+                    origin: .tappedLemma
+                ))
+            }
+            // The unwrapped potential candidate trails the lemma itself (a
+            // genuine dictionary form still resolves there first) and never
+            // repeats the tapped surface's own query.
+            if let dictionaryForm = Self.dictionaryForm(ofPotential: lemma),
+               dictionaryForm != tapped.surface
+            {
+                candidates.append(ExpansionCandidate(
+                    candidate: LookupCandidate(text: dictionaryForm, reading: tapped.reading),
+                    origin: .tappedLemma
+                ))
+            }
         }
         let members = joinedSegments(
             segments: segments, tappedAt: index, sentenceText: sentenceText
