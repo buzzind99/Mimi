@@ -84,6 +84,79 @@ enum DictionaryContent {
     static func truncatedAlso(_ also: [LookupResult]) -> ArraySlice<LookupResult> {
         also.prefix(maxAlsoPills)
     }
+
+    /// Badge naming a display result that came from a forward join — the
+    /// tapped word itself has no entry, but the compound it joins into
+    /// does. nil for the tapped word's own surface or lemma, and for any
+    /// result the user promoted from a pill (an explicit choice never
+    /// reads as a fallback lead).
+    static func joinedMatchBadge(for origin: ExpansionOrigin) -> String? {
+        origin == .join ? "JOINED MATCH" : nil
+    }
+}
+
+/// One row of tappable result pills under a mono label — the entry view's
+/// "also:" fallback hits and the not-found view's "related:" suggestions
+/// render through the same component so they can never diverge.
+struct DictionaryResultPillRow: View {
+    let label: String
+    let results: [LookupResult]
+    var onSelect: (LookupResult) -> Void
+
+    var body: some View {
+        let pills = DictionaryContent.truncatedAlso(results)
+        if !pills.isEmpty {
+            HStack(spacing: 6) {
+                Text(verbatim: label)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Theme.secondaryText)
+                ForEach(Array(pills.enumerated()), id: \.offset) { _, result in
+                    Button {
+                        onSelect(result)
+                    } label: {
+                        Text(verbatim: result.matched)
+                            .font(.system(size: 12))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Theme.accentPink.opacity(0.16)))
+                            .foregroundStyle(Theme.annotationPink)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerStyle(.link)
+                    .help("Look up “\(result.matched)”")
+                }
+            }
+        }
+    }
+}
+
+/// The not-found card and popover content: the tapped surface with a plain
+/// "no entry" line — the lookup never promotes a kanji-split fallback to
+/// the display result — and the split hits demoted to "related:" pills
+/// (tapping one promotes it to the card's primary result).
+struct DictionaryNotFoundView: View {
+    let surface: String
+    let related: [LookupResult]
+    var onSelectRelated: (LookupResult) -> Void = { _ in }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: surface)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                    .textSelection(.disabled)
+                Text("No dictionary entry")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.secondaryText)
+                    .textSelection(.disabled)
+            }
+            DictionaryResultPillRow(
+                label: "related:", results: related, onSelect: onSelectRelated
+            )
+        }
+    }
 }
 
 // MARK: - Shared entry content view
@@ -108,6 +181,9 @@ struct DictionaryEntryContentView: View {
     let entryCount: Int
     let entryIndex: Int
     let also: [LookupResult]
+    /// The candidate role the display result came from. A join lead shows
+    /// the joined-match badge — the compound matched, not the tapped word.
+    var displayOrigin: ExpansionOrigin?
     /// Senses rendered (nil = every sense). The popover keeps the shared
     /// cap; the card passes nil to expand all.
     var senseLimit: Int? = DictionaryContent.maxSenses
@@ -247,6 +323,7 @@ struct DictionaryEntryContentView: View {
     @ViewBuilder
     private var badgeRow: some View {
         let badges = [
+            displayOrigin.flatMap(DictionaryContent.joinedMatchBadge(for:)),
             entry.common ? "COMMON" : nil,
             DictionaryContent.jlptBadge(entry.jlpt)
         ].compactMap { $0 }
@@ -367,36 +444,11 @@ struct DictionaryEntryContentView: View {
     /// the row is absent (no stale measurement on entry switches).
     private var alsoSection: some View {
         VStack(spacing: 0) {
-            alsoRow
+            DictionaryResultPillRow(
+                label: "also:", results: also, onSelect: onSelectAlso
+            )
         }
         .onHeightChange { onAlsoHeightChange($0) }
-    }
-
-    @ViewBuilder
-    private var alsoRow: some View {
-        let pills = DictionaryContent.truncatedAlso(also)
-        if !pills.isEmpty {
-            HStack(spacing: 6) {
-                Text("also:")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Theme.secondaryText)
-                ForEach(Array(pills.enumerated()), id: \.offset) { _, result in
-                    Button {
-                        onSelectAlso(result)
-                    } label: {
-                        Text(verbatim: result.matched)
-                            .font(.system(size: 12))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Theme.accentPink.opacity(0.16)))
-                            .foregroundStyle(Theme.annotationPink)
-                    }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                    .help("Look up “\(result.matched)”")
-                }
-            }
-        }
     }
 }
 

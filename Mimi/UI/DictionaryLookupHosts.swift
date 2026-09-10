@@ -3,27 +3,37 @@ import SwiftUI
 // MARK: - Hosts
 
 /// The popover presented by the surface that owns the selection: the shared
-/// entry content with the labeled Copy pill.
+/// entry content with the labeled Copy pill, or the not-found state with
+/// its related suggestions.
 struct DictionaryPopoverView: View {
     var model: AppModel
     let selected: SelectedLookup
 
     var body: some View {
         Group {
-            if let entry = selected.result.entries[safe: selected.entryIndex] {
-                DictionaryEntryContentView(
-                    entry: entry,
-                    entryCount: selected.result.entries.count,
-                    entryIndex: selected.entryIndex,
-                    also: model.pinnedLookup?.also ?? [],
-                    senseLimit: nil,
-                    glossLimit: nil,
-                    copyPlacement: .pill,
-                    onCopy: {
-                        model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
-                    },
-                    onSelectAlso: { model.selectAlsoPill($0) },
-                    onStepEntry: { model.stepLookupEntry(to: $0) }
+            switch selected.content {
+            case let .found(result, also, origin):
+                if let entry = result.entries[safe: selected.entryIndex] {
+                    DictionaryEntryContentView(
+                        entry: entry,
+                        entryCount: result.entries.count,
+                        entryIndex: selected.entryIndex,
+                        also: also,
+                        displayOrigin: origin,
+                        senseLimit: nil,
+                        glossLimit: nil,
+                        copyPlacement: .pill,
+                        onCopy: {
+                            model.copySnippet(DictionaryContent.headword(of: entry) ?? "")
+                        },
+                        onSelectAlso: { model.selectAlsoPill($0) },
+                        onStepEntry: { model.stepLookupEntry(to: $0) }
+                    )
+                }
+            case let .notFound(surface, related):
+                DictionaryNotFoundView(
+                    surface: surface, related: related,
+                    onSelectRelated: { model.selectAlsoPill($0) }
                 )
             }
         }
@@ -69,23 +79,44 @@ struct DictionaryCardView: View {
                     .foregroundStyle(Theme.secondaryText)
                     .kerning(1.2)
                 Spacer(minLength: 8)
-                if let pinned = model.pinnedLookup, pinned.result.entries.count > 1 {
+                if let pinned = model.pinnedLookup,
+                   case let .found(result, _, _) = pinned.content,
+                   result.entries.count > 1
+                {
                     DictionaryEntryPager(
                         entryIndex: pinned.entryIndex,
-                        entryCount: pinned.result.entries.count,
+                        entryCount: result.entries.count,
                         onStep: { model.stepLookupEntry(to: $0) }
                     )
                 }
             }
             .onHeightChange { labelHeight = $0 }
-            if let pinned = model.pinnedLookup,
-               let entry = pinned.result.entries[safe: pinned.entryIndex]
-            {
+            if let pinned = model.pinnedLookup {
+                pinnedContent(pinned, freeHeight: freeHeight)
+            } else {
+                emptyHint
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardChrome)
+    }
+
+    /// The pinned content per state: the shared entry view for a found
+    /// lookup, the not-found state with its related suggestions otherwise.
+    /// The not-found block feeds the top-section probe so the (sense-less)
+    /// viewport math stays settled while it is up.
+    @ViewBuilder
+    private func pinnedContent(_ pinned: PinnedLookup, freeHeight: CGFloat) -> some View {
+        switch pinned.content {
+        case let .found(result, also, origin):
+            if let entry = result.entries[safe: pinned.entryIndex] {
                 DictionaryEntryContentView(
                     entry: entry,
-                    entryCount: pinned.result.entries.count,
+                    entryCount: result.entries.count,
                     entryIndex: pinned.entryIndex,
-                    also: pinned.also,
+                    also: also,
+                    displayOrigin: origin,
                     senseLimit: nil,
                     glossLimit: nil,
                     sensesViewportHeight: sensesViewport(freeHeight: freeHeight),
@@ -101,15 +132,28 @@ struct DictionaryCardView: View {
                     onStepEntry: { model.stepLookupEntry(to: $0) }
                 )
             } else {
-                Text("Tap a word in the transcript to see its definition here.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                emptyHint
+            }
+        case let .notFound(surface, related):
+            DictionaryNotFoundView(
+                surface: surface, related: related,
+                onSelectRelated: { model.selectAlsoPill($0) }
+            )
+            .onHeightChange { topSectionHeight = $0 }
+            .onAppear {
+                // Probes this state doesn't mount keep the viewport
+                // math at their zero-content values.
+                alsoHeight = 0
+                sensesContentHeight = 0
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardChrome)
+    }
+
+    private var emptyHint: some View {
+        Text("Tap a word in the transcript to see its definition here.")
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// Height for the senses viewport: the full row height when everything
