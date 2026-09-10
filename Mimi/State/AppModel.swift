@@ -33,6 +33,10 @@ final class AppModel {
     // Observed UI state
     var phase: SessionPhase = .idle
     var entries: [SessionEntry] = []
+    /// SESSION-card character total: Σ sentence text lengths (translations
+    /// excluded), maintained incrementally on sentence append / session
+    /// clear instead of re-summing the transcript per render.
+    private(set) var sessionCharacterCount = 0
     var translationStatus: TranslationStatus = .idle
     var engineIsMock = false
     var modelURL: URL?
@@ -175,13 +179,10 @@ final class AppModel {
     /// Internal (not private) so tests can drive the session callbacks.
     let sessionController: SessionController
 
-    /// `makeSessionController` is injectable so tests can drive the start/
-    /// stop flow over a scripted `SessionController` (no TCC prompt, no SCK,
-    /// no native runtime); nil (the default) builds the real one — no
-    /// behavior change.
-    /// Injectable so tests can quiesce the launch check (stub `resolve`):
-    /// the real locator SHA-256-verifies up to ~1.2 GB and its success feeds
-    /// the engine warm-up — real blocking work tests must never trigger.
+    /// Injectable test seams: tests drive start/stop over a scripted
+    /// `SessionController` and quiesce the launch check — the real locator
+    /// SHA-256-verifies up to ~1.2 GB and feeds the engine warm-up. The
+    /// defaults build the real controller and locator.
     init(
         makeSessionController: (
             (LivePartialState, LatencyState, AudioLevelState, TranslationQueue) -> SessionController
@@ -540,9 +541,4 @@ final class AppModel {
             entries[at].appendTranslation(translation)
         }
     }
-
-    /// SESSION-card character total: Σ sentence text lengths (translations
-    /// excluded), maintained incrementally on sentence append / session
-    /// clear instead of re-summing the transcript per render.
-    private(set) var sessionCharacterCount = 0
 }
