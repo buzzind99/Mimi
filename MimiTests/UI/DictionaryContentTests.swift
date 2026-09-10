@@ -130,6 +130,23 @@ struct DictionaryContentTests {
         #expect(DictionaryContent.truncatedAlso([]).isEmpty)
     }
 
+    // MARK: - Pill labels
+
+    @Test("a pill shows the lead entry's headword — what tapping will display")
+    func pillLabel() {
+        // A split-guess fragment (起) whose lead entry's writing differs.
+        let okiru = LookupResult(matched: "起", entries: [entry(keb: "起こり")])
+        #expect(DictionaryContent.pillLabel(for: okiru) == "起こり")
+
+        // Kana-only entries label with their reading.
+        let kanaOnly = LookupResult(matched: "おこり", entries: [entry(keb: nil, reb: "おこり")])
+        #expect(DictionaryContent.pillLabel(for: kanaOnly) == "おこり")
+
+        // Entry-less results (never produced by the engine) keep the fallback.
+        let empty = LookupResult(matched: "起", entries: [])
+        #expect(DictionaryContent.pillLabel(for: empty) == "起")
+    }
+
     // MARK: - Sidebar mode gating
 
     @Test("dictionary mode shows DICTIONARY + SESSION only; other modes show ENGINES + AUDIO")

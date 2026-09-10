@@ -85,6 +85,13 @@ enum DictionaryContent {
         also.prefix(maxAlsoPills)
     }
 
+    /// Pill label: what tapping shows — the result's lead entry headword
+    /// (promotion resets the pager to entry 0), falling back to the matched
+    /// string when the result carries no entries.
+    static func pillLabel(for result: LookupResult) -> String {
+        result.entries.first.flatMap { headword(of: $0) } ?? result.matched
+    }
+
     /// Badge naming a display result that came from a forward join — the
     /// tapped word itself has no entry, but the compound it joins into
     /// does. nil for the tapped word's own surface or lemma, and for any
@@ -114,7 +121,7 @@ struct DictionaryResultPillRow: View {
                     Button {
                         onSelect(result)
                     } label: {
-                        Text(verbatim: result.matched)
+                        Text(verbatim: DictionaryContent.pillLabel(for: result))
                             .font(.system(size: 12))
                             .padding(.horizontal, 9)
                             .padding(.vertical, 4)
@@ -123,7 +130,7 @@ struct DictionaryResultPillRow: View {
                     }
                     .buttonStyle(.plain)
                     .pointerStyle(.link)
-                    .help("Look up “\(result.matched)”")
+                    .help("Look up “\(DictionaryContent.pillLabel(for: result))”")
                 }
             }
         }
