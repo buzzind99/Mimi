@@ -14,10 +14,11 @@
 #
 # The tokenizer core is the vendored daac-tools/vibrato (vendor/vibrato,
 # cloned on first run at the pinned ref). The C ABI lives in our own
-# vendor/vibrato-ffi crate — a path dependency on the vendored lib — so
-# nothing is patched upstream, and the exported symbols use the generic
-# dictionary_ prefix. To move to a newer vibrato: update VIBRATO_REF (and the
-# model digest if the release assets change), delete vendor/vibrato, re-run.
+# ffi/vibrato-ffi crate (tracked in git) — a path dependency on the vendored
+# lib — so nothing is patched upstream, and the exported symbols use the
+# generic dictionary_ prefix. To move to a newer vibrato: update VIBRATO_REF
+# (and the model digest if the release assets change), delete vendor/vibrato,
+# re-run.
 #
 # Prereqs: xcode-select --install; rustup/cargo
 
@@ -25,7 +26,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR_DIR="${REPO_ROOT}/vendor/vibrato"
-FFI_DIR="${REPO_ROOT}/vendor/vibrato-ffi"
+FFI_DIR="${REPO_ROOT}/ffi/vibrato-ffi"
 FRAMEWORKS_DIR="${REPO_ROOT}/local/frameworks"
 UPSTREAM="https://github.com/daac-tools/vibrato.git"
 VIBRATO_REF="${VIBRATO_REF:-7462fa07a60a176e8d9ef3cb287c7973290a0f9d}"  # v0.5.2
@@ -47,7 +48,7 @@ fi
 
 # 2. Build our FFI crate. The cdylib statically embeds the engine and the
 #    zstd decoder, so the staged dylib needs no companion files.
-echo "==> Building vendor/vibrato-ffi (first run takes a while)"
+echo "==> Building ffi/vibrato-ffi (first run takes a while)"
 cargo build --release --manifest-path "${FFI_DIR}/Cargo.toml"
 
 # 3. Staging.

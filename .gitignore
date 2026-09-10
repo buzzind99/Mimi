@@ -27,5 +27,8 @@ local/
 debug/
 Mock/
 
+# Rust build output for the tracked dictionary-FFI crate
+ffi/vibrato-ffi/target/
+
 # Logs & temp
 *.log

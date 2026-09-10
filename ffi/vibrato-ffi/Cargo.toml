@@ -1,0 +1,23 @@
+[package]
+name = "vibrato-ffi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85" # matches the vendored vibrato
+license = "Apache-2.0 OR MIT"
+publish = false
+description = "C ABI for Mimi's dictionary tokenizer, wrapping the vendored vibrato engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+csv-core = "0.1.10" # same engine vibrato uses for feature rows
+ruzstd = "0.8"      # pure-Rust zstd decoder for the first-launch decompress
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The vendored engine (gitignored; scripts/build_dictionary.sh clones it at a
+# pinned ref); `train` (trainer + rucrf) is tokenizer-irrelevant.
+vibrato = { path = "../../vendor/vibrato/vibrato", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
