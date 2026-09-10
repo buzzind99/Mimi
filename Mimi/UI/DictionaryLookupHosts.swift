@@ -72,7 +72,7 @@ struct DictionaryCardView: View {
     }
 
     private func card(freeHeight: CGFloat) -> some View {
-        VStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Text("DICTIONARY")
                     .font(.system(size: 10, weight: .bold))
