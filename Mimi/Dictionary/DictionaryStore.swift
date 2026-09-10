@@ -63,26 +63,32 @@ final class DictionaryStore: @unchecked Sendable {
     /// `scripts/build_dictionary.sh` (Xcode runs with the checkout as working
     /// directory) so first-launch can be exercised before bundling lands.
     static var defaultBundledSource: URL? {
-        if let bundled = Bundle.main.url(forResource: "system", withExtension: "dic.zst") {
-            return bundled
-        }
-        #if DEBUG
-            return URL(fileURLWithPath: "local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst")
-        #else
-            return nil
-        #endif
+        bundledOrDebug(
+            resource: "system", ext: "dic.zst",
+            debugPath: "local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst"
+        )
     }
 
     /// The bundled compressed JMDict artifact, same split as
     /// `defaultBundledSource` but from `scripts/build_jmdict.sh`'s output.
     static var defaultBundledJMDictSource: URL? {
-        if let bundled = Bundle.main.url(
-            forResource: JMDictPin.preparedFileName, withExtension: "zst"
-        ) {
+        bundledOrDebug(
+            resource: JMDictPin.preparedFileName, ext: "zst",
+            debugPath: "local/dictionaries/\(JMDictPin.bundledFileName)"
+        )
+    }
+
+    /// Bundled-resource lookup with the shared debug-checkout fallback:
+    /// release builds see the app bundle only, debug checkouts fall back to
+    /// the copy the build scripts leave under `local/dictionaries/`.
+    private static func bundledOrDebug(
+        resource: String, ext: String, debugPath: String
+    ) -> URL? {
+        if let bundled = Bundle.main.url(forResource: resource, withExtension: ext) {
             return bundled
         }
         #if DEBUG
-            return URL(fileURLWithPath: "local/dictionaries/\(JMDictPin.bundledFileName)")
+            return URL(fileURLWithPath: debugPath)
         #else
             return nil
         #endif
@@ -125,7 +131,7 @@ final class DictionaryStore: @unchecked Sendable {
     static func resolveJMDict(environment: [String: String], fileExists: (URL) -> Bool) -> URL? {
         resolve(
             environmentKey: "MIMI_JMDICT", defaultURL: defaultJMDictURL,
-            debugCheckoutPath: "build/\(JMDictPin.preparedFileName)",
+            debugCheckoutPath: JMDictPin.debugCheckoutPath,
             environment: environment, fileExists: fileExists
         )
     }
@@ -149,14 +155,9 @@ final class DictionaryStore: @unchecked Sendable {
 
     // MARK: - Prepare
 
-    /// Word certain to tokenize with a reading in any IPADIC build; the smoke
-    /// query requires it to come back with a non-null reading.
+    /// Word certain to tokenize with a reading in any IPADIC build and carry
+    /// a JMDict entry in any pin; both smoke queries require it to answer.
     private static let smokeWord = "学生"
-
-    /// Word certain to carry a JMDict entry in any pin; the JMDict smoke
-    /// query runs the JMDict lookup (`JMDictLookup`) over the freshly
-    /// decompressed database and requires it to hit.
-    private static let jmDictSmokeWord = "学生"
 
     /// Queue-confined lifecycle, one phase per artifact. There is no
     /// `.preparing` state: every access happens on the serial queue, so
@@ -200,29 +201,7 @@ final class DictionaryStore: @unchecked Sendable {
     /// URL, or an error — callers silently degrade to plain text and may
     /// retry (next launch or a later call).
     func prepare(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
-        queue.async {
-            if case let .done(url) = self.phases.ipadic {
-                self.complete(completion, .success(url))
-                return
-            }
-            let destination = self.destinationDirectory
-                .appendingPathComponent(Self.dictionaryFileName)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                // Prepared by an earlier launch: adopt it, don't re-decompress.
-                self.phases.ipadic = .done(destination)
-                self.complete(completion, .success(destination))
-                return
-            }
-            do {
-                let url = try self.prepareDictionary(at: destination)
-                self.phases.ipadic = .done(url)
-                self.complete(completion, .success(url))
-            } catch {
-                // Retryable: a later prepare() (or next launch) starts over.
-                self.phases.ipadic = .idle
-                self.complete(completion, .failure(error))
-            }
-        }
+        run(.tokenizer, completion: completion)
     }
 
     /// JMDict counterpart of `prepare(completion:)`: decompresses the bundled
@@ -233,57 +212,110 @@ final class DictionaryStore: @unchecked Sendable {
     /// after a successful promote. Same coalescing: concurrent callers line
     /// up on the store's serial queue.
     func prepareJMDict(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+        run(.jmDict, completion: completion)
+    }
+
+    /// One prepared artifact: its phase slot, destination filename, bundled
+    /// source, and smoke check. Drives the shared prepare pipeline so the two
+    /// artifacts differ only in these values.
+    private enum Artifact: Equatable {
+        case tokenizer
+        case jmDict
+
+        var destinationFileName: String {
+            switch self {
+            case .tokenizer: return DictionaryStore.dictionaryFileName
+            case .jmDict: return JMDictPin.preparedFileName
+            }
+        }
+
+        var missingSourceError: DictionaryStoreError {
+            switch self {
+            case .tokenizer: return .bundledDictionaryMissing
+            case .jmDict: return .bundledJMDictMissing
+            }
+        }
+
+        var phaseKeyPath: ReferenceWritableKeyPath<DictionaryStore, Phase> {
+            switch self {
+            case .tokenizer: return \.phases.ipadic
+            case .jmDict: return \.phases.jmDict
+            }
+        }
+
+        var sourceKeyPath: KeyPath<DictionaryStore, URL?> {
+            switch self {
+            case .tokenizer: return \.bundledSource
+            case .jmDict: return \.bundledJMDictSource
+            }
+        }
+    }
+
+    /// Runs on the serial queue. Coalesces concurrent callers behind the
+    /// phase check: a prepared artifact (done phase, or an earlier launch's
+    /// file) is adopted; otherwise it is staged and promoted. A failed
+    /// prepare resets the phase so a later call retries.
+    private func run(
+        _ artifact: Artifact, completion: @escaping @Sendable (Result<URL, Error>) -> Void
+    ) {
         queue.async {
-            let destination = self.destinationDirectory
-                .appendingPathComponent(JMDictPin.preparedFileName)
-            let adopt: Bool
-            if case let .done(url) = self.phases.jmDict {
+            if case let .done(url) = self[keyPath: artifact.phaseKeyPath] {
                 self.complete(completion, .success(url))
                 return
-            } else if FileManager.default.fileExists(atPath: destination.path) {
-                // Prepared by an earlier launch: adopt it, don't re-decompress.
-                self.phases.jmDict = .done(destination)
-                adopt = true
-            } else {
-                adopt = false
             }
-            if adopt {
-                self.removeLegacyJMDictArtifacts(keeping: destination)
+            let destination = self.destinationDirectory
+                .appendingPathComponent(artifact.destinationFileName)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                // Prepared by an earlier launch: adopt it, don't re-decompress.
+                self[keyPath: artifact.phaseKeyPath] = .done(destination)
+                self.afterPrepare(artifact, promoted: destination)
                 self.complete(completion, .success(destination))
                 return
             }
             do {
-                let url = try self.prepareJMDictDictionary(at: destination)
-                self.removeLegacyJMDictArtifacts(keeping: url)
-                self.phases.jmDict = .done(url)
+                let url = try self.prepareArtifact(artifact, destination: destination)
+                self.afterPrepare(artifact, promoted: url)
+                self[keyPath: artifact.phaseKeyPath] = .done(url)
                 self.complete(completion, .success(url))
             } catch {
-                // Retryable: a later prepareJMDict() (or next launch) starts over.
-                self.phases.jmDict = .idle
+                // Retryable: a later prepare (or next launch) starts over.
+                self[keyPath: artifact.phaseKeyPath] = .idle
                 self.complete(completion, .failure(error))
             }
         }
     }
 
-    /// Async surface over the completion-based `prepare(completion:)` above,
-    /// which stays the primitive. Coalescing semantics are unchanged — the
-    /// continuation lines up behind an in-flight decompression on the store's
-    /// queue exactly like a completion caller would.
-    func prepare() async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            prepare { result in
-                // The completion runs on the main queue; resuming here hops
-                // the value back to the awaiting context.
-                continuation.resume(with: result)
-            }
-        }
+    /// Post-promote hook: the JMDict artifact's versioned filename is its
+    /// staleness key, so stale artifacts from earlier pins are swept after
+    /// each successful promote or adoption. The tokenizer artifact has no
+    /// version to sweep.
+    private func afterPrepare(_ artifact: Artifact, promoted url: URL) {
+        guard artifact == .jmDict else { return }
+        removeLegacyJMDictArtifacts(keeping: url)
     }
 
-    /// Async surface over `prepareJMDict(completion:)`, mirroring
-    /// `prepare() async`.
+    /// Async surface over the completion-based prepares above, which stay the
+    /// primitives. Coalescing semantics are unchanged — the continuation
+    /// lines up behind an in-flight decompression on the store's queue
+    /// exactly like a completion caller would.
+    func prepare() async throws -> URL {
+        try await asyncFromCompletion { self.prepare(completion: $0) }
+    }
+
+    /// JMDict counterpart of `prepare() async`.
     func prepareJMDict() async throws -> URL {
+        try await asyncFromCompletion { self.prepareJMDict(completion: $0) }
+    }
+
+    /// Bridges a completion-based prepare into async: resumes the awaiting
+    /// context with the completion's result.
+    private func asyncFromCompletion(
+        _ start: (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void
+    ) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
-            prepareJMDict { result in
+            // The completion runs on the main queue; resuming here hops the
+            // value back to the awaiting context.
+            start { result in
                 continuation.resume(with: result)
             }
         }
@@ -295,42 +327,13 @@ final class DictionaryStore: @unchecked Sendable {
         DispatchQueue.main.async { completion(result) }
     }
 
-    /// Runs on the serial queue. Stages a private copy of the tokenizer zst
-    /// and decompresses into a private temp directory, smoke-opens the result,
-    /// and only then promotes it into place — a failure at any stage leaves
-    /// no partial dictionary at the destination.
-    private func prepareDictionary(at destination: URL) throws -> URL {
-        try prepareArtifact(
-            source: bundledSource, missingSourceError: .bundledDictionaryMissing,
-            fileName: Self.dictionaryFileName, destination: destination
-        ) { stagedArtifact, ffi in
-            try self.smokeQuery(stagedArtifact, ffi: ffi)
-        }
-    }
-
-    /// JMDict counterpart of `prepareDictionary(at:)`: same stage → decompress
-    /// → promote discipline, but the smoke check runs the JMDict lookup
-    /// engine against the staged SQLite database (`学生` must hit ≥1 entry)
-    /// instead of the tokenizer FFI.
-    private func prepareJMDictDictionary(at destination: URL) throws -> URL {
-        try prepareArtifact(
-            source: bundledJMDictSource, missingSourceError: .bundledJMDictMissing,
-            fileName: JMDictPin.preparedFileName, destination: destination
-        ) { stagedArtifact, _ in
-            try self.smokeQueryJMDict(stagedArtifact)
-        }
-    }
-
-    /// Shared stage → decompress → smoke → promote pipeline for both
-    /// artifacts. Runs on the serial queue; `smoke` receives the freshly
-    /// decompressed artifact in its private staging directory. Returns the
-    /// promoted destination URL.
-    private func prepareArtifact(
-        source: URL?, missingSourceError: DictionaryStoreError, fileName: String,
-        destination: URL, smoke: (URL, DictionaryFFI) throws -> Void
-    ) throws -> URL {
-        guard let source else {
-            throw missingSourceError
+    /// Runs on the serial queue. Stages a private copy of the artifact's zst
+    /// and decompresses it into a private temp directory, smoke-checks the
+    /// result, and only then promotes it into place — a failure at any stage
+    /// leaves no partial file at the destination.
+    private func prepareArtifact(_ artifact: Artifact, destination: URL) throws -> URL {
+        guard let source = self[keyPath: artifact.sourceKeyPath] else {
+            throw artifact.missingSourceError
         }
         guard let ffi else {
             throw DictionaryStoreError.libraryUnavailable
@@ -345,13 +348,13 @@ final class DictionaryStore: @unchecked Sendable {
         // decompress neither touches the bundle nor aliases the caller's file.
         let stagedZst = staging.appendingPathComponent("artifact.zst")
         try fm.copyItem(at: source, to: stagedZst)
-        let stagedArtifact = staging.appendingPathComponent(fileName)
+        let stagedArtifact = staging.appendingPathComponent(artifact.destinationFileName)
 
         let returnCode = ffi.prepare(stagedZst.path, stagedArtifact.path)
         guard returnCode == 0 else {
             throw DictionaryStoreError.prepareFailed(returnCode: returnCode)
         }
-        try smoke(stagedArtifact, ffi)
+        try smoke(artifact, stagedArtifact, ffi: ffi)
 
         try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
         if fm.fileExists(atPath: destination.path) {
@@ -359,6 +362,16 @@ final class DictionaryStore: @unchecked Sendable {
         }
         try fm.moveItem(at: stagedArtifact, to: destination)
         return destination
+    }
+
+    /// The artifact-specific smoke check. The tokenizer opens the staged
+    /// dictionary through the FFI; the JMDict database goes through the
+    /// lookup engine (`学生` must hit ≥1 entry in both).
+    private func smoke(_ artifact: Artifact, _ stagedArtifact: URL, ffi: DictionaryFFI) throws {
+        switch artifact {
+        case .tokenizer: try smokeQuery(stagedArtifact, ffi: ffi)
+        case .jmDict: try smokeQueryJMDict(stagedArtifact)
+        }
     }
 
     /// Proves the freshly decompressed dictionary is openable and actually
@@ -369,18 +382,10 @@ final class DictionaryStore: @unchecked Sendable {
             throw DictionaryStoreError.smokeTestFailed(reason: "open returned null")
         }
         defer { ffi.free(handle) }
-        guard let jsonPointer = ffi.tokenizeJSON(handle, Self.smokeWord) else {
+        guard let tokens = ffi.tokenize(handle, Self.smokeWord) else {
             throw DictionaryStoreError.smokeTestFailed(reason: "tokenize returned null")
         }
-        defer { ffi.freeString(jsonPointer) }
-        guard let json = String(validatingCString: jsonPointer),
-              let tokens = (try? JSONSerialization.jsonObject(with: Data(json.utf8)))
-              as? [[String: Any]],
-              tokens.contains(where: { entry in
-                  let reading = entry["reading"]
-                  return reading != nil && !(reading is NSNull)
-              })
-        else {
+        guard tokens.contains(where: { $0.reading != nil }) else {
             throw DictionaryStoreError.smokeTestFailed(
                 reason: "no reading for \(Self.smokeWord)"
             )
@@ -394,9 +399,9 @@ final class DictionaryStore: @unchecked Sendable {
     private func smokeQueryJMDict(_ databaseURL: URL) throws {
         let lookup = JMDictLookup(resolveDatabase: { databaseURL })
         do {
-            guard try lookup.lookup(LookupCandidate(text: Self.jmDictSmokeWord)) != nil else {
+            guard try lookup.lookup(LookupCandidate(text: Self.smokeWord)) != nil else {
                 throw DictionaryStoreError.smokeTestFailed(
-                    reason: "no entry for \(Self.jmDictSmokeWord)"
+                    reason: "no entry for \(Self.smokeWord)"
                 )
             }
         } catch let error as JMDictLookupError {
@@ -414,8 +419,8 @@ final class DictionaryStore: @unchecked Sendable {
             at: destinationDirectory, includingPropertiesForKeys: nil
         ) else { return }
         for url in contents
-            where url.lastPathComponent.hasPrefix("jmdict-")
-            && url.lastPathComponent.hasSuffix(".sqlite")
+            where url.lastPathComponent.hasPrefix(JMDictPin.artifactPrefix)
+            && url.lastPathComponent.hasSuffix("." + JMDictPin.artifactExtension)
             && url.standardizedFileURL != current.standardizedFileURL
         {
             try? fm.removeItem(at: url)
