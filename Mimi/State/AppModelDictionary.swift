@@ -1,5 +1,11 @@
 import Foundation
 
+/// One preparable dictionary artifact: the resolve probe and its builder.
+private struct DictionaryArtifact<Prepare> {
+    let resolve: () -> URL?
+    let prepare: Prepare
+}
+
 /// Dictionary preparation surface of `AppModel` (file split for the lint
 /// gate): the first-launch kick-off of both artifacts and the session-start
 /// gate that blocks on either missing one.
@@ -16,30 +22,31 @@ extension AppModel {
     /// The `resolve`/`prepare` pairs are injectable for tests; the defaults
     /// drive the real store.
     func prepareDictionaryIfNeeded(
-        resolve: () -> URL? = { DictionaryStore.resolve() },
-        resolveJMDict: () -> URL? = { DictionaryStore.resolveJMDict() },
-        prepare: ((@escaping @Sendable (Result<URL, Error>) -> Void) -> Void) = {
+        resolve: @escaping () -> URL? = { DictionaryStore.resolve() },
+        resolveJMDict: @escaping () -> URL? = { DictionaryStore.resolveJMDict() },
+        prepare: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = {
             DictionaryStore.shared.prepare(completion: $0)
         },
-        prepareJMDict: ((@escaping @Sendable (Result<URL, Error>) -> Void) -> Void) = {
+        prepareJMDict: @escaping (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void = {
             DictionaryStore.shared.prepareJMDict(completion: $0)
         }
     ) {
-        if resolve() == nil {
-            prepare { result in
+        typealias Prepare = (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void
+        // Paired with the log tag a failed fire-and-forget build reports under.
+        let artifacts: [(DictionaryArtifact<Prepare>, String)] = [
+            (
+                DictionaryArtifact(resolve: resolve, prepare: prepare),
+                "[dictionary] first-launch build failed; text stays unannotated"
+            ),
+            (
+                DictionaryArtifact(resolve: resolveJMDict, prepare: prepareJMDict),
+                "[jmdict] first-launch build failed; lookups stay unavailable"
+            )
+        ]
+        for (artifact, log) in artifacts where artifact.resolve() == nil {
+            artifact.prepare { result in
                 if case let .failure(error) = result {
-                    print(
-                        "[dictionary] first-launch build failed; text stays unannotated: \(error.localizedDescription)"
-                    )
-                }
-            }
-        }
-        if resolveJMDict() == nil {
-            prepareJMDict { result in
-                if case let .failure(error) = result {
-                    print(
-                        "[jmdict] first-launch build failed; lookups stay unavailable: \(error.localizedDescription)"
-                    )
+                    print("\(log): \(error.localizedDescription)")
                 }
             }
         }
@@ -55,21 +62,24 @@ extension AppModel {
     /// retries). The `resolve`/`prepare` pairs are injectable for tests;
     /// the defaults drive the real store's async surface.
     func ensureDictionaryReady(
-        resolve: () -> URL? = { DictionaryStore.resolve() },
-        resolveJMDict: () -> URL? = { DictionaryStore.resolveJMDict() },
+        resolve: @escaping () -> URL? = { DictionaryStore.resolve() },
+        resolveJMDict: @escaping () -> URL? = { DictionaryStore.resolveJMDict() },
         prepare: (() async throws -> URL)? = nil,
         prepareJMDict: (() async throws -> URL)? = nil
     ) async throws {
-        let needsIPADIC = resolve() == nil
-        let needsJMDict = resolveJMDict() == nil
-        guard needsIPADIC || needsJMDict else { return }
+        let artifacts: [DictionaryArtifact<() async throws -> URL>] = [
+            DictionaryArtifact(resolve: resolve, prepare: prepare ?? DictionaryStore.shared.prepare),
+            DictionaryArtifact(
+                resolve: resolveJMDict,
+                prepare: prepareJMDict ?? DictionaryStore.shared.prepareJMDict
+            )
+        ]
+        let missing = artifacts.filter { $0.resolve() == nil }
+        guard !missing.isEmpty else { return }
         isPreparingDictionary = true
         defer { isPreparingDictionary = false }
-        if needsIPADIC {
-            _ = try await(prepare ?? DictionaryStore.shared.prepare)()
-        }
-        if needsJMDict {
-            _ = try await(prepareJMDict ?? DictionaryStore.shared.prepareJMDict)()
+        for artifact in missing {
+            _ = try await artifact.prepare()
         }
     }
 }
