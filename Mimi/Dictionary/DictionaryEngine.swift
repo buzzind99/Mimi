@@ -52,8 +52,6 @@ struct DictionaryToken: Codable, Equatable {
 final class DictionaryEngine: @unchecked Sendable {
     static let shared = DictionaryEngine()
 
-    private static let decoder = JSONDecoder()
-
     private let lock = NSLock()
     private let ffi: DictionaryFFI?
     private let resolveDictionary: () -> URL?
@@ -75,18 +73,10 @@ final class DictionaryEngine: @unchecked Sendable {
     /// runtime, dictionary, payload, or decoding is unavailable.
     func tokenize(_ text: String) -> [DictionaryToken]? {
         guard let ffi else { return nil }
-        let payload: Data? = lock.withLock {
+        return lock.withLock {
             guard let handle = openedHandle(ffi: ffi) else { return nil }
-            return text.withCString { cText in
-                guard let pointer = ffi.tokenizeJSON(handle, cText) else {
-                    return nil
-                }
-                defer { ffi.freeString(pointer) }
-                return String(validatingCString: pointer).map { Data($0.utf8) }
-            }
+            return ffi.tokenize(handle, text)
         }
-        guard let payload else { return nil }
-        return try? Self.decoder.decode([DictionaryToken].self, from: payload)
     }
 
     /// Lock-held. Resolves the dictionary URL and opens the handle on first

@@ -35,6 +35,21 @@ struct DictionaryFFI {
     /// Returns 0 on success, 1 on failure.
     let prepare: FnPrepare
 
+    private static let decoder = JSONDecoder()
+
+    /// Tokenizes `text` through `handle` and decodes the runtime's JSON
+    /// payload into dictionary tokens. nil when the runtime returns a null
+    /// pointer, the payload isn't valid UTF-8, or it doesn't decode.
+    func tokenize(_ handle: UnsafeMutableRawPointer?, _ text: String) -> [DictionaryToken]? {
+        let payload: Data? = text.withCString { cText in
+            guard let pointer = tokenizeJSON(handle, cText) else { return nil }
+            defer { freeString(pointer) }
+            return String(validatingCString: pointer).map { Data($0.utf8) }
+        }
+        guard let payload else { return nil }
+        return try? Self.decoder.decode([DictionaryToken].self, from: payload)
+    }
+
     // MARK: - Loading
 
     /// Search paths for the staged dylib, tried in order. The bare name
