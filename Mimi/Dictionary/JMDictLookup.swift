@@ -81,7 +81,7 @@ struct LookupResult: Equatable, Sendable {
 
 /// Ordered-candidate outcome: the first candidate that hit is the display
 /// result; later candidates whose entries add something new are retained as
-/// the "also:" shorter hits, in candidate order.
+/// the "also:" hits, longest match first (ties keep candidate order).
 struct LookupOutcome: Equatable, Sendable {
     let display: LookupResult
     let also: [LookupResult]
@@ -186,14 +186,16 @@ final class JMDictLookup: @unchecked Sendable {
         try lookup([candidate])?.display
     }
 
-    /// Looks up candidates in order (per tap: the forward-expansion joins
-    /// longest-first, then the tapped segment's lemma and surface — see
-    /// `JMDictExpansion.candidates`). The first
+    /// Looks up candidates in order (per tap: the tapped segment's surface
+    /// and lemma, the forward-expansion joins longest-first, then the kanji
+    /// substring splits — see `JMDictExpansion.candidates`). The first
     /// candidate that hit is the display result; later candidates whose
-    /// entries add something new are retained as "also:" results in order —
-    /// a candidate that only re-hits already-returned entries is redundant
-    /// and skipped. Every candidate missing → nil; any infrastructure error
-    /// aborts the whole lookup as a throw (never downgraded to a miss).
+    /// entries add something new are retained as "also:" results, sorted
+    /// longest match first (ties keep candidate order) so the most specific
+    /// fallback leads the pager and the capped "also:" pills — a candidate
+    /// that only re-hits already-returned entries is redundant and skipped.
+    /// Every candidate missing → nil; any infrastructure error aborts the
+    /// whole lookup as a throw (never downgraded to a miss).
     func lookup(_ candidates: [LookupCandidate]) throws -> LookupOutcome? {
         guard !candidates.isEmpty else { return nil }
         var display: LookupResult?
@@ -210,7 +212,16 @@ final class JMDictLookup: @unchecked Sendable {
             seenEntryIDs.formUnion(entryIDs)
         }
         guard let display else { return nil }
-        return LookupOutcome(display: display, also: also)
+        // Longest match first, explicitly stable: candidates arrive in
+        // expansion order (longest-first joins, then splits), so equal
+        // lengths keep that order.
+        let ordered = also.enumerated().sorted { lhs, rhs in
+            if lhs.element.matched.count != rhs.element.matched.count {
+                return lhs.element.matched.count > rhs.element.matched.count
+            }
+            return lhs.offset < rhs.offset
+        }
+        return LookupOutcome(display: display, also: ordered.map(\.element))
     }
 
     /// Releases the database handle. The instance stays closed permanently —

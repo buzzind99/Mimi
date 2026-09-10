@@ -239,16 +239,31 @@ final class JMDictLookupTests {
         #expect(outcome.also.isEmpty)
     }
 
-    @Test("keeps candidate order across several also results")
-    func alsoOrderFollowsCandidates() throws {
+    @Test("sorts also results longest match first")
+    func alsoOrderLongestFirst() throws {
         let outcome = try #require(try engine.lookup([
             LookupCandidate(text: "橋"),
             LookupCandidate(text: "たべる"),
-            LookupCandidate(text: "アルバイト")
+            LookupCandidate(text: "アルバイト"),
+            LookupCandidate(text: "飴")
         ]))
 
         #expect(outcome.display.matched == "橋")
-        #expect(outcome.also.map(\.matched) == ["たべる", "アルバイト"])
+        // アルバイト (5) outranks たべる (3) outranks 飴 (1), regardless of
+        // the order the candidates arrived in.
+        #expect(outcome.also.map(\.matched) == ["アルバイト", "たべる", "飴"])
+    }
+
+    @Test("equal-length also results keep candidate order")
+    func alsoEqualLengthKeepsCandidateOrder() throws {
+        let outcome = try #require(try engine.lookup([
+            LookupCandidate(text: "橋"),
+            LookupCandidate(text: "飴"),
+            LookupCandidate(text: "雨")
+        ]))
+
+        #expect(outcome.display.matched == "橋")
+        #expect(outcome.also.map(\.matched) == ["飴", "雨"])
     }
 
     // MARK: Candidate kind

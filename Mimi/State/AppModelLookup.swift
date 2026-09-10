@@ -38,8 +38,8 @@ extension SelectedLookup {
 }
 
 /// The pinned sidebar DICTIONARY card content: the last lookup of the
-/// session plus its "also:" shorter hits. Persists after the popover
-/// dismisses; cleared on session clear.
+/// session plus its "also:" fallback hits (longest match first). Persists
+/// after the popover dismisses; cleared on session clear.
 struct PinnedLookup: Equatable, Sendable {
     var result: LookupResult
     var also: [LookupResult]

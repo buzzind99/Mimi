@@ -80,7 +80,7 @@ enum DictionaryContent {
         return (visible, glosses.count - visible.count)
     }
 
-    /// "also:" shorter-hit pills, capped at two.
+    /// "also:" fallback-hit pills (longest match first), capped at two.
     static func truncatedAlso(_ also: [LookupResult]) -> ArraySlice<LookupResult> {
         also.prefix(maxAlsoPills)
     }

@@ -25,14 +25,21 @@ struct LookupSegment: Equatable, Sendable {
 /// Forward expansion for a dictionary tap: from the tapped segment it walks
 /// the same segments array the tap rendered from, joining up to `maxTokens`
 /// consecutive word segments into lookup-candidate fallbacks (お+土産 →
-/// お土産 offered when the tapped piece alone misses).
+/// お土産 offered when the tapped piece alone misses), then splits the
+/// tapped surface's contiguous kanji runs into substring candidates
+/// (映画 → 映, 画) for compounds the tokenizer kept whole.
 ///
 /// The tapped segment's own candidates lead — surface, then lemma — so the
 /// word the user tapped always takes the display result and a longer join
-/// that also hits lands in the outcome's "also:" list. Conjugated forms
+/// or split hit lands in the outcome's "also:" list. Conjugated forms
 /// fall back to their lemma (base form) when the surface itself isn't a
 /// headword. The joins follow in longest-first order for taps whose own
-/// text isn't a dictionary headword.
+/// text isn't a dictionary headword, and the kanji-substring splits trail
+/// them, longest substring first, as the deep fallback.
+///
+/// Split candidates carry no reading: per-character division of the
+/// segment's furigana isn't reliable (ateji, multi-character readings), so
+/// the lookup ranking simply ignores readings for them.
 ///
 /// Join rules mirror the annotator's own span-merge guards: whitespace-only
 /// segments between words are skipped, while numeral runs, the
@@ -49,7 +56,11 @@ enum JMDictExpansion {
     /// Segments one candidate may join, the tapped segment included.
     static let maxTokens = 3
     /// Candidates queried per tap, one exact index hit each.
-    static let maxCandidates = 3
+    static let maxCandidates = 9
+    /// Longest kanji substring a split emits, bounding the combinatorics of
+    /// a long kanji run (uncapped, n kanji would emit n(n+1)/2 − 1
+    /// substrings against the headword index).
+    static let maxSplitLength = 3
 
     /// Particles the annotator reads by function, not by dictionary reading
     /// (`ReadingAnnotator.particleRomaji`): expansion never bridges them.
@@ -57,9 +68,10 @@ enum JMDictExpansion {
 
     /// Candidates for a tap on `index`: the tapped segment's surface first,
     /// then its lemma (conjugated forms fall back to their base form), then
-    /// the validated forward joins longest-first. Truncated to
-    /// `maxCandidates`, tapped candidates first, so the word the user tapped
-    /// always leads the display result and a tap costs at most three indexed
+    /// the validated forward joins longest-first, then the tapped surface's
+    /// kanji-substring splits. Truncated to `maxCandidates`, tapped
+    /// candidates first, so the word the user tapped always leads the
+    /// display result and a tap costs at most `maxCandidates` indexed
     /// queries.
     static func candidates(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
@@ -83,7 +95,54 @@ enum JMDictExpansion {
                 candidates.append(LookupCandidate(text: text, reading: joinedReading(members[..<count])))
             }
         }
+        // Split candidates trail the joins, deduplicated against everything
+        // already emitted (the longest split of an all-kanji surface is the
+        // surface itself; a short one can coincide with the lemma or a join).
+        let emitted = Set(candidates.map(\.text))
+        candidates.append(contentsOf: splitCandidates(for: tapped.surface).filter {
+            !emitted.contains($0.text)
+        })
         return Array(candidates.prefix(maxCandidates))
+    }
+
+    /// The tapped surface's kanji-substring split candidates, longest
+    /// substring first: the substrings (up to `maxSplitLength` characters)
+    /// of each contiguous kanji run, lengths descending, left-to-right
+    /// within a length (映画 → 映, 画 once the surface itself is
+    /// deduplicated away). Each carries no reading — the lookup ranking
+    /// ignores a nil reading.
+    private static func splitCandidates(for surface: String) -> [LookupCandidate] {
+        let runs = kanjiRuns(in: surface)
+        var candidates: [LookupCandidate] = []
+        for length in stride(from: maxSplitLength, through: 1, by: -1) {
+            for run in runs where run.count >= length {
+                for start in 0 ... run.count - length {
+                    candidates.append(LookupCandidate(
+                        text: String(String.UnicodeScalarView(run[start ..< start + length]))
+                    ))
+                }
+            }
+        }
+        return candidates
+    }
+
+    /// The contiguous kanji runs of a surface, in order (食べ物 → 食, 物;
+    /// kana, numerals, and punctuation break a run).
+    private static func kanjiRuns(in surface: String) -> [[Unicode.Scalar]] {
+        var runs: [[Unicode.Scalar]] = []
+        var current: [Unicode.Scalar] = []
+        for scalar in surface.unicodeScalars {
+            if KanaClassification.isKanji(scalar) {
+                current.append(scalar)
+            } else if !current.isEmpty {
+                runs.append(current)
+                current = []
+            }
+        }
+        if !current.isEmpty {
+            runs.append(current)
+        }
+        return runs
     }
 
     /// The concatenated readings of a join, nil unless every member carries
@@ -172,9 +231,9 @@ extension JMDictLookup {
     /// rendered segments (`JMDictExpansion.candidates`) and resolves them in
     /// order. The first candidate with a hit is the display result — the
     /// tapped segment's own candidates lead, so the tapped word displays and
-    /// longer joins that also hit are retained as "also:" results. Every
-    /// candidate missing → nil; an infrastructure error on any query aborts
-    /// the tap as a throw — never a miss.
+    /// longer joins and kanji splits that also hit are retained as "also:"
+    /// results. Every candidate missing → nil; an infrastructure error on
+    /// any query aborts the tap as a throw — never a miss.
     func lookup(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
     ) throws -> LookupOutcome? {
