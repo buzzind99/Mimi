@@ -215,7 +215,13 @@ fn prolonged_vowel(kana: char) -> Option<char> {
         0x3041..=0x304A => (h - 0x3041) / 2, // ぁ..お (small/full pairs)
         0x304B..=0x3054 => (h - 0x304B) / 2, // か..ご
         0x3055..=0x305E => (h - 0x3055) / 2, // さ..ぞ
-        0x305F..=0x3069 => (h - 0x305F) / 2, // た..ど (っ sits on the つ row)
+        // た..ど is 15 kana with pairs 1-off from づ on (づ で ど stray),
+        // so the pair arithmetic the other arms use misrows — spelled out.
+        0x305F | 0x3060 => 0,    // た だ
+        0x3061 | 0x3062 => 1,    // ち ぢ
+        0x3063..=0x3065 => 2,    // つ っ づ
+        0x3066 | 0x3067 => 3,    // て で
+        0x3068 | 0x3069 => 4,    // と ど
         0x306A..=0x306E => h - 0x306A,       // な..の
         0x306F..=0x307D => (h - 0x306F) / 3, // は..ぽ
         0x307E..=0x3082 => h - 0x307E,       // ま..も
@@ -720,6 +726,64 @@ mod tests {
         assert_eq!(
             reading_from_features(&row, FeatureScheme::Ipadic, "ゲーム").as_deref(),
             Some("げーむ")
+        );
+    }
+
+    #[test]
+    fn prolonged_vowel_dakuten_rows() {
+        // The た..ど run rows, voiced included: plain/dakuten pairs share a
+        // row, and the stray kana sit where their vowel says.
+        let cases = [
+            ('た', 'あ'),
+            ('だ', 'あ'),
+            ('ち', 'い'),
+            ('ぢ', 'い'),
+            ('つ', 'う'),
+            ('っ', 'う'),
+            ('づ', 'う'),
+            ('て', 'い'),
+            ('で', 'い'),
+            ('と', 'う'),
+            ('ど', 'う'),
+            ('ド', 'ウ'),
+        ];
+        for (kana, vowel) in cases {
+            assert_eq!(prolonged_vowel(kana), Some(vowel), "kana {kana}");
+        }
+    }
+
+    #[test]
+    fn expand_prolonged_marks_dakuten_readings() {
+        // どー → どう (the corpus's dominant shape), and the latent rows.
+        let cases = [
+            ("ドー", "ドウ"),
+            ("どー", "どう"),
+            ("でー", "でい"),
+            ("ヅー", "ヅウ"),
+            ("ドーブツ", "ドウブツ"),
+            ("かんどー", "かんどう"),
+        ];
+        for (reading, expanded) in cases {
+            assert_eq!(expand_prolonged_marks(reading, "漢字"), expanded);
+        }
+    }
+
+    #[test]
+    fn unidic_dakuten_prolonged_reading_expands_end_to_end() {
+        // 動物's UniDic row: pron ドーブツ expands to ドウブツ before the
+        // fold, so the payload reading is どうぶつ — the surface gate still
+        // holds when the word itself carries ー (expansion skipped, ー
+        // passes through, same as ゲーム/げーむ).
+        let row = parse_csv_row(
+            "名詞,普通名詞,一般,*,*,*,ドウブツ,動物,動物,ドーブツ,動物,ドーブツ,漢,*,*,*,*",
+        );
+        assert_eq!(
+            reading_from_features(&row, FeatureScheme::Unidic, "動物").as_deref(),
+            Some("どうぶつ")
+        );
+        assert_eq!(
+            reading_from_features(&row, FeatureScheme::Unidic, "動物ー").as_deref(),
+            Some("どーぶつ")
         );
     }
 
