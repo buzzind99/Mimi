@@ -14,6 +14,14 @@ extension AppModel {
     /// failure after a retry re-latches onto Apple instead of parking on
     /// `.unavailable` forever.
     func retryTranslation() {
+        reengageTranslation()
+    }
+
+    /// Re-arms the one-way auto-fallback and re-attaches the selected engine:
+    /// resets the latch, dismisses the latched degraded card (its Retry action
+    /// would otherwise linger), then activates. Shared by the manual retry and
+    /// a live provider change — both are explicit user intent to re-engage.
+    private func reengageTranslation() {
         translationFallbackActive = false
         // A latched degraded card carries this action; clear it up front so
         // the re-engaged engine's statuses reconcile from a clean stack.
@@ -21,16 +29,12 @@ extension AppModel {
         activateTranslation()
     }
 
-    /// Attaches the selected provider's engine to the queue. Called on
-    /// session start, on `retryTranslation`, and (via
-    /// `translationProviderDidChange`) on a provider selection change while
-    /// a session is running.
-    ///
-    /// External path: build the engine (key read from the Keychain here, at
-    /// construction), spawn the worker task, park the Apple host by
-    /// invalidating any live config. Apple path: invalidate + recreate the
-    /// config so `.translationTask` reliably re-fires and hands an
-    /// `AppleSessionEngine` to `queue.run(with:)`.
+    /// Attaches the selected provider's engine to the queue — on session
+    /// start, on `retryTranslation`, and (via `translationProviderDidChange`)
+    /// on a live provider change. External: build the engine (key read from
+    /// the Keychain here) and spawn the worker, parking any attached Apple
+    /// host. Apple: invalidate + recreate the config so `.translationTask`
+    /// reliably re-fires and hands an `AppleSessionEngine` to the queue.
     func activateTranslation() {
         if let engine = makeExternalEngine() {
             activeTranslationEngine = .external
@@ -42,16 +46,13 @@ extension AppModel {
                 await queue.run(with: engine)
             }
         } else {
-            // Apple path. A selected-but-unconfigured external provider (key
-            // deleted) degrades to Apple here instead of failing outright —
-            // the footer's `.degraded`/`.unavailable` statuses and the
-            // engines card surface the state. Dev builds pin the key store
-            // to a no-op (see `TranslationSettings.init`), so external
-            // providers always take this path there.
+            // A selected-but-unconfigured external provider (key deleted)
+            // degrades to Apple here; the footer and ENGINES card surface
+            // the state. Dev builds pin the key store to a no-op
+            // (`TranslationSettings.init`), so externals always land here.
             activeTranslationEngine = .apple
             activeExternalProvider = nil
-            translationConfig?.invalidate()
-            translationConfig = makeTranslationConfig()
+            refreshTranslationConfig()
         }
     }
 
@@ -71,9 +72,7 @@ extension AppModel {
         if provider.isExternal, translationSettings.key(for: provider) == nil {
             return
         }
-        translationFallbackActive = false
-        toasts.dismiss(key: ToastKey.translationFallback)
-        activateTranslation()
+        reengageTranslation()
     }
 
     /// Builds the selected external provider's engine, or nil when Apple is
@@ -179,6 +178,13 @@ extension AppModel {
         activeExternalProvider = nil
         translationStatus = .degraded("External translation failed — using Apple on-device", severity)
         reconcileTranslationToasts(translationStatus)
+        refreshTranslationConfig()
+    }
+
+    /// Invalidates the live config (parking any attached Apple host) and
+    /// recreates it so `.translationTask` reliably re-fires and hands a fresh
+    /// `AppleSessionEngine` to `queue.run(with:)`.
+    private func refreshTranslationConfig() {
         translationConfig?.invalidate()
         translationConfig = makeTranslationConfig()
     }
