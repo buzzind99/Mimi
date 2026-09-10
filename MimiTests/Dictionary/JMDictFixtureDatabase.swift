@@ -30,7 +30,11 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// the build script stores both reading shapes;
 /// `9990080` さご — kana-only, so the surface-match-first ranking can pin
 /// the kana-written entry above the kanji homophone on the shared さご
-/// headword.
+/// headword;
+/// `9990090` 呂敷/ろしき — a hit for the substring of 風呂敷 that crosses
+/// the 風呂+敷 segment boundary, so the expansion suite can pin the
+/// joined-text split fallback (tap 風呂: the join 風呂敷 displays, the
+/// boundary-crossing 呂敷 split trails in "also").
 enum JMDictFixtureDatabase {
     /// The built database plus the directory it owns — `remove()` deletes
     /// both (test suites call it from `deinit`).
@@ -157,7 +161,17 @@ enum JMDictFixtureDatabase {
     }
 
     private static var syntheticWords: [FixtureWord] {
-        [
+        SyntheticWords.all
+    }
+}
+
+// MARK: - Synthetic entries
+
+/// The synthetic entries themselves, split out of the database builder's
+/// type body. See `JMDictFixtureDatabase`'s doc comment for what each pins.
+private extension JMDictFixtureDatabase {
+    private enum SyntheticWords {
+        fileprivate static let all: [FixtureWord] = [
             FixtureWord(
                 id: "9990010",
                 kanji: [FixtureKanji(text: "仮語", common: false, jlptLevel: nil, pitchAccent: nil)],
@@ -282,12 +296,28 @@ enum JMDictFixtureDatabase {
                         gloss: [FixtureGloss(lang: "eng", text: "kana-written homophone")]
                     )
                 ]
+            ),
+            FixtureWord(
+                id: "9990090",
+                kanji: [FixtureKanji(text: "呂敷", common: false, jlptLevel: nil, pitchAccent: nil)],
+                kana: [FixtureKana(
+                    text: "ろしき", common: false, appliesToKanji: ["*"], jlptLevel: nil,
+                    pitchAccent: nil
+                )],
+                sense: [
+                    FixtureSense(
+                        partOfSpeech: ["n"], appliesToKanji: nil, appliesToKana: nil, misc: nil,
+                        gloss: [FixtureGloss(lang: "eng", text: "boundary-crossing split hit")]
+                    )
+                ]
             )
         ]
     }
+}
 
-    // MARK: - Insertion (build-script mapping)
+// MARK: - Insertion (build-script mapping)
 
+private extension JMDictFixtureDatabase {
     private static func insert(_ word: FixtureWord, _ db: OpaquePointer) throws {
         guard let entSeq = Int(word.id) else {
             throw FixtureError.badEntryID(word.id)

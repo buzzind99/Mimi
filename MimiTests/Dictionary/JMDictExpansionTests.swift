@@ -236,8 +236,53 @@ final class JMDictExpansionCandidateTests {
         )
 
         // The join comes before the splits; the 生徒 split (the surface
-        // itself) is deduplicated away.
-        #expect(candidates.map(\.text) == ["生徒", "生徒会", "生", "徒"])
+        // itself) is deduplicated away and the joined text contributes the
+        // boundary-crossing 徒会 (the neighbor's 会 stays one tap away).
+        #expect(candidates.map(\.text) == ["生徒", "生徒会", "生", "徒", "徒会"])
+    }
+
+    @Test("the joined text's boundary-crossing splits trail the tapped surface's")
+    func joinedTextSplitsAfterTappedSplits() {
+        let candidates = JMDictExpansion.candidates(
+            segments: segments(("風呂", nil), ("敷", nil)),
+            tappedAt: 0,
+            sentenceText: "風呂敷"
+        )
+
+        // The tapped surface's splits (風, 呂) lead; the joined text adds
+        // only the boundary-crossing 呂敷 — the neighbor's 敷 stays one
+        // tap away on the 敷 segment, and the join itself deduplicates.
+        #expect(candidates.map(\.text) == ["風呂", "風呂敷", "風", "呂", "呂敷"])
+    }
+
+    @Test("a kana tap gains no boundary-crossing splits across a kanji neighbor")
+    func kanaTapNoCrossingSplits() {
+        let candidates = JMDictExpansion.candidates(
+            segments: segments(("お", nil), ("土産", "土産")),
+            tappedAt: 0,
+            sentenceText: "お土産"
+        )
+
+        // The kanji run starts inside the neighbor, so no substring of
+        // お土産 straddles the tap boundary: the join alone remains.
+        #expect(candidates.map(\.text) == ["お", "お土産"])
+    }
+
+    @Test("joined-text splits truncate behind the tapped surface's under the cap")
+    func joinedSplitsTruncatedBehindTappedSplits() {
+        let candidates = JMDictExpansion.candidates(
+            segments: segments(("東京駅前", nil), ("駅", nil)),
+            tappedAt: 0,
+            sentenceText: "東京駅前駅"
+        )
+
+        // The join itself occupies a candidate slot (longest-first joins
+        // rank above splits), so the tapped surface's eight splits leave
+        // one slot and the joined text's boundary-crossing splits fall to
+        // the cap before emitting.
+        #expect(candidates.map(\.text) == [
+            "東京駅前", "東京駅前駅", "東京駅", "京駅前", "東京", "京駅", "駅前", "東", "京"
+        ])
     }
 
     // MARK: Reading threading
@@ -394,16 +439,35 @@ final class JMDictExpansionTests {
 
     @Test("a compound hit displays and its split hits trail in also")
     func compoundDisplaySplitsTrail() throws {
+        // 風通し keeps the also-list empty — the 風通 / 風 / 通 splits all
+        // miss the fixture (風呂敷 can't: the boundary-crossing 呂敷 split
+        // resolves the synthetic entry).
         let outcome = try #require(try engine.lookup(
-            segments: [LookupSegment(surface: "風呂敷")],
+            segments: [LookupSegment(surface: "風通し")],
+            tappedAt: 0,
+            sentenceText: "風通し"
+        ))
+
+        #expect(outcome.display.matched == "風通し")
+        #expect(outcome.display.entries.map(\.entSeq) == [1_500_010])
+        #expect(outcome.also.isEmpty)
+    }
+
+    @Test("a cross-boundary split of the join trails in also")
+    func joinedSplitCrossBoundaryHit() throws {
+        let outcome = try #require(try engine.lookup(
+            segments: [LookupSegment(surface: "風呂"), LookupSegment(surface: "敷")],
             tappedAt: 0,
             sentenceText: "風呂敷"
         ))
 
+        // The join 風呂敷 displays; the tapped surface's splits (風, 呂)
+        // miss the fixture and the boundary-crossing 呂敷 split resolves
+        // the compound's inner word as an "also:" result.
         #expect(outcome.display.matched == "風呂敷")
         #expect(outcome.display.entries.map(\.entSeq) == [1_500_150])
-        // The 風呂 / 呂敷 / 風 / 呂 / 敷 splits all miss the fixture.
-        #expect(outcome.also.isEmpty)
+        #expect(outcome.also.map(\.matched) == ["呂敷"])
+        #expect(outcome.also[0].entries.map(\.entSeq) == [9_990_090])
     }
 
     @Test("the tap's furigana ranks the matching entry first in the display result")

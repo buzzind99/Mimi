@@ -27,7 +27,11 @@ struct LookupSegment: Equatable, Sendable {
 /// consecutive word segments into lookup-candidate fallbacks (お+土産 →
 /// お土産 offered when the tapped piece alone misses), then splits the
 /// tapped surface's contiguous kanji runs into substring candidates
-/// (映画 → 映, 画) for compounds the tokenizer kept whole.
+/// (映画 → 映, 画) for compounds the tokenizer kept whole. The split then
+/// runs once more over the joined expansion text as the deepest fallback,
+/// emitting the substrings that cross a member boundary (風呂+敷 → 呂敷)
+/// — a join that spans a real compound's edge can still resolve its
+/// inner word.
 ///
 /// The tapped segment's own candidates lead — surface, then lemma — so the
 /// word the user tapped always takes the display result and a longer join
@@ -35,7 +39,8 @@ struct LookupSegment: Equatable, Sendable {
 /// fall back to their lemma (base form) when the surface itself isn't a
 /// headword. The joins follow in longest-first order for taps whose own
 /// text isn't a dictionary headword, and the kanji-substring splits trail
-/// them, longest substring first, as the deep fallback.
+/// them, longest substring first — the tapped surface's splits before the
+/// joined text's — as the deep fallback.
 ///
 /// Split candidates carry no reading: per-character division of the
 /// segment's furigana isn't reliable (ateji, multi-character readings), so
@@ -69,9 +74,10 @@ enum JMDictExpansion {
     /// Candidates for a tap on `index`: the tapped segment's surface first,
     /// then its lemma (conjugated forms fall back to their base form), then
     /// the validated forward joins longest-first, then the tapped surface's
-    /// kanji-substring splits. Truncated to `maxCandidates`, tapped
-    /// candidates first, so the word the user tapped always leads the
-    /// display result and a tap costs at most `maxCandidates` indexed
+    /// kanji-substring splits, then the joined expansion text's splits —
+    /// the boundary-crossing substrings. Truncated to `maxCandidates`,
+    /// tapped candidates first, so the word the user tapped always leads
+    /// the display result and a tap costs at most `maxCandidates` indexed
     /// queries.
     static func candidates(
         segments: [LookupSegment], tappedAt index: Int, sentenceText: String
@@ -97,26 +103,46 @@ enum JMDictExpansion {
         }
         // Split candidates trail the joins, deduplicated against everything
         // already emitted (the longest split of an all-kanji surface is the
-        // surface itself; a short one can coincide with the lemma or a join).
-        let emitted = Set(candidates.map(\.text))
-        candidates.append(contentsOf: splitCandidates(for: tapped.surface).filter {
+        // surface itself; a short one can coincide with the lemma or a
+        // join): the tapped surface's substrings first, then the joined
+        // expansion text's boundary-crossing substrings (風呂+敷 → 呂敷) —
+        // substrings wholly inside the tapped surface already came out of
+        // the first pass, and ones wholly inside a neighbor stay one tap
+        // away on that neighbor. The deep fallback never evicts the tapped
+        // surface's own splits.
+        var emitted = Set(candidates.map(\.text))
+        let tappedSplits = splitCandidates(for: tapped.surface).filter {
             !emitted.contains($0.text)
-        })
+        }
+        candidates.append(contentsOf: tappedSplits)
+        emitted.formUnion(tappedSplits.map(\.text))
+        let crossingSplits = splitCandidates(
+            for: members.map(\.surface).joined(),
+            crossing: tapped.surface.unicodeScalars.count
+        ).filter { !emitted.contains($0.text) }
+        candidates.append(contentsOf: crossingSplits)
         return Array(candidates.prefix(maxCandidates))
     }
 
-    /// The tapped surface's kanji-substring split candidates, longest
-    /// substring first: the substrings (up to `maxSplitLength` characters)
-    /// of each contiguous kanji run, lengths descending, left-to-right
-    /// within a length (映画 → 映, 画 once the surface itself is
-    /// deduplicated away). Each carries no reading — the lookup ranking
-    /// ignores a nil reading.
-    private static func splitCandidates(for surface: String) -> [LookupCandidate] {
-        let runs = kanjiRuns(in: surface)
+    /// A text's kanji-substring split candidates, longest substring first:
+    /// the substrings (up to `maxSplitLength` characters) of each
+    /// contiguous kanji run, lengths descending, left-to-right within a
+    /// length (映画 → 映, 画 once the text itself is deduplicated away).
+    /// With `crossing`, only the substrings straddling that scalar offset
+    /// are emitted — substrings wholly on either side are dropped. Each
+    /// candidate carries no reading — the lookup ranking ignores a nil
+    /// reading.
+    private static func splitCandidates(
+        for text: String, crossing boundary: Int? = nil
+    ) -> [LookupCandidate] {
         var candidates: [LookupCandidate] = []
         for length in stride(from: maxSplitLength, through: 1, by: -1) {
-            for run in runs where run.count >= length {
+            for (offset, run) in kanjiRuns(in: text) where run.count >= length {
                 for start in 0 ... run.count - length {
+                    let base = offset + start
+                    if let boundary, base + length <= boundary || base >= boundary {
+                        continue
+                    }
                     candidates.append(LookupCandidate(
                         text: String(String.UnicodeScalarView(run[start ..< start + length]))
                     ))
@@ -126,21 +152,26 @@ enum JMDictExpansion {
         return candidates
     }
 
-    /// The contiguous kanji runs of a surface, in order (食べ物 → 食, 物;
-    /// kana, numerals, and punctuation break a run).
-    private static func kanjiRuns(in surface: String) -> [[Unicode.Scalar]] {
-        var runs: [[Unicode.Scalar]] = []
+    /// The contiguous kanji runs of a text with each run's scalar start
+    /// offset, in order (食べ物 → 食@0, 物@2; kana, numerals, and
+    /// punctuation break a run).
+    private static func kanjiRuns(
+        in text: String
+    ) -> [(offset: Int, scalars: [Unicode.Scalar])] {
+        var runs: [(offset: Int, scalars: [Unicode.Scalar])] = []
         var current: [Unicode.Scalar] = []
-        for scalar in surface.unicodeScalars {
+        var scanned = 0
+        for scalar in text.unicodeScalars {
             if KanaClassification.isKanji(scalar) {
                 current.append(scalar)
             } else if !current.isEmpty {
-                runs.append(current)
+                runs.append((scanned - current.count, current))
                 current = []
             }
+            scanned += 1
         }
         if !current.isEmpty {
-            runs.append(current)
+            runs.append((scanned - current.count, current))
         }
         return runs
     }
