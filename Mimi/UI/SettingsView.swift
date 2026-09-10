@@ -40,6 +40,7 @@ struct SettingsView: View {
             minHeight: 720, idealHeight: 800
         )
         .background(Palette.window)
+        .background(FloatingWindowAccessor())
         .preferredColorScheme($appearance.resolvedColorScheme)
         // A selection change applies immediately while a session is running:
         // the queue re-attaches the selected engine mid-drain (pending
@@ -334,5 +335,24 @@ struct SettingsView: View {
         }
         .padding(16)
         .settingsCardBackground()
+    }
+}
+
+/// Raises the hosting Settings window to `.floating` so it stays above the
+/// main window (and other normal-level windows), matching the HUD panel's
+/// level band. SwiftUI owns the Settings scene's window and may recreate it,
+/// so the level is re-applied every time the view attaches to a window.
+private struct FloatingWindowAccessor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        FloatingLevelView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class FloatingLevelView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.level = .floating
+        }
     }
 }
