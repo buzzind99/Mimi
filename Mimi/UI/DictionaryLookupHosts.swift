@@ -1,5 +1,26 @@
 import SwiftUI
 
+// MARK: - Shared popover binding
+
+extension AppModel {
+    /// The "get: source match / set: dismiss" binding behind every
+    /// dictionary-popover presentation (the live strip and each transcript
+    /// word anchor): true only while the selection's anchor is `source`;
+    /// dismissal (and Escape) clears the selection only when this surface
+    /// owns it, so a stale binding from a virtualized-off-screen row can
+    /// never clobber a newer selection.
+    func lookupPopoverBinding(for source: SelectedLookup.Source) -> Binding<Bool> {
+        Binding(
+            get: { self.selectedLookup?.source == source },
+            set: { isPresented in
+                if !isPresented {
+                    self.dismissLookupPopover(source: source)
+                }
+            }
+        )
+    }
+}
+
 // MARK: - Hosts
 
 /// The popover presented by the surface that owns the selection: the shared
@@ -74,10 +95,7 @@ struct DictionaryCardView: View {
     private func card(freeHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text("DICTIONARY")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.secondaryText)
-                    .kerning(1.2)
+                KickerLabel("DICTIONARY")
                 Spacer(minLength: 8)
                 if let pinned = model.pinnedLookup,
                    case let .found(result, _, _) = pinned.content,
@@ -99,7 +117,7 @@ struct DictionaryCardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardChrome)
+        .cardSurface()
     }
 
     /// The pinned content per state: the shared entry view for a found

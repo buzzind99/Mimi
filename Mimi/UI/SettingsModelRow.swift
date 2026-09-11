@@ -80,21 +80,16 @@ struct SettingsModelRow: View {
         }
         .buttonStyle(.plain)
         .disabled(selectionDisabled)
-        .background(cardBackground)
+        .cardSurface(
+            radius: 12,
+            fill: isInUse ? Palette.accent.opacity(0.08) : Palette.cardFill,
+            stroke: isInUse ? Palette.accent.opacity(0.55) : Palette.cardStroke
+        )
         .hoverHighlight(
             RoundedRectangle(cornerRadius: 12, style: .continuous),
             isEnabled: !selectionDisabled && !isInUse,
             tint: Palette.accent, opacity: 0.06
         )
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(isInUse ? Palette.accent.opacity(0.08) : Palette.cardFill)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isInUse ? Palette.accent.opacity(0.55) : Palette.cardStroke)
-            )
     }
 
     /// Download affordances for a missing model; these stay enabled even
@@ -131,21 +126,7 @@ struct SettingsModelRow: View {
     private var footer: some View {
         switch downloader.state {
         case let .downloading(_, bytes, total):
-            VStack(alignment: .leading, spacing: 5) {
-                if let total, total > 0 {
-                    ProgressView(value: Double(bytes), total: Double(total))
-                        .tint(Palette.accent)
-                    Text(
-                        bytes.formatted(.byteCount(style: .memory)) + " / "
-                            + total.formatted(.byteCount(style: .memory))
-                    )
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(Palette.secondaryText)
-                } else {
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-            }
+            ModelDownloadProgressView(bytes: bytes, total: total)
         case let .failed(message):
             Text(message)
                 .font(.system(size: 10.5))

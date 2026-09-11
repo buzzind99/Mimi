@@ -5,17 +5,11 @@ import SwiftUI
 /// which the Appearance setting drives via `.preferredColorScheme`.
 enum Palette {
     // Surfaces
-    static let window = Color(light: 0xFAF7F2, dark: 0x12101A)
+    static let window = SharedTokens.window
     static let headerBar = Color(light: 0xFAF7F2, dark: 0x171320)
-    static let divider = Color(
-        light: NSColor(hex: 0xE9E2D8), dark: NSColor.white.withAlphaComponent(0.06)
-    )
-    static let cardFill = Color(
-        light: .white, dark: NSColor.white.withAlphaComponent(0.045)
-    )
-    static let cardStroke = Color(
-        light: NSColor(hex: 0xE9E2D8), dark: NSColor.white.withAlphaComponent(0.07)
-    )
+    static let divider = SharedTokens.divider
+    static let cardFill = SharedTokens.cardFill
+    static let cardStroke = SharedTokens.cardStroke
     static let cardShadow = Color(
         light: NSColor(hex: 0x2A241E).withAlphaComponent(0.05), dark: .clear
     )
@@ -25,6 +19,9 @@ enum Palette {
     static let fieldStroke = Color(
         light: NSColor(hex: 0xE9E2D8), dark: NSColor.white.withAlphaComponent(0.09)
     )
+    /// Settings tile fill. Dark density is deliberately stronger than
+    /// `Theme.tileFill` (6% vs 4%): these tiles sit inside an elevated card,
+    /// where a lighter wash would disappear.
     static let tileFill = Color(
         light: NSColor(hex: 0xF0EAE1), dark: NSColor.white.withAlphaComponent(0.06)
     )
@@ -38,8 +35,10 @@ enum Palette {
         light: NSColor(hex: 0xFF6B5E), dark: NSColor(hex: 0xFF6E9C)
     )
 
-    // Text
-    static let primaryText = Color(light: 0x2A241E, dark: 0xFFFFFF)
+    /// Text
+    static let primaryText = SharedTokens.primaryText
+    /// Settings detail text. Dark density is deliberately stronger than
+    /// `Theme.secondaryText` (60% vs 45%) for the settings hierarchy.
     static let secondaryText = Color(
         light: NSColor(hex: 0x8A8177), dark: NSColor.white.withAlphaComponent(0.6)
     )
@@ -51,37 +50,16 @@ enum Palette {
     )
 
     // Accent
-    static let accent = Color(light: 0xFF6B5E, dark: 0xFF6E9C)
-    static let accentViolet = Color(light: 0xFF6B5E, dark: 0xB36BFF)
+    static let accent = SharedTokens.accent
+    static let accentViolet = SharedTokens.brandViolet
     static let engineText = Color(light: 0xFF6B5E, dark: 0x9FE8DF)
-    static let statusGreen = Color(light: 0x15803D, dark: 0x4ADE80)
+    static let statusGreen = SharedTokens.statusGreen
     static let statusRed = Color(light: 0xC21F30, dark: 0xFF8A93)
 }
 
 // MARK: - Shared card pieces
 
 extension View {
-    /// Stacked-card surface used by every settings card.
-    func settingsCardBackground() -> some View {
-        background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Palette.cardFill)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Palette.cardStroke)
-                )
-                .shadow(color: Palette.cardShadow, radius: 8, y: 3)
-        )
-    }
-
-    /// Kicker label at the top of a settings card.
-    func settingsCardLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(Palette.label)
-            .kerning(1.2)
-    }
-
     /// 1pt hairline between rows inside a settings card.
     func settingsDivider() -> some View {
         Rectangle().fill(Palette.divider).frame(height: 1)

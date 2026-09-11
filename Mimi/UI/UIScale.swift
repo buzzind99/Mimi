@@ -35,27 +35,6 @@ enum UIScale: Int, CaseIterable, Identifiable {
     }
 }
 
-/// Property wrapper exposing the persisted UI scale (invalid stored values
-/// fall back to 100%). Conforms to `DynamicProperty` so observing views
-/// re-render on change; the projected value is a `Binding<UIScale>` for
-/// controls.
-@propertyWrapper
-struct UIScaleSetting: DynamicProperty {
-    @AppStorage(UIScale.storageKey) private var raw = UIScale.default.rawValue
-
-    var wrappedValue: UIScale {
-        get { UIScale(rawValue: raw) ?? .default }
-        nonmutating set { raw = newValue.rawValue }
-    }
-
-    var projectedValue: Binding<UIScale> {
-        Binding(
-            get: { UIScale(rawValue: raw) ?? .default },
-            set: { raw = $0.rawValue }
-        )
-    }
-}
-
 /// Point sizes for the macOS semantic text styles content text uses
 /// (caption 11, body 13, callout 12, title3 15), multiplied by the UI-scale
 /// factor. Visually identical to the semantic styles at 100%.

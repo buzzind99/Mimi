@@ -6,9 +6,9 @@ struct HUDView: View {
     var model: AppModel
     var live: LivePartialState
     @ObservedObject var panel: HUDPanel
-    @ReadingAnnotationSetting private var readingAnnotation
-    @CursorModeSetting private var cursorMode
-    @UIScaleSetting private var uiScale
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
+    @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
 
     /// Set on offscreen measurement copies: fixes the layout width so the
     /// measured ideal height reflects text wrapped at the real HUD width.
@@ -34,13 +34,10 @@ struct HUDView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.black.opacity(0.62))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(.white.opacity(panel.locked ? 0.08 : 0.35), lineWidth: 1)
+        .cardSurface(
+            radius: 12,
+            fill: .black.opacity(0.62),
+            stroke: .white.opacity(panel.locked ? 0.08 : 0.35)
         )
         .frame(minWidth: 360, minHeight: 170)
         .overlay(alignment: .topTrailing) { padlockButton }

@@ -43,16 +43,39 @@ extension NSColor {
     }
 }
 
+/// Identity primitives shared verbatim by the main-window `Theme` and the
+/// settings `Palette`: surfaces, strokes, text, and accents that must match
+/// across both windows. Each surface keeps its own density-specific tokens on
+/// top of this core.
+enum SharedTokens {
+    static let window = Color(light: 0xFAF7F2, dark: 0x12101A)
+    static let divider = Color(
+        light: NSColor(hex: 0xE9E2D8), dark: NSColor.white.withAlphaComponent(0.06)
+    )
+    static let cardFill = Color(
+        light: NSColor.white, dark: NSColor.white.withAlphaComponent(0.045)
+    )
+    static let cardStroke = Color(
+        light: NSColor(hex: 0xE9E2D8), dark: NSColor.white.withAlphaComponent(0.07)
+    )
+    static let primaryText = Color(light: 0x2A241E, dark: 0xFFFFFF)
+    static let accent = Color(light: 0xFF6B5E, dark: 0xFF6E9C)
+    static let brandViolet = Color(light: 0xFF6B5E, dark: 0xB36BFF)
+    static let statusGreen = Color(light: 0x15803D, dark: 0x4ADE80)
+}
+
 /// Main-window design tokens. Light values mirror the Settings warm-paper
 /// palette (`Palette` in SettingsPalette.swift): cream surfaces, warm-brown
 /// text, coral accent. Dark values use the matching sakura dark appearance.
-/// Centralized here so tokens stay tweakable without touching view code.
+/// Shared primitives live in `SharedTokens`; the tokens below are
+/// surface-specific. Centralized here so tokens stay tweakable without
+/// touching view code.
 enum Theme {
 
     // MARK: Surfaces
 
     /// Transcript pane background.
-    static let window = Color(light: 0xFAF7F2, dark: 0x12101A)
+    static let window = SharedTokens.window
     /// Sidebar background.
     static let sidebar = Color(light: 0xFAF7F2, dark: 0x171320)
     /// Live strip background.
@@ -70,21 +93,15 @@ enum Theme {
     // MARK: Strokes & fills
 
     /// Card fill: white 4.5% on dark, solid white (settings card fill) on light.
-    static let cardFill = Color(
-        light: NSColor.white,
-        dark: NSColor.white.withAlphaComponent(0.045)
-    )
+    static let cardFill = SharedTokens.cardFill
     /// Card stroke: settings hairline `#E9E2D8` on light, white 7% on dark.
-    static let cardStroke = Color(
-        light: NSColor(hex: 0xE9E2D8),
-        dark: NSColor.white.withAlphaComponent(0.07)
-    )
+    static let cardStroke = SharedTokens.cardStroke
     /// 1pt separators (sidebar divider, live-strip top edge).
-    static let divider = Color(
-        light: NSColor(hex: 0xE9E2D8),
-        dark: NSColor.white.withAlphaComponent(0.06)
-    )
-    /// Inner tile fill (scale stepper middle, toast dismiss button).
+    static let divider = SharedTokens.divider
+    /// Inner tile fill (scale stepper middle, toast dismiss button). Dark
+    /// density is deliberately lower than `Palette.tileFill` (4% vs 6%):
+    /// main-window tiles sit on a flat surface, settings tiles sit inside an
+    /// already-elevated card and need the stronger wash to read.
     static let tileFill = Color(
         light: NSColor(hex: 0xF0EAE1),
         dark: NSColor.white.withAlphaComponent(0.04)
@@ -95,8 +112,11 @@ enum Theme {
     /// JP transcript text (primary line).
     static let jpText = Color(light: 0x2A241E, dark: 0xF5F3FA)
     /// Generic primary text.
-    static let primaryText = Color(light: 0x2A241E, dark: 0xFFFFFF)
-    /// Labels and detail lines: warm gray `#8A8177` on light, white 45% on dark.
+    static let primaryText = SharedTokens.primaryText
+    /// Labels and detail lines: warm gray `#8A8177` on light, white 45% on
+    /// dark. The dark density is intentionally lighter than
+    /// `Palette.secondaryText` (45% vs 60%): settings text sits on a raised
+    /// card and needs the stronger contrast for its hierarchy.
     static let secondaryText = Color(
         light: NSColor(hex: 0x8A8177),
         dark: NSColor.white.withAlphaComponent(0.45)
@@ -111,10 +131,10 @@ enum Theme {
 
     /// Accent (reading-aid selected pill, jump-button glyphs, brand): settings
     /// coral `#FF6B5E` on light, sakura pink on dark.
-    static let accentPink = Color(light: 0xFF6B5E, dark: 0xFF6E9C)
+    static let accentPink = SharedTokens.accent
     /// Brand gradient's second stop — flat coral on light (mirrors the
     /// settings header mark), violet on dark.
-    static let brandViolet = Color(light: 0xFF6B5E, dark: 0xB36BFF)
+    static let brandViolet = SharedTokens.brandViolet
     /// Inline romaji / furigana reading annotations.
     static let annotationPink = Color(light: 0xB33459, dark: 0xFF9DBB)
     /// Translation text.
@@ -134,7 +154,7 @@ enum Theme {
     /// LIVE indicator (dot + label): settings status red on light.
     static let liveRed = Color(light: 0xC21F30, dark: 0xFF4D5E)
     /// Engine-status dots (green = running, yellow = transitioning).
-    static let dotGreen = Color(light: 0x15803D, dark: 0x4ADE80)
+    static let dotGreen = SharedTokens.statusGreen
     static let dotYellow = Color(light: 0xB45309, dark: 0xFBBF24)
 
     // MARK: Toast
@@ -207,5 +227,54 @@ extension Theme {
         case .confirm: NoticePillTokens(fill: noticeFill, text: noticeText)
         case .warning: NoticePillTokens(fill: noticeWarningFill, text: noticeWarningText)
         }
+    }
+}
+
+extension View {
+    /// Rounded card surface shared by every card-like view — sidebar cards,
+    /// settings cards, the notice/toast cards, onboarding, and the HUD panel.
+    /// A continuous rounded rect filled with `fill`, stroked with `stroke`,
+    /// with an optional drop shadow. The defaults are the shared card tokens;
+    /// the settings surface passes `Palette.cardShadow`.
+    func cardSurface(
+        radius: CGFloat = 14,
+        fill: Color = Theme.cardFill,
+        stroke: Color = Theme.cardStroke,
+        shadow: Color = .clear,
+        shadowRadius: CGFloat = 8,
+        shadowY: CGFloat = 3
+    ) -> some View {
+        background(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(fill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .stroke(stroke)
+                )
+                .shadow(color: shadow, radius: shadowRadius, y: shadowY)
+        )
+    }
+}
+
+/// Small bold uppercase kicker label used above sidebar cards, settings
+/// cards, and the dictionary card. Defaults to the main-window secondary
+/// text; settings surfaces pass `Palette.label`, and the OpenRouter model
+/// field uses the 9.5pt variant.
+struct KickerLabel: View {
+    let text: String
+    var color: Color
+    var size: CGFloat
+
+    init(_ text: String, color: Color = Theme.secondaryText, size: CGFloat = 10) {
+        self.text = text
+        self.color = color
+        self.size = size
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: size, weight: .bold))
+            .foregroundStyle(color)
+            .kerning(1.2)
     }
 }

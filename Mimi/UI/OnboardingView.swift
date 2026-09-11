@@ -96,8 +96,7 @@ struct OnboardingView: View {
         .foregroundStyle(Theme.secondaryText)
         .padding(16)
         .frame(maxWidth: 520, alignment: .leading)
-        .background(cardShape.fill(Theme.cardFill))
-        .overlay(cardShape.stroke(Theme.cardStroke))
+        .cardSurface()
     }
 
     private var selectedChoice: ASRModelChoice {
@@ -138,11 +137,9 @@ struct OnboardingView: View {
                     cardShape, isEnabled: true,
                     tint: Theme.accentPink, opacity: isSelected ? 0.08 : 0.05
                 )
-                .background(
-                    cardShape.fill(isSelected ? Theme.accentPink.opacity(0.1) : Theme.cardFill)
-                )
-                .overlay(
-                    cardShape.strokeBorder(isSelected ? Theme.accentPink : Theme.cardStroke)
+                .cardSurface(
+                    fill: isSelected ? Theme.accentPink.opacity(0.1) : Theme.cardFill,
+                    stroke: isSelected ? Theme.accentPink : Theme.cardStroke
                 )
             }
         }
@@ -178,26 +175,15 @@ struct OnboardingView: View {
             }
         case let .downloading(_, bytes, total):
             VStack(spacing: 8) {
-                if let total, total > 0 {
-                    ProgressView(value: Double(bytes), total: Double(total))
-                        .tint(Theme.accentPink)
-                    Text(
-                        "Downloading \(selectedChoice.displayName) model… "
-                            + bytes.formatted(.byteCount(style: .memory)) + " / "
-                            + total.formatted(.byteCount(style: .memory))
-                    )
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(Theme.secondaryText)
-                } else {
-                    ProgressView()
-                        .tint(Theme.accentPink)
-                    Text(
-                        "Downloading \(selectedChoice.displayName) model… "
-                            + bytes.formatted(.byteCount(style: .memory))
-                    )
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(Theme.secondaryText)
-                }
+                ModelDownloadProgressView(
+                    bytes: bytes, total: total,
+                    tint: Theme.accentPink,
+                    font: .system(size: 11).monospacedDigit(),
+                    textColor: Theme.secondaryText,
+                    alignment: .center,
+                    spacing: 8,
+                    prefix: "Downloading \(selectedChoice.displayName) model… "
+                )
                 Button("Cancel") { downloader.cancel() }
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.accentPink)

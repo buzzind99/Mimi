@@ -1,15 +1,14 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Main sidebar: brand header, session capsule, reading-aid picker,
 /// engines/audio/session cards, and the toolbar row. Fixed 282pt, themed by
 /// `Theme`; the transcript pane supplies the 1pt divider.
 struct SidebarView: View {
     @Bindable var model: AppModel
-    @ReadingAnnotationSetting private var readingAnnotation
-    @CursorModeSetting private var cursorMode
-    @UIScaleSetting private var uiScale
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
+    @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
 
     @State private var exportPresented = false
     @State private var exportFormat: SessionExporter.Format = .txt
@@ -86,50 +85,31 @@ struct SidebarView: View {
 
     // MARK: - Session capsule
 
+    /// Pure mapping (unit-tested): phase → capsule presentation + ASR dot.
+    private var status: SidebarStatus {
+        SidebarStatus.map(phase: model.phase, isCheckingModel: model.isCheckingModel)
+    }
+
     private var sessionButton: some View {
         Button {
-            if model.phase == .running || model.phase == .sourceLost {
+            if status.isLiveSession {
                 model.stop()
             } else {
                 model.start()
             }
         } label: {
-            Label(sessionButtonTitle, systemImage: sessionButtonIcon)
+            Label(status.sessionTitle, systemImage: status.sessionIcon)
                 .font(.system(size: 14, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .background(Capsule().fill(sessionButtonGradient))
+                .background(
+                    Capsule().fill(status.isLiveSession ? Theme.Gradients.stop : Theme.Gradients.start)
+                )
                 .foregroundStyle(.white)
                 .pointerStyle(.link)
         }
         .buttonStyle(.plain)
-        .disabled(sessionButtonDisabled)
-    }
-
-    private var sessionButtonTitle: String {
-        switch model.phase {
-        case .running, .sourceLost: "Stop session"
-        case .starting: "Starting…"
-        case .stopping: "Stopping…"
-        case .idle, .needsModel, .failed: "Start session"
-        }
-    }
-
-    private var sessionButtonIcon: String {
-        model.phase == .running || model.phase == .sourceLost ? "stop.fill" : "play.fill"
-    }
-
-    private var sessionButtonGradient: LinearGradient {
-        model.phase == .running || model.phase == .sourceLost
-            ? Theme.Gradients.stop
-            : Theme.Gradients.start
-    }
-
-    /// While model discovery is in flight Start is gated (`isCheckingModel`);
-    /// Stop must stay reachable from a live session.
-    private var sessionButtonDisabled: Bool {
-        model.phase == .starting || model.phase == .stopping
-            || (model.isCheckingModel && model.phase != .running && model.phase != .sourceLost)
+        .disabled(status.isSessionDisabled)
     }
 
     // MARK: - Annotation picker
@@ -192,24 +172,18 @@ extension SidebarView {
     }
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(Theme.secondaryText)
-            .kerning(1.2)
+        KickerLabel(text)
             .padding(.top, 24)
             .padding(.bottom, 8)
     }
 
     private var enginesCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("ENGINES")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Theme.secondaryText)
-                .kerning(1.2)
+            KickerLabel("ENGINES")
 
             engineRow(
                 title: "ASR · \(model.asrModelSettings.selected.displayName)",
-                detail: asrDetail, detailColor: asrDetailColor, dotColor: asrDotColor
+                detail: asrDetail, detailColor: asrDetailColor, dotColor: dotColor(status.asrDot)
             )
             engineRow(
                 title: "Translation · \(translationEngineName)",
@@ -218,7 +192,7 @@ extension SidebarView {
             )
         }
         .padding(14)
-        .background(cardChrome)
+        .cardSurface()
     }
 
     private var asrDetail: String {
@@ -227,15 +201,6 @@ extension SidebarView {
 
     private var asrDetailColor: Color {
         model.engineIsMock ? Theme.dotYellow : Theme.secondaryText
-    }
-
-    private var asrDotColor: Color {
-        switch model.phase {
-        case .running: Theme.dotGreen
-        case .starting, .stopping: Theme.dotYellow
-        case .sourceLost, .failed: Theme.liveRed
-        case .idle, .needsModel: Theme.secondaryText
-        }
     }
 
     /// The latched Apple fallback stays visible after the fresh Apple run
@@ -251,32 +216,27 @@ extension SidebarView {
     /// engine the queue isn't using.
     private var translationEngineName: String {
         guard model.activeTranslationEngine == .external else { return "Apple" }
-        return switch model.activeExternalProvider ?? model.translationSettings.selectedProvider {
-        case .apple: "Apple"
-        case .google: "Google"
-        case .deepl: "DeepL"
-        case .openrouter: "OpenRouter"
-        }
+        return (model.activeExternalProvider ?? model.translationSettings.selectedProvider).shortName
     }
 
     private var translationDetail: String {
-        if translationFallbackLatched {
-            return "On-device (fallback)"
-        }
-        return switch model.translationStatus {
-        case .degraded: "On-device (fallback)"
-        case .unavailable: "Unavailable"
-        case .ready, .translating, .retrying, .idle:
-            model.activeTranslationEngine == .apple ? "On-device" : "External"
-        }
-    }
-
-    private var translationDotColor: Color {
-        switch TranslationPill.map(
+        SidebarStatus.translationDetail(
             status: model.translationStatus,
             activeEngine: model.activeTranslationEngine,
             fallbackActive: translationFallbackLatched
-        ).tone {
+        )
+    }
+
+    private var translationDotColor: Color {
+        dotColor(SidebarStatus.DotTone(TranslationPill.map(
+            status: model.translationStatus,
+            activeEngine: model.activeTranslationEngine,
+            fallbackActive: translationFallbackLatched
+        ).tone))
+    }
+
+    private func dotColor(_ tone: SidebarStatus.DotTone) -> Color {
+        switch tone {
         case .green: Theme.dotGreen
         case .yellow: Theme.dotYellow
         case .red: Theme.liveRed
@@ -345,7 +305,7 @@ extension SidebarView {
         .menuIndicator(.hidden)
         .disabled(!model.isExportable)
         .frame(width: 34, height: 32)
-        .background(iconButtonBackground)
+        .cardSurface(radius: 9)
         .hoverHighlight(iconButtonShape, isEnabled: model.isExportable)
         .help("Copy or export the session transcript")
     }
@@ -357,7 +317,7 @@ extension SidebarView {
             Image(systemName: "rectangle.on.rectangle")
                 .foregroundStyle(model.hudVisible ? Theme.accentPink : Theme.primaryText.opacity(0.7))
                 .frame(width: 34, height: 32)
-                .background(iconButtonBackground)
+                .cardSurface(radius: 9)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -372,48 +332,31 @@ extension SidebarView {
             Image(systemName: "gearshape")
                 .foregroundStyle(isSettingsOpen ? Theme.accentPink : Theme.primaryText.opacity(0.7))
                 .frame(width: 34, height: 32)
-                .background(iconButtonBackground)
+                .cardSurface(radius: 9)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .hoverHighlight(iconButtonShape)
         .help("Settings")
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-            if isSettingsWindow(note.object) {
+            if SettingsWindowController.isSettingsWindow(note.object) {
                 isSettingsOpen = true
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
-            if isSettingsWindow(note.object) {
+            if SettingsWindowController.isSettingsWindow(note.object) {
                 isSettingsOpen = false
             }
         }
     }
 
-    /// SwiftUI's Settings scene window identifier.
-    private static let settingsWindowID = "com_apple_SwiftUI_Settings_window"
-
-    private func isSettingsWindow(_ object: Any?) -> Bool {
-        (object as? NSWindow)?.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true
-    }
-
     private func toggleSettings() {
-        if let window = NSApp.windows.first(where: {
-            // SwiftUI keeps the closed Settings window cached in `windows`,
-            // so check visibility rather than mere existence.
-            $0.identifier?.rawValue == Self.settingsWindowID && $0.isVisible
-        }) {
-            window.performClose(nil)
+        if let settingsWindow = SettingsWindowController.visibleWindow() {
+            SettingsWindowController.close(settingsWindow)
         } else {
             isSettingsOpen = true
             openSettings()
         }
-    }
-
-    private var iconButtonBackground: some View {
-        iconButtonShape
-            .fill(Theme.cardFill)
-            .overlay(iconButtonShape.stroke(Theme.cardStroke))
     }
 
     private var iconButtonShape: RoundedRectangle {
@@ -483,64 +426,5 @@ extension SidebarView {
                 title: "Export failed", body: error.localizedDescription
             )
         }
-    }
-}
-
-/// Card chrome (fill + stroke) shared by the sidebar cards, the audio leaf
-/// below, and the DICTIONARY card (DictionaryLookupViews.swift).
-var cardChrome: some View {
-    RoundedRectangle(cornerRadius: 14, style: .continuous)
-        .fill(Theme.cardFill)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Theme.cardStroke)
-        )
-}
-
-/// The sidebar AUDIO card as an observation leaf: it reads `AudioLevelState`
-/// directly, so meter updates (poll-tick staged RMS) re-render only this
-/// card — never the whole sidebar body with its engine/session cards.
-private struct AudioCardView: View {
-    let state: AudioLevelState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("AUDIO")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.secondaryText)
-                    .kerning(1.2)
-                Spacer()
-                Text(state.currentDB)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            AudioMeterView(levels: state.levels)
-                .frame(height: 44)
-        }
-        .padding(14)
-        .background(cardChrome)
-    }
-}
-
-/// Minimal `FileDocument` wrapper that hands the prepared export payload to
-/// SwiftUI's `fileExporter`.
-private struct ExportDocument: FileDocument {
-    let data: Data
-
-    static var readableContentTypes: [UTType] {
-        []
-    }
-
-    init(data: Data) {
-        self.data = data
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
     }
 }

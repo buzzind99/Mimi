@@ -45,15 +45,9 @@ struct ContentView: View {
     /// Whether the live strip owns the app's single dictionary
     /// popover: true only while the selection is anchored to the strip.
     /// Dismissal clears the selection only when the strip still owns it.
+    /// (Binding shape shared via `AppModel.lookupPopoverBinding`.)
     private var liveStripLookupPresented: Binding<Bool> {
-        Binding(
-            get: { model.selectedLookup?.source == .liveStrip },
-            set: { isPresented in
-                if !isPresented {
-                    model.dismissLookupPopover(source: .liveStrip)
-                }
-            }
-        )
+        model.lookupPopoverBinding(for: .liveStrip)
     }
 
     private var mainContent: some View {

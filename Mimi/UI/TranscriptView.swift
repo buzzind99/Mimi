@@ -27,9 +27,9 @@ import SwiftUI
 /// chase converges quietly.
 struct TranscriptView: View {
     var model: AppModel
-    @ReadingAnnotationSetting private var readingAnnotation
-    @CursorModeSetting private var cursorMode
-    @UIScaleSetting private var uiScale
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
+    @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
     @State private var pinnedToBottom = true
     @State private var reAnchorScheduled = false
     /// Latest geometry tick, driving the jump buttons' visibility off the
@@ -215,14 +215,7 @@ struct TranscriptView: View {
             sentenceIndex: sentenceIndex, tokenIndex: tokenIndex
         )
         return RubyTextView.LookupPopover(
-            isPresented: Binding(
-                get: { model.selectedLookup?.source == source },
-                set: { isPresented in
-                    if !isPresented {
-                        model.dismissLookupPopover(source: source)
-                    }
-                }
-            ),
+            isPresented: model.lookupPopoverBinding(for: source),
             content: model.selectedLookup?.popoverItem(for: source).map {
                 DictionaryPopoverView(model: model, selected: $0)
             }

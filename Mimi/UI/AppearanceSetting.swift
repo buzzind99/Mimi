@@ -22,6 +22,15 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .dark: "Dark"
         }
     }
+
+    /// SF Symbol shown beside the label in the settings appearance picker.
+    var systemImage: String {
+        switch self {
+        case .system: "laptopcomputer"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
 }
 
 /// Tracks the system-wide color scheme so `.system` can resolve to a
@@ -54,29 +63,24 @@ final class SystemSchemeObserver: ObservableObject {
     }
 }
 
-/// Property wrapper exposing the persisted appearance as a decoded
-/// `Appearance` (invalid stored values fall back to `.system`). Mirrors
-/// `ReadingAnnotationSetting`: conforms to `DynamicProperty` so observing
-/// views re-render on change; the projected value is a
-/// `Binding<Appearance>` for controls plus the always-concrete scheme for
-/// `.preferredColorScheme` at the window root.
+/// Property wrapper exposing the persisted appearance. Conforms to
+/// `DynamicProperty` so observing views re-render on change; the projected
+/// value is a `Binding<Appearance>` for controls plus the always-concrete
+/// scheme for `.preferredColorScheme` at the window root.
 @MainActor
 @propertyWrapper
 struct AppearanceSetting: DynamicProperty {
-    @AppStorage(Appearance.storageKey) private var raw = Appearance.system.rawValue
+    @AppStorage(Appearance.storageKey) private var stored = Appearance.system
     @StateObject private var systemScheme = SystemSchemeObserver.shared
 
     var wrappedValue: Appearance {
-        get { Appearance(rawValue: raw) ?? .system }
-        nonmutating set { raw = newValue.rawValue }
+        get { stored }
+        nonmutating set { stored = newValue }
     }
 
     var projectedValue: AppearanceProjection {
         AppearanceProjection(
-            binding: Binding(
-                get: { Appearance(rawValue: raw) ?? .system },
-                set: { raw = $0.rawValue }
-            ),
+            binding: Binding(get: { stored }, set: { stored = $0 }),
             resolvedColorScheme: resolvedColorScheme
         )
     }

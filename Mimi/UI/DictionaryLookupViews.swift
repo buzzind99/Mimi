@@ -1,106 +1,8 @@
 import SwiftUI
 
-/// Pure content assembly shared by the dictionary popover and the sidebar
-/// DICTIONARY card: derives display strings from a `JMDictEntry` under the
-/// lookup-plan caps and the probe-fixed mappings (JLPT `≈N`, pitch pill
-/// without an accent-type label, hatsuon omitted when it carries Wadoku
-/// markup). Both hosts render through the same view so they can never
-/// diverge.
-enum DictionaryContent {
-    static let maxGlossesPerSense = 3
-    static let maxSenses = 5
-    static let maxAlsoPills = 2
-
-    /// Headword row: the kanji writing when present, else the reading.
-    static func headword(of entry: JMDictEntry) -> String? {
-        entry.keb ?? entry.reb
-    }
-
-    /// Probe-fixed JLPT display: `≈N{value}` (5 → ≈N5 … 1 → ≈N1); nil
-    /// omits the badge.
-    static func jlptBadge(_ jlpt: Int?) -> String? {
-        guard let jlpt else { return nil }
-        return "≈N\(jlpt)"
-    }
-
-    /// `hatsuon` renders verbatim only when free of the Wadoku markup
-    /// markers (`< > [ ] ･ ~`); marked-up text omits the hatsuon part and
-    /// the pill shows `zoPatts` alone.
-    static func renderableHatsuon(_ hatsuon: String?) -> String? {
-        guard let hatsuon, !hatsuon.isEmpty,
-              !hatsuon.contains(where: { "<>[]･~".contains($0) })
-        else { return nil }
-        return hatsuon
-    }
-
-    /// Pitch pill v1: unmarked-up hatsuon (optional) + verbatim `zoPatts`
-    /// (alphabet `H L h l ,` — never re-spaced). Nil when neither part
-    /// exists, omitting the pill.
-    struct PitchPill: Equatable {
-        let hatsuon: String?
-        let zoPatts: String?
-    }
-
-    static func pitchPill(for entry: JMDictEntry) -> PitchPill? {
-        let hatsuon = renderableHatsuon(entry.hatsuon)
-        let zo = entry.zoPatts.flatMap { $0.isEmpty ? nil : $0 }
-        guard hatsuon != nil || zo != nil else { return nil }
-        return PitchPill(hatsuon: hatsuon, zoPatts: zo)
-    }
-
-    /// Romaji line under the headword: kana→romaji over the reading; nil
-    /// when the reading is missing or unmappable (no line).
-    static func romaji(for entry: JMDictEntry) -> String? {
-        entry.reb.flatMap { KanaRomaji.romaji(fromKana: $0) }
-    }
-
-    /// First tag of the stored comma-joined POS string.
-    static func posLabel(_ pos: String?) -> String? {
-        guard let pos, !pos.isEmpty else { return nil }
-        return pos.components(separatedBy: ",").first?
-            .trimmingCharacters(in: .whitespaces)
-    }
-
-    /// Sense list capped at `limit` (nil = every sense), with the hidden
-    /// count for the "+ N more senses" footer.
-    static func truncatedSenses(
-        _ senses: [JMDictSense], limit: Int? = DictionaryContent.maxSenses
-    ) -> (visible: ArraySlice<JMDictSense>, hidden: Int) {
-        guard let limit else { return (senses[...], 0) }
-        let visible = senses.prefix(limit)
-        return (visible, senses.count - visible.count)
-    }
-
-    /// Glosses of one sense capped (nil = every gloss), with the hidden count.
-    static func truncatedGlosses(
-        _ glosses: [String], limit: Int? = DictionaryContent.maxGlossesPerSense
-    ) -> (visible: ArraySlice<String>, hidden: Int) {
-        guard let limit else { return (glosses[...], 0) }
-        let visible = glosses.prefix(limit)
-        return (visible, glosses.count - visible.count)
-    }
-
-    /// "also:" fallback-hit pills (longest match first), capped at two.
-    static func truncatedAlso(_ also: [LookupResult]) -> ArraySlice<LookupResult> {
-        also.prefix(maxAlsoPills)
-    }
-
-    /// Pill label: what tapping shows — the result's lead entry headword
-    /// (promotion resets the pager to entry 0), falling back to the matched
-    /// string when the result carries no entries.
-    static func pillLabel(for result: LookupResult) -> String {
-        result.entries.first.flatMap { headword(of: $0) } ?? result.matched
-    }
-
-    /// Badge naming a display result that came from a forward join — the
-    /// tapped word itself has no entry, but the compound it joins into
-    /// does. nil for the tapped word's own surface or lemma, and for any
-    /// result the user promoted from a pill (an explicit choice never
-    /// reads as a fallback lead).
-    static func joinedMatchBadge(for origin: ExpansionOrigin) -> String? {
-        origin == .join ? "JOINED MATCH" : nil
-    }
-}
+// The pure content assembly (`DictionaryContent`) lives in
+// `DictionaryContent.swift`; this file holds the view types both dictionary
+// hosts render through.
 
 /// One row of tappable result pills under a mono label — the entry view's
 /// "also:" fallback hits and the not-found view's "related:" suggestions
@@ -191,10 +93,11 @@ struct DictionaryEntryContentView: View {
     /// The candidate role the display result came from. A join lead shows
     /// the joined-match badge — the compound matched, not the tapped word.
     var displayOrigin: ExpansionOrigin?
-    /// Senses rendered (nil = every sense). The popover keeps the shared
-    /// cap; the card passes nil to expand all.
+    /// Senses rendered (nil = every sense). Both hosts pass nil — long
+    /// entries expand in full; the constant default serves tests and any
+    /// future capped host.
     var senseLimit: Int? = DictionaryContent.maxSenses
-    /// Glosses per sense (nil = every gloss).
+    /// Glosses per sense (nil = every gloss); same host story as `senseLimit`.
     var glossLimit: Int? = DictionaryContent.maxGlossesPerSense
     /// When set, the sense rows render inside a vertical ScrollView framed
     /// to exactly this height — they scroll only when taller than it. The
@@ -410,7 +313,7 @@ struct DictionaryEntryContentView: View {
 
     @ViewBuilder
     private var senseRows: some View {
-        let truncated = DictionaryContent.truncatedSenses(entry.senses, limit: senseLimit)
+        let truncated = DictionaryContent.truncated(entry.senses, limit: senseLimit)
         if !truncated.visible.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(truncated.visible.enumerated()), id: \.offset) { index, sense in
@@ -433,7 +336,7 @@ struct DictionaryEntryContentView: View {
             if let pos = DictionaryContent.posLabel(sense.pos) {
                 DictionaryBadgeView(text: pos, color: Theme.accentPink, compact: true)
             }
-            let glosses = DictionaryContent.truncatedGlosses(sense.glosses, limit: glossLimit)
+            let glosses = DictionaryContent.truncated(sense.glosses, limit: glossLimit)
             // Visible glosses join into one wrapping line; a hidden tail
             // closes with an ellipsis.
             Text(
@@ -536,4 +439,4 @@ extension View {
     }
 }
 
-// The card chrome (fill + stroke) is declared in SidebarView.swift.
+// The card surface (fill + stroke) is `View.cardSurface` in Theme.swift.

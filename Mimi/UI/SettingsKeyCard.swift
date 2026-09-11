@@ -17,24 +17,24 @@ struct SettingsKeyCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            settingsCardLabel(provider.displayName.uppercased())
+            KickerLabel(provider.displayName.uppercased(), color: Palette.label)
             if settings.hasKey(for: provider) {
-                savedKeyRows(provider)
+                savedKeyRows()
             } else {
-                keyEntryRows(provider)
+                keyEntryRows()
             }
             if provider == .openrouter {
                 modelField
             }
         }
         .padding(16)
-        .settingsCardBackground()
+        .cardSurface(shadow: Palette.cardShadow)
     }
 
     // MARK: - Saved key
 
     @ViewBuilder
-    private func savedKeyRows(_ provider: TranslationProvider) -> some View {
+    private func savedKeyRows() -> some View {
         HStack(spacing: 8) {
             Text("••••••••••••••••")
                 .font(.system(size: 12, design: .monospaced))
@@ -63,7 +63,7 @@ struct SettingsKeyCard: View {
     // MARK: - Key entry
 
     @ViewBuilder
-    private func keyEntryRows(_ provider: TranslationProvider) -> some View {
+    private func keyEntryRows() -> some View {
         HStack(spacing: 8) {
             SecureField("Paste API key", text: $keyDraft)
                 .textFieldStyle(.plain)
@@ -98,10 +98,7 @@ struct SettingsKeyCard: View {
     private var modelField: some View {
         VStack(alignment: .leading, spacing: 7) {
             settingsDivider()
-            Text("MODEL")
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(Palette.label)
-                .kerning(1.2)
+            KickerLabel("MODEL", color: Palette.label, size: 9.5)
             HStack(spacing: 8) {
                 TextField("tencent/hy-mt2-30b-a3b", text: $settings.openRouterModel)
                     .textFieldStyle(.plain)

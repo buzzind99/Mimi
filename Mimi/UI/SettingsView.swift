@@ -147,27 +147,20 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Palette.accent.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Palette.accent.opacity(0.3))
-                )
-        )
+        .cardSurface(fill: Palette.accent.opacity(0.08), stroke: Palette.accent.opacity(0.3))
     }
 
     // MARK: - Provider
 
     private var providerCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            settingsCardLabel("TRANSLATION · PROVIDER")
+            KickerLabel("TRANSLATION · PROVIDER", color: Palette.label)
             ForEach(TranslationProvider.allCases) { provider in
                 providerRow(provider)
             }
         }
         .padding(16)
-        .settingsCardBackground()
+        .cardSurface(shadow: Palette.cardShadow)
     }
 
     private func providerRow(_ provider: TranslationProvider) -> some View {
@@ -194,7 +187,7 @@ struct SettingsView: View {
                             .fill(Palette.tileFill)
                     )
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(providerName(provider))
+                    Text(provider.settingsName(deeplIsFreeTier: settings.deeplIsFreeTier))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.primaryText)
                     Text(provider.settingsDetail)
@@ -219,55 +212,24 @@ struct SettingsView: View {
         )
     }
 
-    private func providerName(_ provider: TranslationProvider) -> String {
-        switch provider {
-        case .apple: "Apple"
-        case .google: "Google Translate"
-        case .deepl: settings.deeplIsFreeTier ? "DeepL (Free)" : "DeepL"
-        case .openrouter: "OpenRouter"
-        }
-    }
-
     // MARK: - Appearance
 
     private var appearanceCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            settingsCardLabel("APPEARANCE")
-            HStack(spacing: 2) {
-                appearanceSegment(.system, icon: "laptopcomputer")
-                appearanceSegment(.light, icon: "sun.max")
-                appearanceSegment(.dark, icon: "moon")
-            }
-            .padding(3)
-            .background(Capsule().fill(Palette.segmentTrack))
+            KickerLabel("APPEARANCE", color: Palette.label)
+            ModePicker(
+                help: "Window appearance — System follows the macOS setting",
+                modes: Appearance.allCases,
+                selection: $appearance.binding,
+                label: \.label,
+                icon: { $0.systemImage },
+                track: Palette.segmentTrack,
+                selectedFill: Palette.segmentFill,
+                unselectedColor: Palette.mutedText
+            )
         }
         .padding(16)
-        .settingsCardBackground()
-    }
-
-    private func appearanceSegment(_ value: Appearance, icon: String) -> some View {
-        let selected = appearance == value
-        return Button {
-            appearance = value
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                Text(value.label)
-                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
-            }
-            .foregroundStyle(selected ? Palette.primaryText : Palette.mutedText)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
-            .background {
-                if selected {
-                    Capsule().fill(Palette.segmentFill)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .hoverHighlight(Capsule(), isEnabled: !selected)
+        .cardSurface(shadow: Palette.cardShadow)
     }
 
     // MARK: - Model / session diagnostics
@@ -276,7 +238,7 @@ struct SettingsView: View {
     /// and a re-check action.
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            settingsCardLabel("SPEECH MODEL")
+            KickerLabel("SPEECH MODEL", color: Palette.label)
             HStack(alignment: .top, spacing: 12) {
                 ForEach(ASRModelChoice.allCases) { choice in
                     SettingsModelRow(choice: choice, model: model)
@@ -291,12 +253,12 @@ struct SettingsView: View {
             }
         }
         .padding(16)
-        .settingsCardBackground()
+        .cardSurface(shadow: Palette.cardShadow)
     }
 
     private var sessionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            settingsCardLabel("SESSION")
+            KickerLabel("SESSION", color: Palette.label)
             row(label: "Entries") {
                 Text("\(model.entries.count)")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -334,7 +296,7 @@ struct SettingsView: View {
             }
         }
         .padding(16)
-        .settingsCardBackground()
+        .cardSurface(shadow: Palette.cardShadow)
     }
 }
 

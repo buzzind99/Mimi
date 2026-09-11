@@ -69,14 +69,9 @@ private struct ToastCard: View {
         }
         .padding(14)
         .frame(width: 300)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Theme.toastBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(borderColor)
-                )
-                .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
+        .cardSurface(
+            fill: Theme.toastBackground, stroke: borderColor,
+            shadow: .black.opacity(0.4), shadowRadius: 18, shadowY: 8
         )
     }
 

@@ -12,9 +12,9 @@ struct LiveStripView: View {
     /// Invoked with the tapped word when cursor mode is `.dictionary`;
     /// nil keeps `.dictionary` on the legacy rendering path.
     var onLookup: ((LookupToken) -> Void)?
-    @ReadingAnnotationSetting private var readingAnnotation
-    @CursorModeSetting private var cursorMode
-    @UIScaleSetting private var uiScale
+    @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji
+    @AppStorage(CursorMode.storageKey) private var cursorMode = CursorMode.none
+    @AppStorage(UIScale.storageKey) private var uiScale = UIScale.default
     @State private var pulsing = false
 
     var body: some View {
@@ -91,9 +91,7 @@ struct LiveStripView: View {
     }
 
     private var reservedAnnotationLine: some View {
-        Text(verbatim: " ")
-            .font(.system(size: 13 * uiScale.factor, design: .monospaced))
-            .lineLimit(1)
+        AnnotationLineSpacer(font: .system(size: 13 * uiScale.factor, design: .monospaced))
     }
 
     /// Empty state: the "…" sits where the surface would, keeping the

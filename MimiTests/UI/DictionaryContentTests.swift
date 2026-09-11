@@ -1,5 +1,4 @@
 @testable import Mimi
-import SwiftUI
 import Testing
 
 /// Tests the shared dictionary content assembly (`DictionaryContent`) and
@@ -73,6 +72,7 @@ struct DictionaryContentTests {
     @Test("clean hatsuon renders verbatim alongside the verbatim zoPatts")
     func cleanPitch() {
         let pill = DictionaryContent.pitchPill(for: entry(hatsuon: "おみ'やけ", zoPatts: "HLLL"))
+
         #expect(pill == DictionaryContent.PitchPill(hatsuon: "おみ'やけ", zoPatts: "HLLL"))
     }
 
@@ -80,6 +80,7 @@ struct DictionaryContentTests {
     func markedUpHatsuon() {
         for marked in ["<あい'さつ>", "[あい]さつ", "あい･さつ", "あい~さつ"] {
             let pill = DictionaryContent.pitchPill(for: entry(hatsuon: marked, zoPatts: "HLL"))
+
             #expect(pill == DictionaryContent.PitchPill(hatsuon: nil, zoPatts: "HLL"))
         }
     }
@@ -95,6 +96,7 @@ struct DictionaryContentTests {
         // accPatts semantics are unvalidated (probe record); the assembly
         // never derives a label from them.
         let pill = DictionaryContent.pitchPill(for: entry(accPatts: "1,1—0"))
+
         #expect(pill?.hatsuon == "おみ'やけ", "accPatts never leaks into the pill")
     }
 
@@ -103,7 +105,9 @@ struct DictionaryContentTests {
     @Test("senses cap at five with a hidden-count footer")
     func senseCap() {
         let senses = (0 ..< 7).map { sense(glosses: ["gloss \($0)"]) }
-        let truncated = DictionaryContent.truncatedSenses(senses)
+
+        let truncated = DictionaryContent.truncated(senses, limit: DictionaryContent.maxSenses)
+
         #expect(truncated.visible.count == 5)
         #expect(truncated.hidden == 2)
     }
@@ -111,14 +115,19 @@ struct DictionaryContentTests {
     @Test("the card's tighter sense limit is parameterized")
     func cardSenseLimit() {
         let senses = (0 ..< 7).map { _ in sense() }
-        let truncated = DictionaryContent.truncatedSenses(senses, limit: 2)
+
+        let truncated = DictionaryContent.truncated(senses, limit: 2)
+
         #expect(truncated.visible.count == 2)
         #expect(truncated.hidden == 5)
     }
 
     @Test("glosses cap at three per sense")
     func glossCap() {
-        let truncated = DictionaryContent.truncatedGlosses(["a", "b", "c", "d", "e"])
+        let truncated = DictionaryContent.truncated(
+            ["a", "b", "c", "d", "e"], limit: DictionaryContent.maxGlossesPerSense
+        )
+
         #expect(Array(truncated.visible) == ["a", "b", "c"])
         #expect(truncated.hidden == 2)
     }
@@ -126,6 +135,7 @@ struct DictionaryContentTests {
     @Test("also pills cap at two")
     func alsoCap() {
         let also = (0 ..< 3).map { result("word\($0)") }
+
         #expect(Array(DictionaryContent.truncatedAlso(also)).map(\.matched) == ["word0", "word1"])
         #expect(DictionaryContent.truncatedAlso([]).isEmpty)
     }
@@ -167,6 +177,7 @@ struct DictionaryContentTests {
             source: .transcript(sentenceIndex: 2, tokenIndex: 1),
             entryIndex: 0
         )
+
         #expect(
             selected.popoverItem(for: .transcript(sentenceIndex: 2, tokenIndex: 1)) == selected
         )

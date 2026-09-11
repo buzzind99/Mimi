@@ -7,10 +7,7 @@ extension SidebarView {
 
     var sessionCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("SESSION")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Theme.secondaryText)
-                .kerning(1.2)
+            KickerLabel("SESSION")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 stat(value: "\(model.entries.count)", label: "Sentences")
                 durationStat
@@ -23,7 +20,7 @@ extension SidebarView {
             }
         }
         .padding(12)
-        .background(cardChrome)
+        .cardSurface()
     }
 
     /// Duration ticks at 1 s while running (now − startedAt); frozen at
