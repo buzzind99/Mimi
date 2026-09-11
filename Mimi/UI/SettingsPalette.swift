@@ -127,22 +127,3 @@ struct SettingsPill: View {
         )
     }
 }
-
-extension TranslationProvider {
-    var settingsIcon: String {
-        switch self {
-        case .apple: "apple.logo"
-        case .google: "g.circle.fill"
-        case .deepl: "d.circle.fill"
-        case .openrouter: "o.circle.fill"
-        }
-    }
-
-    var settingsDetail: String {
-        switch self {
-        case .apple: "On-device"
-        case .google, .deepl: "External · API key"
-        case .openrouter: "External · API key + model"
-        }
-    }
-}

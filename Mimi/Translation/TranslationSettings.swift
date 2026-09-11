@@ -28,6 +28,47 @@ enum TranslationProvider: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+extension TranslationProvider {
+    /// SF Symbol shown in the settings provider row.
+    var settingsIcon: String {
+        switch self {
+        case .apple: "apple.logo"
+        case .google: "g.circle.fill"
+        case .deepl: "d.circle.fill"
+        case .openrouter: "o.circle.fill"
+        }
+    }
+
+    /// Supporting detail line under the provider name.
+    var settingsDetail: String {
+        switch self {
+        case .apple: "On-device"
+        case .google, .deepl: "External · API key"
+        case .openrouter: "External · API key + model"
+        }
+    }
+
+    /// Provider picker row label; DeepL appends its free-tier marker.
+    func settingsName(deeplIsFreeTier: Bool) -> String {
+        switch self {
+        case .apple: "Apple"
+        case .google: "Google Translate"
+        case .deepl: deeplIsFreeTier ? "DeepL (Free)" : "DeepL"
+        case .openrouter: "OpenRouter"
+        }
+    }
+
+    /// Compact engine label for the sidebar ENGINES card.
+    var shortName: String {
+        switch self {
+        case .apple: "Apple"
+        case .google: "Google"
+        case .deepl: "DeepL"
+        case .openrouter: "OpenRouter"
+        }
+    }
+}
+
 /// Outcome of the Settings "Test" button, surfaced inline and persisted so
 /// the row survives relaunch. Failure detail strings are provider-agnostic
 /// status copy — never key material or raw response bodies.
@@ -174,6 +215,9 @@ final class TranslationSettings {
         keys.deleteKey(for: provider.rawValue)
         hasKey[provider] = false
         keyHints[provider] = nil
+        if provider == .deepl {
+            deeplIsFreeTier = false
+        }
         defaults.set(false, forKey: Self.hasKeyKey(provider))
         defaults.removeObject(forKey: Self.keyHintKey(provider))
         setTestResult(nil, for: provider)

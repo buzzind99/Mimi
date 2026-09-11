@@ -104,6 +104,18 @@ struct TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: false) == "DeepL (Free)")
     }
 
+    @Test("removing a free-tier DeepL key clears the tier marker")
+    func removingDeeplKeyClearsFreeTier() throws {
+        let (settings, defaults) = makeSUT()
+        try settings.saveKey("abc123:fx", for: .deepl)
+
+        settings.removeKey(for: .deepl)
+
+        #expect(!settings.deeplIsFreeTier)
+        let (reloaded, _) = makeSUT(defaults: defaults)
+        #expect(!reloaded.deeplIsFreeTier)
+    }
+
     @Test("removing a key clears the flag, hint, key, and test result")
     func removingKeyClearsEverything() throws {
         let (settings, _) = makeSUT()
@@ -255,6 +267,27 @@ struct TranslationSettingsTests {
         #expect(TranslationProvider.google.displayName == "Google Translate")
         #expect(TranslationProvider.deepl.displayName == "DeepL")
         #expect(TranslationProvider.openrouter.displayName == "OpenRouter")
+    }
+
+    @Test("provider presentation metadata covers every provider")
+    func providerPresentationMetadata() {
+        #expect(TranslationProvider.apple.settingsIcon == "apple.logo")
+        #expect(TranslationProvider.google.settingsIcon == "g.circle.fill")
+        #expect(TranslationProvider.deepl.settingsIcon == "d.circle.fill")
+        #expect(TranslationProvider.openrouter.settingsIcon == "o.circle.fill")
+        #expect(TranslationProvider.apple.settingsDetail == "On-device")
+        #expect(TranslationProvider.google.settingsDetail == "External · API key")
+        #expect(TranslationProvider.deepl.settingsDetail == "External · API key")
+        #expect(TranslationProvider.openrouter.settingsDetail == "External · API key + model")
+        #expect(TranslationProvider.apple.settingsName(deeplIsFreeTier: false) == "Apple")
+        #expect(TranslationProvider.google.settingsName(deeplIsFreeTier: false) == "Google Translate")
+        #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: false) == "DeepL")
+        #expect(TranslationProvider.deepl.settingsName(deeplIsFreeTier: true) == "DeepL (Free)")
+        #expect(TranslationProvider.openrouter.settingsName(deeplIsFreeTier: false) == "OpenRouter")
+        #expect(TranslationProvider.apple.shortName == "Apple")
+        #expect(TranslationProvider.google.shortName == "Google")
+        #expect(TranslationProvider.deepl.shortName == "DeepL")
+        #expect(TranslationProvider.openrouter.shortName == "OpenRouter")
     }
 
     // MARK: - Short keys
