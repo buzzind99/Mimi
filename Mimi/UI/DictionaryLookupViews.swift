@@ -137,7 +137,7 @@ struct DictionaryEntryContentView: View {
 
     private var headwordText: some View {
         Text(verbatim: headword)
-            .font(.system(size: 26, weight: .bold))
+            .font(.system(size: 26))
             .foregroundStyle(Theme.primaryText)
             .lineLimit(1)
             .textSelection(.disabled)
