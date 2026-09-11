@@ -58,6 +58,11 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
 {
     static let outputSampleRate: Double = 16000
     static let chunkSamples = Int(outputSampleRate * 0.16)
+    /// Rate requested from SCK: the system mix's native rate. The 16 kHz
+    /// conversion for ASR happens locally (AVAudioConverter), where its
+    /// quality is controlled — SCK's internal sample-rate conversion is
+    /// opaque, so we avoid asking it to downsample.
+    static let captureSampleRate = 48000
 
     var onChunk: ((AudioChunk) -> Void)?
     var onIOError: ((CaptureError) -> Void)?
@@ -127,7 +132,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         let config = SCStreamConfiguration()
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
-        config.sampleRate = Int(Self.outputSampleRate)
+        config.sampleRate = Self.captureSampleRate
         config.channelCount = 1
         // Audio-only stream: keep the (unused) video track as cheap as possible.
         config.width = 2
@@ -147,7 +152,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
 
         stateLock.withLock { isRunning = true }
         #if DEBUG
-            print("[capture] SCK system-audio stream started (target: 16 kHz mono)")
+            print("[capture] SCK system-audio stream started (target: 48 kHz mono in, 16 kHz out)")
         #endif
     }
 
@@ -186,11 +191,15 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         handleStreamStopped(error)
     }
 
-    /// `SCStreamDelegate` seam: teardown of a dead stream.
+    /// `SCStreamDelegate` seam: teardown of a dead stream. Mirrors `stop()`'s
+    /// state reset so a dead stream never leaves stale accumulator state
+    /// behind.
     func handleStreamStopped(_ error: Error) {
         let wasRunning = stateLock.withLock { () -> Bool in
             guard isRunning else { return false }
             isRunning = false
+            accumulated.removeAll(keepingCapacity: true)
+            accumulatedStart = 0
             return true
         }
         guard wasRunning else { return }
@@ -392,7 +401,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         return mono
     }
 
-    // MARK: - Resample (fallback when SCK ignores the 16 kHz request)
+    // MARK: - Resample (primary path: SCK delivers the native 48 kHz mix)
 
     private lazy var outputFormat: AVAudioFormat = .init(
         standardFormatWithSampleRate: Self.outputSampleRate, channels: 1
@@ -435,8 +444,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
             }
         }
 
+        // The converter carries a priming backlog, so a single `convert` can
+        // fill the output buffer and still report `.haveData`; size it with
+        // headroom and keep draining until it reports `.inputRanDry` (below),
+        // or the tail of each callback's samples would be clipped.
         let ratio = Self.outputSampleRate / rate
-        let outCapacity = AVAudioFrameCount(Double(mono.count) * ratio) + 32
+        let outCapacity = AVAudioFrameCount(Double(mono.count) * ratio) + AVAudioFrameCount(mono.count) + 32
         if outBuffer == nil || outBuffer!.frameCapacity < outCapacity {
             outBuffer = AVAudioPCMBuffer(
                 pcmFormat: outputFormat, frameCapacity: outCapacity
@@ -444,29 +457,52 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         }
         guard let outBuffer else { return nil }
 
-        // The converter's input block is @Sendable: capture the buffer by
-        // value and gate the single feed with a Mutex (the block is invoked
-        // serially, but the compiler can't see that). `nonisolated(unsafe)`
-        // suppresses the AVAudioPCMBuffer sendability diagnostic — the
-        // buffer only escapes into the converter, which serially drains it.
-        nonisolated(unsafe) let inputBuffer = inBuffer
-        let fed = Mutex(false)
-        var conversionError: NSError?
-        let status = converter.convert(to: outBuffer, error: &conversionError) { _, inputStatus in
-            if fed.withLock({ $0 }) {
-                inputStatus.pointee = .endOfStream
-                return nil
-            }
-            inputStatus.pointee = .haveData
-            fed.withLock { $0 = true }
-            return inputBuffer
-        }
-        guard status != .error, conversionError == nil,
-              let src = outBuffer.floatChannelData?[0]
-        else { return nil }
+        return drain(inBuffer, through: converter, into: outBuffer)
+    }
 
-        let n = Int(outBuffer.frameLength)
-        return Array(UnsafeBufferPointer(start: src, count: n))
+    /// Drains `input` through `converter`, accumulating every output frame.
+    /// Loops while the converter reports `.haveData` (output buffer full,
+    /// more pending) instead of converting once, so its priming backlog is
+    /// never clipped. Returns `nil` on conversion failure.
+    ///
+    /// The converter's input block is `@Sendable`: `input` is captured by
+    /// value and its single feed gated with a Mutex (the block is invoked
+    /// serially, but the compiler can't see that). `nonisolated(unsafe)`
+    /// suppresses the `AVAudioPCMBuffer` sendability diagnostic — the buffer
+    /// only escapes into the converter, which serially drains it. The input
+    /// status is `.noDataNow`, never `.endOfStream`: the latter is terminal,
+    /// latching the converter into an ended state so every later callback
+    /// converts to zero frames. `.noDataNow` just says this callback has no
+    /// more input, keeping a persistent converter usable across the stream.
+    private func drain(
+        _ input: AVAudioPCMBuffer,
+        through converter: AVAudioConverter,
+        into outBuffer: AVAudioPCMBuffer
+    ) -> [Float]? {
+        nonisolated(unsafe) let inputBuffer = input
+        let fed = Mutex(false)
+        var output: [Float] = []
+        var status: AVAudioConverterOutputStatus = .haveData
+        repeat {
+            outBuffer.frameLength = 0
+            var conversionError: NSError?
+            status = converter.convert(to: outBuffer, error: &conversionError) { _, inputStatus in
+                if fed.withLock({ $0 }) {
+                    inputStatus.pointee = .noDataNow
+                    return nil
+                }
+                inputStatus.pointee = .haveData
+                fed.withLock { $0 = true }
+                return inputBuffer
+            }
+            guard status != .error, conversionError == nil,
+                  let src = outBuffer.floatChannelData?[0]
+            else { return nil }
+
+            let n = Int(outBuffer.frameLength)
+            output.append(contentsOf: UnsafeBufferPointer(start: src, count: n))
+        } while status == .haveData
+        return output
     }
 
     // MARK: - Chunking

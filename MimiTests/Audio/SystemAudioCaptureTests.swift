@@ -58,6 +58,7 @@ struct SystemAudioCaptureTests {
         #expect(SystemAudioCapture.outputSampleRate == 16000)
         #expect(SystemAudioCapture.chunkSamples == 2560)
         #expect(Double(SystemAudioCapture.chunkSamples) == SystemAudioCapture.outputSampleRate * 0.16)
+        #expect(SystemAudioCapture.captureSampleRate == 48000)
     }
 
     // MARK: - AudioChunk
@@ -282,7 +283,7 @@ struct SystemAudioCaptureTests {
         #expect(secondChunk.samples == [2560] + (0 ..< 2559).map(Float.init))
     }
 
-    // MARK: - Resample fallback
+    // MARK: - Resample
 
     @Test("44.1 kHz mono input is resampled to 16 kHz before chunking")
     func resamplesToOutputRate() throws {
@@ -297,6 +298,27 @@ struct SystemAudioCaptureTests {
         #expect(chunk.samples.count == 2560)
         #expect(chunk.startSample == 0)
         #expect(chunk.samples.allSatisfy { $0 >= -1 && $0 <= 8192 })
+    }
+
+    @Test("48 kHz input keeps delivering chunks across successive callbacks")
+    func resamplesAcrossSuccessiveCallbacks() throws {
+        let capture = makeCapture(running: true)
+        let buffer = try SampleBufferSynthesis.make(frames: 7680, sampleRate: 48000)
+
+        for _ in 0 ..< 4 {
+            capture.handleSampleBuffer(buffer, type: .audio)
+        }
+
+        // A converter that latches to end-of-stream after the first callback
+        // yields exactly one chunk and then starves; a correctly streamed
+        // converter keeps cutting chunks, each a full 160 ms.
+        #expect(recorder.errors.isEmpty)
+        #expect(recorder.chunks.count >= 3)
+        #expect(
+            recorder.chunks.map(\.startSample)
+                == (0 ..< recorder.chunks.count).map { $0 * 2560 }
+        )
+        #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
     }
 
     @Test("a non-float32 PCM payload surfaces formatUnavailable")
@@ -431,6 +453,26 @@ struct SystemAudioCaptureTests {
             return
         }
         #expect(detail == "stream died")
+    }
+
+    @Test("didStopWithError clears the accumulator so chunk timing restarts")
+    func streamStoppedClearsAccumulator() throws {
+        let capture = makeCapture(running: true)
+        let streamError = NSError(domain: "dev.mimi.tests", code: 9)
+
+        try capture.handleSampleBuffer(SampleBufferSynthesis.make(frames: 1280), type: .audio)
+        #expect(recorder.chunks.isEmpty)
+        capture.handleStreamStopped(streamError)
+
+        // The instance stays usable after the stream died: the next run must
+        // not stitch new samples onto pre-death leftovers.
+        capture.setRunningForTesting(true)
+        try capture.handleSampleBuffer(SampleBufferSynthesis.make(frames: 2560), type: .audio)
+
+        #expect(recorder.chunks.count == 1)
+        let chunk = try #require(recorder.chunks.first)
+        #expect(chunk.startSample == 0)
+        #expect(chunk.samples == (0 ..< 2560).map(Float.init))
     }
 
     @Test("didStopWithError while not running is a no-op")
