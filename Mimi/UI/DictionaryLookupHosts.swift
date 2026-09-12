@@ -108,6 +108,9 @@ struct DictionaryCardView: View {
                     )
                 }
             }
+            // The pager's height is reserved even when it is absent, so the
+            // header row never changes height between lookups.
+            .frame(height: DictionaryEntryPager.height)
             .onHeightChange { labelHeight = $0 }
             if let pinned = model.pinnedLookup {
                 pinnedContent(pinned, freeHeight: freeHeight)

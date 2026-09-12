@@ -144,7 +144,11 @@ struct DictionaryEntryContentView: View {
     }
 
     private var headerRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // Center alignment keeps the row exactly the headword's height: the
+        // 18pt pager buttons hang well below a text baseline and would
+        // otherwise stretch the header whenever a multi-entry lookup shows
+        // them.
+        HStack(spacing: 8) {
             // Inline reading beside the kanji while the pair fits; when it
             // doesn't, the furigana-style stack moves the reading above the
             // (still truncating) headword instead of eclipsing it.
@@ -365,6 +369,11 @@ struct DictionaryEntryContentView: View {
 /// `◀ i/N ▶` walker over the entries a homograph candidate matched — shared
 /// by the popover header row and the sidebar card's DICTIONARY label row.
 struct DictionaryEntryPager: View {
+    /// Row height the pager always occupies (the button circles); hosts
+    /// reserve it so their header rows keep a constant height with and
+    /// without the pager.
+    static let height: CGFloat = 18
+
     let entryIndex: Int
     let entryCount: Int
     var onStep: (Int) -> Void
@@ -394,7 +403,7 @@ struct DictionaryEntryPager: View {
             Image(systemName: icon)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(enabled ? Theme.primaryText : Theme.secondaryText.opacity(0.4))
-                .frame(width: 18, height: 18)
+                .frame(width: Self.height, height: Self.height)
                 .background(Theme.tileFill.clipShape(Circle()))
         }
         .buttonStyle(.plain)
