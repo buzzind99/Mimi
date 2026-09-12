@@ -58,10 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // SwiftUI's Settings scene ignores `.windowStyle(.hiddenTitleBar)`,
         // so the chrome is hidden at the AppKit level when the
         // lazily-created window becomes key on open. Every key event also
-        // re-checks the Settings child attachment: the main window the
-        // Settings window should ride above can change while Settings
-        // stays open (close + reopen, Cmd+N), and this observer is the
-        // only signal SwiftUI gives us for either window's lifecycle.
+        // re-applies the Settings z-order: the main window the Settings
+        // window should ride above can change while Settings stays open
+        // (close + reopen, Cmd+N), and this observer is the only signal
+        // SwiftUI gives us for either window's lifecycle.
         keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -72,9 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if window.titleVisibility != .hidden {
                         self?.hideTitleChrome(of: window)
                     }
-                    self?.attachAboveMainWindow(window)
+                    self?.keepAboveMainWindow(window)
                 } else if let settings = SettingsWindowController.visibleWindow() {
-                    self?.attachAboveMainWindow(settings)
+                    self?.keepAboveMainWindow(settings)
                 }
             }
         }
@@ -86,20 +86,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titlebarAppearsTransparent = true
     }
 
-    /// Attaches the Settings window as a child above the app's frontmost
-    /// main window (z-order, per `NSApp.orderedWindows`). Idempotent via the
-    /// live AppKit relationship — `settings.parent` — so a Settings window
-    /// SwiftUI recreated re-attaches even while the main window is
-    /// unchanged. With no main window open, Settings stays a plain
-    /// normal-level window.
-    private func attachAboveMainWindow(_ settings: NSWindow) {
+    /// Keeps the Settings window immediately above the app's frontmost main
+    /// window in z-order (per `NSApp.orderedWindows`), re-applied on every
+    /// key event so SwiftUI recreating either window — or the main window
+    /// changing while Settings stays open — re-settles the order. With no
+    /// main window open, Settings stays a plain normal-level window.
+    ///
+    /// Deliberately relative ordering, not `addChildWindow`: on macOS 26
+    /// attaching a child window spins AppKit's window-level/tag sync into
+    /// infinite recursion (`_applyWindowLevelWithTagUpdateNeeded:` stack
+    /// overflow) the moment the attachment is made.
+    private func keepAboveMainWindow(_ settings: NSWindow) {
         settings.level = .normal
         let main = NSApp.orderedWindows.first {
             $0.isVisible && $0 !== settings && !($0 is NSPanel)
         }
-        guard settings.parent !== main else { return }
-        settings.parent?.removeChildWindow(settings)
-        main?.addChildWindow(settings, ordered: .above)
+        guard let main else { return }
+        settings.order(.above, relativeTo: main.windowNumber)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
