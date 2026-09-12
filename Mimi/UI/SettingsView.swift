@@ -202,7 +202,7 @@ struct SettingsView: View {
                     Text(provider.settingsName(deeplIsFreeTier: settings.deeplIsFreeTier))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Palette.primaryText)
-                    Text(provider.settingsDetail)
+                    Text(provider.settingsDetail(hasKey: settings.hasKey(for: provider)))
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.mutedText)
                 }
@@ -211,7 +211,7 @@ struct SettingsView: View {
                     HStack(spacing: 5) {
                         ProgressView()
                             .controlSize(.mini)
-                        Text("Checking…")
+                        Text("Connecting…")
                             .font(.system(size: 11))
                             .foregroundStyle(Palette.mutedText)
                     }

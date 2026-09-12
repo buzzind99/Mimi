@@ -39,12 +39,15 @@ extension TranslationProvider {
         }
     }
 
-    /// Supporting detail line under the provider name.
-    var settingsDetail: String {
+    /// Supporting detail line under the provider name. Key-holding external
+    /// providers append a "Configured" marker.
+    func settingsDetail(hasKey: Bool) -> String {
         switch self {
         case .apple: "On-device"
-        case .google, .deepl: "External · API key"
-        case .openrouter: "External · API key + model"
+        case .google, .deepl:
+            hasKey ? "External · API key · Configured" : "External · API key"
+        case .openrouter:
+            hasKey ? "External · API key + model · Configured" : "External · API key + model"
         }
     }
 
