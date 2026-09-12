@@ -70,8 +70,6 @@ struct TranscriptRow: View, Equatable {
 
                 translationRow
             }
-
-            Spacer(minLength: 0)
         }
         // Generous row spacing stands in for a divider.
         .padding(.bottom, 24)

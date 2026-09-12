@@ -91,9 +91,12 @@ struct FlowLayout: Layout {
     }
 
     func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        // The fingerprint fully determines the children's content (text,
+        // fonts, annotation and cursor mode, reservation), so a match with a
+        // steady count is enough to reuse the cached sizes — no need to
+        // re-measure the first child on every pass.
         let unchanged = cache.fingerprint == fingerprint
             && cache.sizes.count == subviews.count
-            && subviews.first.map { $0.sizeThatFits(.unspecified) } == cache.sizes.first
         guard !unchanged else { return }
         cache.fingerprint = fingerprint
         cache.sizes = subviews.map { $0.sizeThatFits(.unspecified) }

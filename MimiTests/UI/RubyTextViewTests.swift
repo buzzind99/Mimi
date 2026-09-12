@@ -28,13 +28,15 @@ struct RubyTextViewTests {
         cursorMode: CursorMode = .none,
         onCopy: ((String) -> Void)? = nil,
         onLookup: ((LookupToken) -> Void)? = nil,
-        lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil
+        lookupPopover: ((Int) -> RubyTextView.LookupPopover?)? = nil,
+        reservesAnnotationLine: Bool = false
     ) -> RubyTextView {
         RubyTextView(
             text: "テスト",
             surfaceFont: .system(size: 12),
             annotationFont: .system(size: 10, design: .monospaced),
             annotationColor: .primary,
+            reservesAnnotationLine: reservesAnnotationLine,
             cursorMode: cursorMode,
             onCopy: onCopy,
             onLookup: onLookup,
@@ -149,6 +151,11 @@ struct RubyTextViewTests {
     @Test("fingerprint changes with cursor mode so the flow cache invalidates")
     func fingerprint() {
         #expect(view().fingerprint != view(cursorMode: .dictionary).fingerprint)
+    }
+
+    @Test("fingerprint changes with the reserved line so the flow cache invalidates")
+    func fingerprintReservation() {
+        #expect(view().fingerprint != view(reservesAnnotationLine: true).fingerprint)
     }
 
     // MARK: - Body plan

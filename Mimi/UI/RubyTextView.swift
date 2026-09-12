@@ -325,9 +325,12 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// Pins FlowLayout's size cache: annotation and cursor mode change
     /// child structure (the dictionary path drops plain-run folding), the
     /// italic flag changes child structure, the fonts change child sizes,
-    /// the text changes surfaces. Colors paint only, so they are excluded.
+    /// the text changes surfaces, and the reservation adds or drops the
+    /// spacer line above plain/annotated units. Colors paint only, so they
+    /// are excluded.
     var fingerprint: String {
-        "\(annotation)-\(cursorMode)-\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
+        "\(annotation)-\(cursorMode)-\(reservesAnnotationLine)-\(dictionaryLookupActive)-"
+            + "\(surfaceItalic)-\(surfaceFont.hashValue)-\(noteFont.hashValue)-\(text)"
     }
 
     /// Segments folded for rendering: consecutive runs without a distinct
@@ -429,8 +432,39 @@ struct AnnotationLineSpacer: View {
     let font: Font
 
     var body: some View {
-        Text(verbatim: " ")
-            .font(font)
-            .lineLimit(1)
+        Color.clear.frame(width: 0, height: AnnotationLineMetrics.height(for: font))
+    }
+}
+
+/// Height SwiftUI gives a single note line for a font, measured once per font
+/// and cached. Reserved lines used to lay out a `Text(" ")` per unit to get
+/// this height; a zero-size frame reproduces it exactly with no glyph layout.
+/// The height is measured with an offscreen hosting view rather than AppKit
+/// font metrics, which disagree with SwiftUI's own line height (e.g. 11pt
+/// monospaced: AppKit 13, SwiftUI 14).
+@MainActor
+private enum AnnotationLineMetrics {
+    private static var heights: [Font: CGFloat] = [:]
+
+    static func height(for font: Font) -> CGFloat {
+        if let cached = heights[font] {
+            return cached
+        }
+        let probe = NSHostingView(rootView: NoteLineProbe(font: font))
+        probe.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
+        probe.layoutSubtreeIfNeeded()
+        let height = probe.fittingSize.height
+        heights[font] = height
+        return height
+    }
+
+    private struct NoteLineProbe: View {
+        let font: Font
+
+        var body: some View {
+            Text(verbatim: " ")
+                .font(font)
+                .lineLimit(1)
+        }
     }
 }
