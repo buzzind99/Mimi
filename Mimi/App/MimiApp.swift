@@ -52,33 +52,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var repliedToTerminate = false
     private var teardownWatchdog: Timer?
     private var teardownCompleteObserver: NSObjectProtocol?
-    private var chromeObserver: NSObjectProtocol?
+    private var keyWindowObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // SwiftUI's Settings scene ignores `.windowStyle(.hiddenTitleBar)`,
         // so the chrome is hidden at the AppKit level when the
-        // lazily-created window becomes key on open.
-        chromeObserver = NotificationCenter.default.addObserver(
+        // lazily-created window becomes key on open. Every key event also
+        // re-checks the Settings child attachment: the main window the
+        // Settings window should ride above can change while Settings
+        // stays open (close + reopen, Cmd+N), and this observer is the
+        // only signal SwiftUI gives us for either window's lifecycle.
+        keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let window,
-                      window.identifier?.rawValue.hasPrefix(Self.settingsWindowID) == true
-                else { return }
-                if window.titleVisibility != .hidden {
-                    self?.hideTitleChrome(of: window)
+                guard let window else { return }
+                if SettingsWindowController.isSettingsWindow(window) {
+                    if window.titleVisibility != .hidden {
+                        self?.hideTitleChrome(of: window)
+                    }
+                    self?.attachAboveMainWindow(window)
+                } else if let settings = SettingsWindowController.visibleWindow() {
+                    self?.attachAboveMainWindow(settings)
                 }
-                self?.attachAboveMainWindow(window)
             }
         }
     }
-
-    private static let settingsWindowID = "com_apple_SwiftUI_Settings_window"
-
-    /// Current parent of the Settings window; weak so a closed main window
-    /// clears the link.
-    private weak var settingsParent: NSWindow?
 
     private func hideTitleChrome(of window: NSWindow) {
         window.styleMask.insert(.fullSizeContentView)
@@ -86,25 +86,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titlebarAppearsTransparent = true
     }
 
-    /// Attaches the Settings window as a child above the app's main window.
-    /// Re-applied on every key event (SwiftUI may recreate either window);
-    /// the parent is the first visible non-panel window. With no main
-    /// window open, Settings stays a plain normal-level window.
+    /// Attaches the Settings window as a child above the app's frontmost
+    /// main window (z-order, per `NSApp.orderedWindows`). Idempotent via the
+    /// live AppKit relationship — `settings.parent` — so a Settings window
+    /// SwiftUI recreated re-attaches even while the main window is
+    /// unchanged. With no main window open, Settings stays a plain
+    /// normal-level window.
     private func attachAboveMainWindow(_ settings: NSWindow) {
         settings.level = .normal
-        let main = NSApp.windows.first {
+        let main = NSApp.orderedWindows.first {
             $0.isVisible && $0 !== settings && !($0 is NSPanel)
         }
-        guard main !== settingsParent else { return }
-        if let settingsParent {
-            settingsParent.removeChildWindow(settings)
-        }
-        guard let main else {
-            settingsParent = nil
-            return
-        }
-        main.addChildWindow(settings, ordered: .above)
-        settingsParent = main
+        guard settings.parent !== main else { return }
+        settings.parent?.removeChildWindow(settings)
+        main?.addChildWindow(settings, ordered: .above)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
