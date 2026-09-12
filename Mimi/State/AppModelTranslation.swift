@@ -75,6 +75,34 @@ extension AppModel {
         reengageTranslation()
     }
 
+    /// Verifies a provider's stored key with a live connection probe and
+    /// records the outcome for the inline status row (`ConnectionTestResult`).
+    /// On success the provider becomes the selection — SettingsView's
+    /// `.onChange(of: selectedProvider)` re-attaches its engine — unless it's
+    /// already selected, in which case the engine re-attaches directly (the
+    /// key card's re-test path). Returns whether the key verified.
+    func verifyAndSelectTranslationProvider(_ provider: TranslationProvider) async -> Bool {
+        guard let key = translationSettings.key(for: provider) else {
+            translationSettings.setTestResult(.failure("No API key configured"), for: provider)
+            return false
+        }
+        let result = await TranslationConnectionTester.test(
+            provider: provider, key: key, transport: translationTransport
+        )
+        let outcome = switch result {
+        case .success: ConnectionTestResult.success
+        case let .failure(error): ConnectionTestResult.failure(error.statusMessage)
+        }
+        translationSettings.setTestResult(outcome, for: provider)
+        guard case .success = result else { return false }
+        if translationSettings.selectedProvider == provider {
+            translationProviderDidChange()
+        } else {
+            translationSettings.select(provider)
+        }
+        return true
+    }
+
     /// Builds the selected external provider's engine, or nil when Apple is
     /// selected (or the external provider has no usable key — the unconfigured
     /// edge falls back to Apple with a note in `activateTranslation`).

@@ -42,6 +42,18 @@ struct AppModelTranslationEngineTests {
         }
     }
 
+    /// Transport that answers 200 to OpenRouter's key probe (GET) and 401 to
+    /// everything else (e.g. a chat-completions POST with a dead key).
+    private func keyProbeTransport() -> HTTPTranslationTransport {
+        HTTPTranslationTransport(timeout: 5) { request in
+            let status = request.httpMethod == "GET" ? 200 : 401
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            )!
+            return (Data(), response)
+        }
+    }
+
     /// Tears the model's translation worker down (stop requires a session
     /// phase; the queue worker is what actually needs cancelling).
     private func stopTranslation(_ model: AppModel) async {
@@ -353,6 +365,116 @@ struct AppModelTranslationEngineTests {
         model.translationProviderDidChange()
         #expect(model.activeTranslationEngine == .external)
         #expect(model.activeExternalProvider == .deepl)
+
+        await stopTranslation(model)
+    }
+
+    // MARK: - Connection-verified provider switch
+
+    /// A verified probe moves the selection and records `.success`; the
+    /// engine itself attaches only when the settings change is applied (the
+    /// SettingsView `.onChange` contract).
+    @Test("a verified probe selects the provider; applying the change attaches its engine")
+    func verifiedProbeSelectsProvider() async {
+        let settings = makeSettings(provider: .google)
+        try? settings.saveKey("test-key-1234", for: .openrouter)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: constantStatusTransport(200),
+            initialModelResolve: { _ in nil }
+        )
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        model.phase = .running
+
+        let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
+
+        #expect(verified)
+        #expect(settings.selectedProvider == .openrouter, "the probe moved the selection")
+        #expect(settings.testResult(for: .openrouter) == .success)
+        #expect(model.activeExternalProvider == .google, "activation waits for the settings-change observer")
+
+        // SettingsView's onChange applies the selection change.
+        model.translationProviderDidChange()
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .openrouter)
+
+        await stopTranslation(model)
+    }
+
+    /// A probe that fails (403 → invalid key, Google's taxonomy) records the
+    /// failure result and leaves both the selection and the attached engine
+    /// untouched.
+    @Test("a failed probe records the failure and leaves the active engine untouched")
+    func failedProbeKeepsActiveEngine() async {
+        let settings = makeSettings(provider: .openrouter)
+        try? settings.saveKey("test-key-1234", for: .google)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: constantStatusTransport(403),
+            initialModelResolve: { _ in nil }
+        )
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+        model.phase = .running
+
+        let verified = await model.verifyAndSelectTranslationProvider(.google)
+
+        #expect(!verified)
+        #expect(settings.selectedProvider == .openrouter, "the selection stays put")
+        #expect(settings.testResult(for: .google) == .failure("Invalid API key"))
+        #expect(model.activeExternalProvider == .openrouter, "the active engine is untouched")
+
+        await stopTranslation(model)
+    }
+
+    @Test("verifying a provider without a key records a failure and returns false")
+    func verifyingWithoutKeyFails() async {
+        let settings = isolatedTranslationSettings(suite: "test.AppModelEngine")
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            initialModelResolve: { _ in nil }
+        )
+
+        let verified = await model.verifyAndSelectTranslationProvider(.deepl)
+
+        #expect(!verified)
+        #expect(settings.testResult(for: .deepl) == .failure("No API key configured"))
+        #expect(settings.selectedProvider == .apple, "the selection never moved")
+    }
+
+    /// Verifying the already-selected provider re-attaches its engine
+    /// directly (the key card's re-test path): a latched Apple fallback is
+    /// reset and the external engine comes back.
+    @Test("verifying the already-selected provider re-attaches its engine and resets the latch")
+    func verifyingSelectedProviderReattaches() async {
+        let settings = makeSettings(provider: .openrouter)
+        let model = AppModel(
+            translationSettings: settings,
+            asrModelSettings: isolatedASRModelSettings(suite: "test.AppModelEngine"),
+            translationTransport: keyProbeTransport(),
+            initialModelResolve: { _ in nil }
+        )
+        model.retryTranslation()
+        #expect(await pollUntil { model.translationStatus == .ready })
+
+        // A failed translation latches the Apple fallback…
+        model.translationQueue.enqueue(makeSentence(index: 0, text: "テスト"))
+        #expect(await pollUntil { model.translationFallbackActive })
+        #expect(model.activeTranslationEngine == .apple)
+
+        // …then a successful probe of the selected provider re-engages it.
+        model.phase = .running
+        let verified = await model.verifyAndSelectTranslationProvider(.openrouter)
+
+        #expect(verified)
+        #expect(settings.testResult(for: .openrouter) == .success)
+        #expect(!model.translationFallbackActive, "re-engagement re-arms the latch")
+        #expect(model.activeTranslationEngine == .external)
+        #expect(model.activeExternalProvider == .openrouter)
 
         await stopTranslation(model)
     }

@@ -14,6 +14,11 @@ struct SettingsView: View {
     /// card is shown, but the selection (checkmark) stays on the current
     /// provider until a key is saved and the connection test succeeds.
     @State private var pendingProvider: TranslationProvider?
+    /// A configured external provider whose key is being verified before the
+    /// selection may move to it (row click → live probe). Its row shows a
+    /// checking spinner; a stale outcome (another row clicked mid-probe) is
+    /// discarded.
+    @State private var verifyingProvider: TranslationProvider?
 
     /// The provider whose card (key entry + privacy notice) is displayed:
     /// the pending one while it's being configured, otherwise the selection.
@@ -165,15 +170,23 @@ struct SettingsView: View {
     private func providerRow(_ provider: TranslationProvider) -> some View {
         let selected = settings.selectedProvider == provider
         return Button {
-            // Configured providers (and Apple) select immediately. An
-            // unconfigured external provider only opens its key card — the
+            // Apple and the already-selected provider select immediately
+            // (the latter is effectively a no-op that dismisses any key
+            // card). A configured external provider is verified first: the
+            // checkmark moves only once a live probe confirms its key still
+            // works — failure opens its key card with the recorded error. An
+            // unconfigured external provider opens its key card; the
             // checkmark moves once a key is saved and the connection test
             // succeeds (the key card's success path selects it).
-            if provider == .apple || settings.hasKey(for: provider) {
+            if provider == .apple || settings.selectedProvider == provider {
                 pendingProvider = nil
+                verifyingProvider = nil
                 settings.select(provider)
+            } else if settings.hasKey(for: provider) {
+                verifyThenSelect(provider)
             } else {
                 pendingProvider = provider
+                verifyingProvider = nil
             }
         } label: {
             HStack(spacing: 10) {
@@ -194,7 +207,15 @@ struct SettingsView: View {
                         .foregroundStyle(Palette.mutedText)
                 }
                 Spacer()
-                if selected {
+                if verifyingProvider == provider {
+                    HStack(spacing: 5) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Checking…")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.mutedText)
+                    }
+                } else if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(Palette.accent)
@@ -209,6 +230,23 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous),
             tint: Palette.accent, opacity: 0.1
         )
+    }
+
+    /// Probe-then-select for a configured external provider row: the
+    /// selection moves only if the live probe verifies the key (via
+    /// `AppModel.verifyAndSelectTranslationProvider`); failure opens the key
+    /// card, where the recorded failure and Remove/Test actions show.
+    private func verifyThenSelect(_ provider: TranslationProvider) {
+        guard verifyingProvider != provider else { return }
+        verifyingProvider = provider
+        Task {
+            let verified = await model.verifyAndSelectTranslationProvider(provider)
+            guard verifyingProvider == provider else { return }
+            verifyingProvider = nil
+            if !verified {
+                pendingProvider = provider
+            }
+        }
     }
 
     // MARK: - Appearance

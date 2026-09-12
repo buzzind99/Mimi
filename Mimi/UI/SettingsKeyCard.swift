@@ -151,29 +151,11 @@ struct SettingsKeyCard: View {
     }
 
     private func runConnectionTest(for provider: TranslationProvider) {
-        guard let key = settings.key(for: provider) else {
-            settings.setTestResult(.failure("No API key configured"), for: provider)
-            return
-        }
         isTestingConnection = true
         Task {
-            let result = await TranslationConnectionTester.test(provider: provider, key: key)
-            let message = switch result {
-            case .success: ConnectionTestResult.success
-            case let .failure(error): ConnectionTestResult.failure(error.statusMessage)
-            }
-            settings.setTestResult(message, for: provider)
-            // A verified key configures the provider: selecting it moves the
-            // checkmark and re-attaches its engine via SettingsView's
-            // onChange. Already-selected providers (re-test after a key
-            // fix) re-attach directly.
-            if case .success = result {
-                if settings.selectedProvider == provider {
-                    model.translationProviderDidChange()
-                } else {
-                    settings.select(provider)
-                }
-            }
+            // Probe + result recording + select-on-success live on `AppModel`,
+            // shared with the provider row's verify-before-select flow.
+            _ = await model.verifyAndSelectTranslationProvider(provider)
             isTestingConnection = false
         }
     }
