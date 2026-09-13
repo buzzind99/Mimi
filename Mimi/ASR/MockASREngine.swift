@@ -1,10 +1,11 @@
 import Foundation
 
 /// Pure-Swift stand-in used when the native runtime is unavailable. Emits
-/// deterministic pseudo transcripts driven by the audio energy (simple RMS
+/// canned transcripts in rotation, gated by the audio energy (simple RMS
 /// threshold) so the
 /// full pipeline — buffering, translation, UI, export — stays exercisable.
-/// The UI labels mock sessions clearly.
+/// Only the texts are deterministic: the sentence cadence is randomized
+/// (5–12 speech chunks). The UI labels mock sessions clearly.
 ///
 /// `@unchecked Sendable`: state is only ever touched from the single capture
 /// queue thread (`push`) or the main actor (`poll`/`finish`), which the

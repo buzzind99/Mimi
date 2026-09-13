@@ -5,7 +5,7 @@ import Foundation
 protocol ASREngine: AnyObject, Sendable {
     /// Prepare the recognizer (model load) before the stream opens.
     func prepare() throws(ASREngineError)
-    /// Open a streaming recognition session.
+    /// (Re)arm per-stream state; the C session itself is opened in `prepare`.
     func openStream() throws(ASREngineError)
     /// Push one 16 kHz mono chunk into the stream.
     func push(_ samples: [Float])
