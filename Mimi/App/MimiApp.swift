@@ -53,29 +53,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var teardownWatchdog: Timer?
     private var teardownCompleteObserver: NSObjectProtocol?
     private var keyWindowObserver: NSObjectProtocol?
+    private var resignKeyObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // SwiftUI's Settings scene ignores `.windowStyle(.hiddenTitleBar)`,
         // so the chrome is hidden at the AppKit level when the
-        // lazily-created window becomes key on open. Every key event also
-        // re-applies the Settings z-order: the main window the Settings
-        // window should ride above can change while Settings stays open
-        // (close + reopen, Cmd+N), and this observer is the only signal
-        // SwiftUI gives us for either window's lifecycle.
+        // lazily-created window becomes key on open.
         keyWindowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
         ) { [weak self] note in
             let window = note.object as? NSWindow
             MainActor.assumeIsolated {
-                guard let window else { return }
-                if SettingsWindowController.isSettingsWindow(window) {
-                    if window.titleVisibility != .hidden {
-                        self?.hideTitleChrome(of: window)
-                    }
-                    self?.keepAboveMainWindow(window)
-                } else if let settings = SettingsWindowController.visibleWindow() {
-                    self?.keepAboveMainWindow(settings)
-                }
+                guard let window,
+                      SettingsWindowController.isSettingsWindow(window),
+                      window.titleVisibility != .hidden
+                else { return }
+                self?.hideTitleChrome(of: window)
+            }
+        }
+        // Settings dismisses on any click outside it: losing key status is
+        // exactly that — the click landed on the main window, the desktop,
+        // or another app — so resign-key closes the window.
+        resignKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
+        ) { note in
+            let window = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard let window,
+                      SettingsWindowController.isSettingsWindow(window),
+                      window.isVisible
+                else { return }
+                window.performClose(nil)
             }
         }
     }
@@ -84,25 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.styleMask.insert(.fullSizeContentView)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-    }
-
-    /// Keeps the Settings window immediately above the app's frontmost main
-    /// window in z-order (per `NSApp.orderedWindows`), re-applied on every
-    /// key event so SwiftUI recreating either window — or the main window
-    /// changing while Settings stays open — re-settles the order. With no
-    /// main window open, Settings stays a plain normal-level window.
-    ///
-    /// Deliberately relative ordering, not `addChildWindow`: on macOS 26
-    /// attaching a child window spins AppKit's window-level/tag sync into
-    /// infinite recursion (`_applyWindowLevelWithTagUpdateNeeded:` stack
-    /// overflow) the moment the attachment is made.
-    private func keepAboveMainWindow(_ settings: NSWindow) {
-        settings.level = .normal
-        let main = NSApp.orderedWindows.first {
-            $0.isVisible && $0 !== settings && !($0 is NSPanel)
-        }
-        guard let main else { return }
-        settings.order(.above, relativeTo: main.windowNumber)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

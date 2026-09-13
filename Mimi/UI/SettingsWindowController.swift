@@ -1,9 +1,9 @@
 import AppKit
 
-/// Settings-window detection + dismissal for the sidebar toolbar — a small
-/// helper, not a view: SwiftUI owns the Settings scene's window, this only
-/// finds and closes it. SwiftUI keeps the closed Settings window cached in
-/// `NSApp.windows`, so visibility — not mere existence — decides the toggle.
+/// Settings-window detection for AppKit-level tweaks — SwiftUI owns the
+/// Settings scene's window, this only recognizes it. SwiftUI keeps the closed
+/// Settings window cached in `NSApp.windows`, so the identifier — not mere
+/// existence — is the stable signal.
 @MainActor
 enum SettingsWindowController {
     /// SwiftUI's Settings scene window identifier prefix.
@@ -12,15 +12,5 @@ enum SettingsWindowController {
     /// Whether a notification object is the SwiftUI Settings window.
     static func isSettingsWindow(_ object: Any?) -> Bool {
         (object as? NSWindow)?.identifier?.rawValue.hasPrefix(windowID) == true
-    }
-
-    /// The Settings window while it is open, else nil.
-    static func visibleWindow() -> NSWindow? {
-        NSApp.windows.first { isSettingsWindow($0) && $0.isVisible }
-    }
-
-    /// Closes an already-resolved open Settings window.
-    static func close(_ window: NSWindow) {
-        window.performClose(nil)
     }
 }

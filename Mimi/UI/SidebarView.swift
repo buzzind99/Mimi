@@ -14,6 +14,12 @@ struct SidebarView: View {
     @State private var exportFormat: SessionExporter.Format = .txt
     @State private var exportData: Data?
     @State private var isSettingsOpen = false
+    /// When the Settings window last closed. A gear click is itself a click
+    /// outside Settings — resign-key closes the window before this button's
+    /// mouse-up action runs — so a fresh close means the click already did
+    /// the toggle-off and must not re-open. Continuous clock: monotonic, so
+    /// a system-time step can't stretch or skip the guard.
+    @State private var settingsClosedAt: ContinuousClock.Instant?
 
     @Environment(\.openSettings) private var openSettings
 
@@ -346,17 +352,19 @@ extension SidebarView {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
             if SettingsWindowController.isSettingsWindow(note.object) {
                 isSettingsOpen = false
+                settingsClosedAt = .now
             }
         }
     }
 
     private func toggleSettings() {
-        if let settingsWindow = SettingsWindowController.visibleWindow() {
-            SettingsWindowController.close(settingsWindow)
-        } else {
-            isSettingsOpen = true
-            openSettings()
+        if let settingsClosedAt,
+           settingsClosedAt.duration(to: .now) < .milliseconds(500)
+        {
+            return
         }
+        isSettingsOpen = true
+        openSettings()
     }
 
     private var iconButtonShape: RoundedRectangle {
