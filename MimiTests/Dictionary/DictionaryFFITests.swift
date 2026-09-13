@@ -65,5 +65,9 @@ struct DictionaryFFITests {
     }
 
     @Test("binds all symbols from the real runtime", .enabled(if: DictionaryFFI.load() != nil))
-    func realRuntimeBindsAllSymbols() {}
+    func realRuntimeBindsAllSymbols() throws {
+        let ffi = try #require(DictionaryFFI.load())
+
+        #expect(ffi.open("") == nil)
+    }
 }
