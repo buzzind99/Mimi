@@ -23,7 +23,7 @@ protocol SecureKeyStoring: Sendable {
 /// OSStatus errors into nil so callers can only ever observe "key" or
 /// "no key" — never a partial secret.
 ///
-/// Invariants (enforced here, re-checked in the security review): key
+/// Invariants (enforced here): key
 /// material never reaches UserDefaults, logs, error `localizedDescription`,
 /// the pasteboard, or export files.
 struct KeychainStore: SecureKeyStoring {
