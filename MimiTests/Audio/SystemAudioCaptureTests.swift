@@ -5,16 +5,16 @@ import ScreenCaptureKit
 import Testing
 
 /// Tests `SystemAudioCapture`'s data path through the internal delegate
-/// seams (`handleSampleBuffer`/`handleStreamStopped`), driven by synthesized
-/// `CMSampleBuffer`s from `SampleBufferSynthesis` — no ScreenCaptureKit
-/// involved, and the stop fence is deterministic because the callbacks run
-/// synchronously on the calling thread. `ensurePermission()`'s preflight-
-/// granted arm is covered machine-gated (a Screen Recording grant on the
-/// host). Excluded (needs TCC interaction and a live display stream):
+/// seams (`handleSampleBuffer`), driven by synthesized `CMSampleBuffer`s
+/// from `SampleBufferSynthesis` — no ScreenCaptureKit involved, and the
+/// callbacks run synchronously on the calling thread. `ensurePermission()`'s
+/// preflight-granted arm is covered machine-gated (a Screen Recording grant
+/// on the host). Excluded (needs TCC interaction and a live display stream):
 /// `start()`'s SCK stream setup, `ensurePermission()`'s request arm, and
-/// `stop()`'s SCK teardown. The resample converter-failure branch is not
-/// fixture-reachable either: Core Media rejects non-positive sample rates
-/// before a converter is ever built, and any positive rate builds one.
+/// `stop()`'s SCK teardown — the stop fence and dead-stream reset live in
+/// `SystemAudioCaptureTeardownTests`. The resample converter-failure branch
+/// is not fixture-reachable either: Core Media rejects non-positive sample
+/// rates before a converter is ever built, and any positive rate builds one.
 @Suite("SystemAudioCapture")
 struct SystemAudioCaptureTests {
 
@@ -57,7 +57,6 @@ struct SystemAudioCaptureTests {
     func chunkConstants() {
         #expect(SystemAudioCapture.outputSampleRate == 16000)
         #expect(SystemAudioCapture.chunkSamples == 2560)
-        #expect(Double(SystemAudioCapture.chunkSamples) == SystemAudioCapture.outputSampleRate * 0.16)
         #expect(SystemAudioCapture.captureSampleRate == 48000)
     }
 
@@ -297,7 +296,17 @@ struct SystemAudioCaptureTests {
         let chunk = try #require(recorder.chunks.first)
         #expect(chunk.samples.count == 2560)
         #expect(chunk.startSample == 0)
-        #expect(chunk.samples.allSatisfy { $0 >= -1 && $0 <= 8192 })
+        // The input ramp makes the conversion computable: output index k
+        // tracks input position k * 44100/16000 on the ramp. A converter
+        // emitting zeros or bounded garbage fails; the tolerance absorbs
+        // interpolation and any small priming phase shift.
+        for k in [0, 1, 1024, 2559] {
+            let expected = Float(Double(k) * 44100 / 16000)
+            #expect(
+                abs(chunk.samples[k] - expected) < 2,
+                "k=\(k): got \(chunk.samples[k]), expected ~\(expected)"
+            )
+        }
     }
 
     @Test("48 kHz input keeps delivering chunks across successive callbacks")
@@ -321,6 +330,80 @@ struct SystemAudioCaptureTests {
         #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
     }
 
+    @Test("a mid-stream sample-rate change rebuilds the converter and keeps chunks contiguous")
+    func rateChangeRebuildsConverter() throws {
+        let capture = makeCapture(running: true)
+
+        try capture.handleSampleBuffer(
+            SampleBufferSynthesis.make(frames: 8192, sampleRate: 44100), type: .audio
+        )
+        // The fresh 48 kHz converter's priming backlog withholds a few
+        // hundred early output frames, so feed several callbacks before
+        // counting chunks — same accepted looseness as
+        // `resamplesAcrossSuccessiveCallbacks`.
+        for _ in 0 ..< 4 {
+            try capture.handleSampleBuffer(
+                SampleBufferSynthesis.make(frames: 7680, sampleRate: 48000), type: .audio
+            )
+        }
+
+        // The rate change must not reuse the 44.1 kHz converter: a stale
+        // converter mis-converts or starves, breaking the chunk stream.
+        #expect(recorder.errors.isEmpty)
+        #expect(recorder.chunks.count >= 3)
+        #expect(
+            recorder.chunks.map(\.startSample)
+                == (0 ..< recorder.chunks.count).map { $0 * 2560 }
+        )
+        #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
+    }
+
+    @Test("a resampled remainder below the chunk size is retained and leads the next chunk")
+    func resampledRemainderRetained() throws {
+        let capture = makeCapture(running: true)
+
+        // 6144 frames at 48 kHz → ≤ 2048 ideal output frames, and the
+        // converter's priming backlog only lowers that — safely below the
+        // chunk size, so the accumulator holds a resampled remainder.
+        try capture.handleSampleBuffer(
+            SampleBufferSynthesis.make(frames: 6144, sampleRate: 48000), type: .audio
+        )
+        #expect(recorder.chunks.isEmpty)
+
+        // Steady-state output is a full chunk's worth, topping up the
+        // remainder to exactly one more chunk.
+        try capture.handleSampleBuffer(
+            SampleBufferSynthesis.make(frames: 7680, sampleRate: 48000), type: .audio
+        )
+
+        #expect(recorder.errors.isEmpty)
+        #expect(recorder.chunks.count == 1)
+        let chunk = try #require(recorder.chunks.first)
+        #expect(chunk.startSample == 0)
+        // The chunk's first frame tracks the input ramp near position 0 —
+        // proof the remainder led it. A dropped remainder would start this
+        // chunk near input position 6144 * 48000 / 16000 ≈ 18_432.
+        #expect(chunk.samples[0] < 100)
+    }
+
+    @Test("a larger callback after a small one reallocates the converter buffers")
+    func bufferGrowthAcrossCallbacks() throws {
+        let capture = makeCapture(running: true)
+
+        // 320 frames seed the input/output PCM buffers; the 60× larger
+        // callback must grow both instead of clipping or failing.
+        try capture.handleSampleBuffer(
+            SampleBufferSynthesis.make(frames: 320, sampleRate: 48000), type: .audio
+        )
+        try capture.handleSampleBuffer(
+            SampleBufferSynthesis.make(frames: 3 * 7680, sampleRate: 48000), type: .audio
+        )
+
+        #expect(recorder.errors.isEmpty)
+        #expect(recorder.chunks.map(\.startSample) == [0, 2560, 5120])
+        #expect(recorder.chunks.allSatisfy { $0.samples.count == 2560 })
+    }
+
     @Test("a non-float32 PCM payload surfaces formatUnavailable")
     func int16PayloadSurfacesFormatUnavailable() throws {
         let capture = makeCapture(running: true)
@@ -335,154 +418,5 @@ struct SystemAudioCaptureTests {
             Issue.record("expected .formatUnavailable, got \(error)")
             return
         }
-    }
-
-    // MARK: - Stop fence
-
-    @Test("stop() fences an in-flight callback and nothing lands after it returns")
-    func stopFencesInFlightCallback() throws {
-        let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2 * 2560)
-        let recorder = self.recorder
-
-        // Hold the first chunk delivery inside the callback (under the
-        // capture's state lock): stop() must not be able to return until the
-        // in-flight callback finishes, and no chunk may land afterwards.
-        let chunkDelivered = DispatchSemaphore(value: 0)
-        let deliveryGate = NSLock()
-        deliveryGate.lock()
-        capture.onChunk = { chunk in
-            recorder.record(chunk)
-            chunkDelivered.signal()
-            deliveryGate.lock()
-            deliveryGate.unlock()
-        }
-
-        // The callback thread deliberately hands the buffer in off-main —
-        // that is the real production path; the buffer is read-only here.
-        nonisolated(unsafe) let callbackBuffer = buffer
-        let callbackThread = Thread {
-            capture.handleSampleBuffer(callbackBuffer, type: .audio)
-        }
-        callbackThread.start()
-        #expect(chunkDelivered.wait(timeout: .now() + 2) == .success)
-        #expect(recorder.chunks.count == 1)
-
-        let stopReturned = DispatchSemaphore(value: 0)
-        let stopThread = Thread {
-            capture.stop()
-            stopReturned.signal()
-        }
-        stopThread.start()
-        #expect(stopReturned.wait(timeout: .now() + 0.2) == .timedOut)
-
-        deliveryGate.unlock()
-        #expect(stopReturned.wait(timeout: .now() + 2) == .success)
-        #expect(!capture.isRunning)
-        #expect(recorder.chunks.count == 2)
-        #expect(recorder.chunks.map(\.startSample) == [0, 2560])
-        #expect(recorder.errors.isEmpty)
-    }
-
-    @Test("sample buffers are dropped after stop() returns")
-    func samplesDroppedAfterStop() throws {
-        let capture = makeCapture(running: true)
-        let buffer = try SampleBufferSynthesis.make(frames: 2560)
-
-        capture.handleSampleBuffer(buffer, type: .audio)
-        #expect(recorder.chunks.count == 1)
-
-        capture.stop()
-        capture.handleSampleBuffer(buffer, type: .audio)
-        #expect(!capture.isRunning)
-        #expect(recorder.chunks.count == 1)
-        #expect(recorder.errors.isEmpty)
-    }
-
-    @Test("a stop during extraction drops the in-flight samples")
-    func stopDuringExtractionDropsSamples() throws {
-        let capture = makeCapture(running: true)
-        // Extraction (buffer-list copy + downmix) must comfortably outlast
-        // the gap between the callback-start signal and stop()'s fence:
-        // 8M frames downmix in tens of milliseconds, so the callback is
-        // guaranteed to still be inside `extractMono` — before the locked
-        // re-check — when stop() flips `isRunning`. The re-check then drops
-        // the whole buffer.
-        let buffer = try SampleBufferSynthesis.make(frames: 8_000_000)
-
-        let callbackStarted = DispatchSemaphore(value: 0)
-        let callbackFinished = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) let callbackBuffer = buffer
-        let callbackThread = Thread {
-            callbackStarted.signal()
-            capture.handleSampleBuffer(callbackBuffer, type: .audio)
-            callbackFinished.signal()
-        }
-        callbackThread.start()
-        #expect(callbackStarted.wait(timeout: .now() + 2) == .success)
-        // The entry checks are microseconds; this settle only has to let the
-        // callback pass them and enter extraction. If the thread has not
-        // scheduled at all, the entry `isRunning` guard drops the buffer too.
-        Thread.sleep(forTimeInterval: 0.002)
-        capture.stop()
-
-        #expect(callbackFinished.wait(timeout: .now() + 10) == .success)
-        #expect(!capture.isRunning)
-        #expect(recorder.chunks.isEmpty)
-        #expect(recorder.errors.isEmpty)
-    }
-
-    // MARK: - SCStreamDelegate stop handling
-
-    @Test("didStopWithError while running resets the state and reports the error")
-    func streamStoppedWhileRunning() throws {
-        let capture = makeCapture(running: true)
-        let streamError = NSError(
-            domain: "dev.mimi.tests", code: 42,
-            userInfo: [NSLocalizedDescriptionKey: "stream died"]
-        )
-
-        capture.handleStreamStopped(streamError)
-
-        #expect(!capture.isRunning)
-        #expect(recorder.chunks.isEmpty)
-        #expect(recorder.errors.count == 1)
-        let error = try #require(recorder.errors.first)
-        guard case let .streamSetupFailed(detail) = error else {
-            Issue.record("expected .streamSetupFailed, got \(error)")
-            return
-        }
-        #expect(detail == "stream died")
-    }
-
-    @Test("didStopWithError clears the accumulator so chunk timing restarts")
-    func streamStoppedClearsAccumulator() throws {
-        let capture = makeCapture(running: true)
-        let streamError = NSError(domain: "dev.mimi.tests", code: 9)
-
-        try capture.handleSampleBuffer(SampleBufferSynthesis.make(frames: 1280), type: .audio)
-        #expect(recorder.chunks.isEmpty)
-        capture.handleStreamStopped(streamError)
-
-        // The instance stays usable after the stream died: the next run must
-        // not stitch new samples onto pre-death leftovers.
-        capture.setRunningForTesting(true)
-        try capture.handleSampleBuffer(SampleBufferSynthesis.make(frames: 2560), type: .audio)
-
-        #expect(recorder.chunks.count == 1)
-        let chunk = try #require(recorder.chunks.first)
-        #expect(chunk.startSample == 0)
-        #expect(chunk.samples == (0 ..< 2560).map(Float.init))
-    }
-
-    @Test("didStopWithError while not running is a no-op")
-    func streamStoppedWhenNotRunning() {
-        let capture = makeCapture(running: false)
-        let streamError = NSError(domain: "dev.mimi.tests", code: 7)
-
-        capture.handleStreamStopped(streamError)
-
-        #expect(!capture.isRunning)
-        #expect(recorder.errors.isEmpty)
     }
 }

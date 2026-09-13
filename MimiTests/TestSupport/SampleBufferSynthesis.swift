@@ -7,10 +7,13 @@ import Foundation
 /// (`CMAudioFormatDescriptionCreate` + `CMBlockBuffer` + `CMSampleBufferCreate`).
 ///
 /// Payload values are deterministic so tests can compute expected downmix and
-/// resample results exactly: channel `c`, frame `f` holds `f + c * 10_000`
-/// (float32-exact for f < 10_000 and c < 9; int16 writes the same values
-/// truncated). A stereo deinterleaved downmix of frame `f` is therefore
-/// `f + 5_000`, a mono buffer is just `f`.
+/// resample results exactly: channel `c`, frame `f` holds `f + c * 10_000`.
+/// float32 represents integers exactly up to 2^24, so `.float32` values are
+/// exact while `f + c * 10_000 < 16_777_216`; `.int16` writes the same value
+/// via `truncatingIfNeeded`, exact only while `f + c * 10_000 <= 32_767`
+/// (c ≤ 3 for the usual frame counts, above that it wraps). A stereo
+/// deinterleaved downmix of frame `f` is therefore `f + 5_000`, a mono
+/// buffer is just `f`.
 enum SampleBufferSynthesis {
 
     /// Thrown when a Core Media call fails during synthesis.
