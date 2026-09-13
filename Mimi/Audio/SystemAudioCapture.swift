@@ -51,8 +51,13 @@ protocol AudioCapturing: AnyObject, Sendable {
 /// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
 /// engine's job.
 ///
-/// Sendable by locking contract: mutable state (`isRunning`, `accumulated`,
-/// the resample caches, …) is guarded by `stateLock` — see the comment there.
+/// Sendable by locking contract: `stateLock` guards `isRunning` and the
+/// chunk accumulator (`accumulated`, `accumulatedStart`, `emittedSamples`) —
+/// see the comment there. Two deliberate exemptions, both single-owner:
+/// `stream` is only touched after winning the locked `isRunning` handoff
+/// (the setter in `start()`, or the one teardown winner between `stop()`
+/// and `handleStreamStopped`), and the resample caches (`converter`,
+/// `inBuffer`, `outBuffer`) live only on the serial sample-callback path.
 final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
     SCStreamDelegate, SCStreamOutput
 {
@@ -183,6 +188,12 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         stateLock.withLock { isRunning = value }
     }
 
+    /// Invoked at the top of `extractMono` — before the buffer-list copy and
+    /// downmix — so tests can park an in-flight callback past every entry
+    /// guard and fence teardown against it deterministically. Nil in
+    /// production.
+    var onExtractionEntered: (() -> Void)?
+
     // MARK: - SCStreamDelegate
 
     /// Forwards to the internal seam — tests drive `handleStreamStopped`
@@ -265,6 +276,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
     /// Handles both interleaved (one buffer, N channels) and deinterleaved
     /// (N one-channel buffers) layouts.
     private func extractMono(sampleBuffer: CMSampleBuffer, asbd: AudioStreamBasicDescription) -> [Float]? {
+        onExtractionEntered?()
         guard MemoryLayout<Float>.size == 4, asbd.mBitsPerChannel == 32,
               asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
         else {
