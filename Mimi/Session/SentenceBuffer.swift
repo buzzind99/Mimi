@@ -2,11 +2,13 @@ import Foundation
 
 /// Groups ASR finals into translatable sentences and applies the 3-tier
 /// boundary policy:
-///   1. Terminal punctuation (`。！？`) closes immediately.
+///   1. Terminal punctuation (`。！？` plus ASCII `!`/`?`) closes immediately.
 ///   2. Silence timeout: no new finals for ~1 s finalizes the buffer.
-///   3. Length cap (~35–45 chars): split at the nearest clause boundary.
+///   3. Length cap (`maxChars`, 42 chars): split at the nearest clause
+///      boundary at/after `minSplitChars`.
 ///
-/// All calls must happen on one actor/queue (AppModel hops to MainActor).
+/// All calls must happen on one actor/queue (driven on the MainActor by
+/// `SessionController`).
 final class SentenceBuffer {
     struct Config {
         var silenceTimeout: TimeInterval = 1.0

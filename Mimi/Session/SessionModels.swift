@@ -17,8 +17,8 @@ struct Sentence: Identifiable, Equatable, Sendable {
     }
 }
 
-/// A translation for a sentence. `translations` is append-only by design
-/// (future multi-target support).
+/// A translation for a sentence; `SessionEntry.translations` is append-only
+/// by design (future multi-target support).
 struct SentenceTranslation: Equatable, Codable, Sendable {
     let lang: String
     let text: String
