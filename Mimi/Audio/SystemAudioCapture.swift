@@ -51,8 +51,8 @@ protocol AudioCapturing: AnyObject, Sendable {
 /// `onChunk` on that queue. Silence suppression (VAD + RMS backstop) is the
 /// engine's job.
 ///
-/// Sendable by locking contract: mutable state (`isRunning`, `stream`,
-/// `accumulated`, …) is guarded by `stateLock` — see the comment there.
+/// Sendable by locking contract: mutable state (`isRunning`, `accumulated`,
+/// the resample caches, …) is guarded by `stateLock` — see the comment there.
 final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
     SCStreamDelegate, SCStreamOutput
 {
