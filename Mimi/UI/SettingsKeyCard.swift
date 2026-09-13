@@ -113,6 +113,11 @@ struct SettingsKeyCard: View {
                     model.translationProviderDidChange()
                 }
             }
+            Text("Current model: \(settings.effectiveOpenRouterModel)")
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(Palette.mutedText)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
     }
 

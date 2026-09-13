@@ -247,6 +247,16 @@ struct TranslationSettingsTests {
         #expect(settings.activeEngineDescription(fallbackActive: false) == "OpenRouter · tencent/hy-mt2-30b-a3b")
     }
 
+    @Test("effective OpenRouter model falls back to the engine default when empty")
+    func effectiveOpenRouterModelFallsBackToDefault() {
+        let (settings, _) = makeSUT()
+
+        #expect(settings.effectiveOpenRouterModel == OpenRouterEngine.defaultModel)
+
+        settings.openRouterModel = "custom/model"
+        #expect(settings.effectiveOpenRouterModel == "custom/model")
+    }
+
     @Test("fallback latch appends the fallback note only for external providers")
     func fallbackNoteOnlyForExternal() throws {
         let (settings, _) = makeSUT()

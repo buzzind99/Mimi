@@ -254,6 +254,13 @@ final class TranslationSettings {
 
     // MARK: - "Currently using" row
 
+    /// The model the OpenRouter engine actually sends per request: the stored
+    /// string, or the engine's default when the field is left empty (mirrors
+    /// the init fallback in `OpenRouterEngine`).
+    var effectiveOpenRouterModel: String {
+        openRouterModel.isEmpty ? OpenRouterEngine.defaultModel : openRouterModel
+    }
+
     /// Truthful description of the engine currently in use, including the
     /// Apple-fallback latch ("DeepL (Free) — fallback active"). The base
     /// label prefers the attached provider (`attachedProvider`) over the
