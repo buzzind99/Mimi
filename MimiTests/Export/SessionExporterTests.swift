@@ -4,7 +4,8 @@ import Testing
 
 /// Tests the export formats through the public `SessionExporter` API:
 /// plain text, SRT (comma ms), VTT (dot ms + header), and the JSON session
-/// document (verified by decoding back).
+/// document (verified by decoding back, plus a raw-key check pinning the
+/// v1 snake_case interchange contract).
 @Suite("SessionExporter")
 struct SessionExporterTests {
 
@@ -89,6 +90,17 @@ struct SessionExporterTests {
         let output = SessionExporter.subtitles(entries: [entry], format: .srt)
 
         #expect(output == "")
+    }
+
+    @Test("cue renders multiple translations as separate lines")
+    func cueRendersEachTranslationOnItsOwnLine() {
+        var entry = makeUntranslatedEntry()
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: "First."))
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: "Second."))
+
+        let output = SessionExporter.subtitles(entries: [entry], format: .srt)
+
+        #expect(output == "1\n\(expectedSrtTiming)\nFirst.\nSecond.\n\n")
     }
 
     @Test("VTT keeps only the header for untranslated entries")
@@ -184,6 +196,53 @@ struct SessionExporterTests {
         #expect(document.sentences.first?.translations == [pending])
     }
 
+    @Test("entry translations win over pending results")
+    func jsonPrefersEntryTranslationOverPendingResult() throws {
+        var entry = makeUntranslatedEntry()
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        let pending = SentenceTranslation(lang: "en", text: "Stale pending result.")
+
+        let data = try SessionExporter.json(entries: [entry], metadata: nil, results: [0: pending])
+        let document = try decodeDocument(from: data)
+
+        #expect(
+            document.sentences.first?.translations
+                == [SentenceTranslation(lang: "en", text: englishTranslation)]
+        )
+    }
+
+    @Test("JSON output uses the v1 snake_case keys")
+    func jsonEmitsV1SnakeCaseKeys() throws {
+        var entry = makeUntranslatedEntry()
+        entry.appendTranslation(SentenceTranslation(lang: "en", text: englishTranslation))
+        let metadata = SessionMetadata(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            sourceLang: "ja-JP",
+            targetLang: "en-US",
+            model: "mock",
+            chunkMS: 333
+        )
+
+        let data = try SessionExporter.json(entries: [entry], metadata: metadata, results: [:])
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let session = try #require(object["session"] as? [String: Any])
+        let sentences = try #require(object["sentences"] as? [[String: Any]])
+        let sentence = try #require(sentences.first)
+        let translations = try #require(sentence["translations"] as? [[String: Any]])
+        let translation = try #require(translations.first)
+
+        #expect(Set(object.keys) == ["schema_version", "session", "sentences"])
+        #expect(object["schema_version"] as? Int == schemaVersion)
+        #expect(
+            Set(session.keys) == ["started_at", "source_lang", "target_lang", "model", "chunk_ms"]
+        )
+        #expect(
+            Set(sentence.keys)
+                == ["index", "start_s", "end_s", "lang", "transcript", "translations"]
+        )
+        #expect(Set(translation.keys) == ["lang", "text"])
+    }
+
     @Test("nil metadata falls back to session defaults")
     func jsonNilMetadataFallsBackToDefaults() throws {
         let before = Date()
@@ -195,8 +254,10 @@ struct SessionExporterTests {
         #expect(document.session.targetLang == "en")
         #expect(document.session.model == nil)
         #expect(document.session.chunkMS == 160)
+        // `.iso8601` encoding truncates sub-second precision: the decoded
+        // fallback can land up to 1 s before `before`.
         #expect(document.session.startedAt >= before.addingTimeInterval(-1))
-        #expect(document.session.startedAt <= Date().addingTimeInterval(1))
+        #expect(document.session.startedAt <= Date())
     }
 
     @Test("partially populated metadata merges with fallbacks")
@@ -227,10 +288,10 @@ struct SessionExporterTests {
         let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let metadata = SessionMetadata(
             startedAt: startedAt,
-            sourceLang: "ja",
-            targetLang: "en",
+            sourceLang: "ja-JP",
+            targetLang: "en-US",
             model: "mock",
-            chunkMS: 160
+            chunkMS: 333
         )
 
         let data = try SessionExporter.json(entries: [], metadata: metadata, results: [:])
@@ -240,10 +301,10 @@ struct SessionExporterTests {
             abs(document.session.startedAt.timeIntervalSince1970
                 - startedAt.timeIntervalSince1970) < 1
         )
-        #expect(document.session.sourceLang == "ja")
-        #expect(document.session.targetLang == "en")
+        #expect(document.session.sourceLang == "ja-JP")
+        #expect(document.session.targetLang == "en-US")
         #expect(document.session.model == "mock")
-        #expect(document.session.chunkMS == 160)
+        #expect(document.session.chunkMS == 333)
     }
 
     // MARK: - Format metadata
@@ -256,10 +317,19 @@ struct SessionExporterTests {
         #expect(SessionExporter.Format.json.fileExtension == "json")
     }
 
-    @Test("every format's id equals its raw value")
-    func formatIDMatchesRawValue() {
-        for format in SessionExporter.Format.allCases {
-            #expect(format.id == format.rawValue)
-        }
+    @Test("every format's id equals its display name", arguments: zip(
+        SessionExporter.Format.allCases,
+        ["Plain text", "SubRip (.srt)", "WebVTT (.vtt)", "JSON session"]
+    ))
+    func formatIDMatchesDisplayName(format: SessionExporter.Format, expectedID: String) {
+        #expect(format.id == expectedID)
+    }
+
+    @Test("only the JSON format maps to the JSON content type")
+    func formatContentTypeMapsOnlyJSONToJSON() {
+        #expect(SessionExporter.Format.json.contentType == .json)
+        #expect(SessionExporter.Format.txt.contentType == .plainText)
+        #expect(SessionExporter.Format.srt.contentType == .plainText)
+        #expect(SessionExporter.Format.vtt.contentType == .plainText)
     }
 }

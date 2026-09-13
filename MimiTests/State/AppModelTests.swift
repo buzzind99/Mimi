@@ -1,12 +1,12 @@
-import AppKit
 import Foundation
 @testable import Mimi
 import Testing
 
-/// Tests `AppModel` session-control guards, translation wiring, and export
-/// delegation on the main actor. The `start()`/`begin()` flow itself is
-/// covered over injected factories in `AppModelSessionTests`; the default
-/// factories (real TCC preflight + SCK) stay production-only here.
+/// Tests `AppModel` session-control guards, translation wiring, and the
+/// session-controller callbacks on the main actor. The `start()`/`begin()`
+/// flow itself is covered over injected factories in `AppModelSessionTests`;
+/// the default factories (real TCC preflight + SCK) stay production-only
+/// here. Export delegation lives in `AppModelExportTests`.
 @MainActor
 @Suite("AppModel session control")
 struct AppModelTests {
@@ -223,131 +223,6 @@ struct AppModelTests {
 
         #expect(model.phase == .idle)
         #expect(model.toasts.toasts.isEmpty)
-    }
-
-    // MARK: - Export
-
-    @Test("nothing is exportable without entries")
-    func notExportableWhenEmpty() async {
-        let model = await makeSUT()
-
-        #expect(!model.isExportable)
-    }
-
-    @Test("entries make the session exportable")
-    func exportableWhenEntriesExist() async {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-
-        #expect(model.isExportable)
-    }
-
-    @Test("exportText delegates to the plain exporter")
-    func exportTextDelegatesToPlainExporter() async {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-        model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
-        )
-
-        let output = model.exportText()
-
-        #expect(output == SessionExporter.plainText(entries: model.entries))
-    }
-
-    @Test("copyTranscript puts the plain-text transcript on the pasteboard")
-    func copyTranscriptPutsTranscriptOnPasteboard() async {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-
-        model.copyTranscript()
-
-        #expect(NSPasteboard.general.string(forType: .string) == model.exportText())
-    }
-
-    @Test("copySnippet puts the snippet on the pasteboard and posts the notice")
-    func copySnippetPutsSnippetOnPasteboardAndPostsNotice() async {
-        let model = await makeSUT()
-
-        model.copySnippet("こんにちは")
-
-        #expect(NSPasteboard.general.string(forType: .string) == "こんにちは")
-        #expect(model.notices.message == "Text copied")
-    }
-
-    @Test("txt export matches the plain exporter")
-    func exportTxtMatchesPlainExporter() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-
-        let data = try model.export(format: .txt)
-
-        #expect(data == Data(SessionExporter.plainText(entries: model.entries).utf8))
-    }
-
-    @Test("srt export matches the subtitle exporter")
-    func exportSrtMatchesSubtitleExporter() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-        model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
-        )
-
-        let data = try model.export(format: .srt)
-
-        #expect(data == Data(SessionExporter.subtitles(entries: model.entries, format: .srt).utf8))
-    }
-
-    @Test("vtt export matches the subtitle exporter")
-    func exportVttMatchesSubtitleExporter() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-        model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
-        )
-
-        let data = try model.export(format: .vtt)
-
-        #expect(data == Data(SessionExporter.subtitles(entries: model.entries, format: .vtt).utf8))
-    }
-
-    @Test("json export falls back to defaults for nil session metadata")
-    func exportJsonFallsBackForNilMetadata() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-
-        let data = try model.export(format: .json)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let doc = try decoder.decode(JSONSessionDocument.self, from: data)
-        #expect(doc.schemaVersion == 1)
-        #expect(doc.session.sourceLang == "ja")
-        #expect(doc.session.targetLang == "en")
-        #expect(doc.session.model == nil)
-        #expect(doc.session.chunkMS == 160)
-        #expect(doc.sentences.count == 1)
-        #expect(doc.sentences[0].index == 0)
-        #expect(doc.sentences[0].transcript == sentenceText)
-        #expect(doc.sentences[0].translations == [])
-    }
-
-    @Test("json export snapshots the latest translation")
-    func exportJsonSnapshotsLatestTranslation() async throws {
-        let model = await makeSUT()
-        model.sessionController.onSentence?(makeSentence())
-        model.applyTranslation(
-            index: 0, translation: SentenceTranslation(lang: "en", text: translationText)
-        )
-
-        let data = try model.export(format: .json)
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let doc = try decoder.decode(JSONSessionDocument.self, from: data)
-        #expect(doc.sentences[0].translations == [
-            SentenceTranslation(lang: "en", text: translationText)
-        ])
     }
 
     // MARK: - Session controller wiring
