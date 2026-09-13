@@ -150,12 +150,14 @@ final class AppModel {
     /// flowing (`onSessionBegin`) and when teardown completes
     /// (`performStop`); both nil before the first session. Duration reads
     /// now − startedAt while running, endedAt − startedAt after stop.
-    private(set) var sessionStartedAt: Date?
-    private(set) var sessionEndedAt: Date?
+    /// Monotonic instants: a wall-clock change mid-session must not distort
+    /// the elapsed display.
+    private(set) var sessionStartedAt: ContinuousClock.Instant?
+    private(set) var sessionEndedAt: ContinuousClock.Instant?
     /// When the capture source died mid-session (`.sourceLost`). The SESSION
     /// card freezes at it during the outage — the session clock itself
     /// survives a successful restart, so duration resumes counting then.
-    private(set) var captureLostAt: Date?
+    private(set) var captureLostAt: ContinuousClock.Instant?
     /// Injectable so tests can observe (and fake) the quit-time release of
     /// the process-warm ASR engine; the default drives the real factory.
     private let retireWarmEngine: @Sendable () -> Void
@@ -240,7 +242,7 @@ final class AppModel {
             entryPositionBySentence.removeAll()
             sessionCharacterCount = 0
             hudPinnedIndex = nil
-            sessionStartedAt = Date()
+            sessionStartedAt = .now
             sessionEndedAt = nil
             captureLostAt = nil
             // The Apple-fallback latch is per session: a fresh session
@@ -272,7 +274,7 @@ final class AppModel {
             // session can never come up, so surface it instead of swallowing.
             guard let self, phase == .running || phase == .starting else { return }
             phase = .sourceLost
-            captureLostAt = Date()
+            captureLostAt = .now
             postCaptureLost(body: message)
         }
     }
@@ -391,7 +393,7 @@ final class AppModel {
                 // Freeze the SESSION duration at the failure: a capture that
                 // died mid-start would otherwise leave the endedAt anchor nil
                 // and the frozen path reading now − startedAt per render.
-                self.sessionEndedAt = Date()
+                self.sessionEndedAt = .now
                 self.toasts.post(
                     key: ToastKey.sessionFailed, style: .redPersistent,
                     title: "Session failed", body: error.localizedDescription
@@ -490,7 +492,7 @@ final class AppModel {
         translationWorker?.cancel()
         translationWorker = nil
         translationStatus = .idle
-        sessionEndedAt = Date()
+        sessionEndedAt = .now
         // Stop/teardown clears all toasts and notices (phase → `.idle`).
         toasts.clearAll()
         notices.dismiss()
