@@ -269,9 +269,11 @@ extension ReadingAnnotator {
 
     /// The same irregular days keyed by the resolved number kana, consulted
     /// after resolution: covers kanji numeral runs the tokenizer splits
-    /// (二+日 → ふつか, 二十+日 → はつか, 十四+日 → じゅうよっか).
+    /// (二+日 → ふつか, 二十+日 → はつか, 十四+日 → じゅうよっか). 一+日 reads
+    /// the duration form いちにち — the date reading ついたち is reserved for
+    /// the written digit form (1日, `digitDateReadings`).
     private static let kanaDateReadings: [String: String] = [
-        "いち": "ついたち", "に": "ふつか", "さん": "みっか", "よん": "よっか",
+        "いち": "いちにち", "に": "ふつか", "さん": "みっか", "よん": "よっか",
         "ご": "いつか", "ろく": "むいか", "なな": "なのか", "はち": "ようか",
         "きゅう": "ここのか", "じゅう": "とおか", "にじゅう": "はつか",
         "じゅうよん": "じゅうよっか", "にじゅうよん": "にじゅうよっか"

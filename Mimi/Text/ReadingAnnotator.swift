@@ -213,7 +213,7 @@ final class ReadingAnnotator: @unchecked Sendable {
             ))
             return
         }
-        reading = Self.lexicalKana[reading] ?? reading
+        reading = Self.surfaceReadings[surface] ?? Self.lexicalKana[reading] ?? reading
         var romaji = KanaRomaji.romaji(fromKana: reading) ?? surface
         if let lexical = Self.lexicalRomaji[reading] {
             romaji = lexical
@@ -374,6 +374,12 @@ final class ReadingAnnotator: @unchecked Sendable {
     /// kana: 入口/入り口 carries the etymological いりくち but is spoken with
     /// rendaku (いりぐち) — keyed by reading so both written forms inherit it.
     private static let lexicalKana = ["いりくち": "いりぐち"]
+
+    /// Whole-surface reading overrides, keyed by the written form: 一日 is a
+    /// single dictionary token whose first reading is the date ついたち, but
+    /// transcripts mean the duration word いちにち — the date reading stays
+    /// with the digit form (1日 → ついたち, `digitDateReadings`).
+    private static let surfaceReadings = ["一日": "いちにち"]
 
     // MARK: - Text helpers
 

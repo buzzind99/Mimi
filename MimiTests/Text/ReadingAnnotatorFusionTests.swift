@@ -77,6 +77,17 @@ struct ReadingAnnotatorFusionTests {
         #expect(describe(segments) == [[text, romaji, furigana]])
     }
 
+    @Test("reads the split 一+日 pair as the duration word (いちにち, not ついたち)")
+    func splitIchinichiReadsTheDurationWord() throws {
+        let annotator = makeAnnotator(tokens(
+            ["一", "日"], readings: ["いち", "にち"]
+        ))
+
+        let segments = try #require(annotator.segments(for: "一日"))
+
+        #expect(describe(segments) == [["一日", "ichinichi", "いちにち"]])
+    }
+
     @Test("fuses 六 plainly before 歳 (roku exception → plain fusion)")
     func rokuExceptionBeforeSai() throws {
         let annotator = makeAnnotator(tokens(
@@ -430,6 +441,15 @@ struct ReadingAnnotatorFusionTests {
     }
 
     // MARK: - Lexical reading repairs
+
+    @Test("overrides the single token's date reading of 一日 with the duration reading")
+    func singleTokenIchinichiOverridesTsuitachi() throws {
+        let annotator = makeAnnotator([token("一日", start: 0, reading: "ついたち")])
+
+        let segments = try #require(annotator.segments(for: "一日"))
+
+        #expect(describe(segments) == [["一日", "ichinichi", "いちにち"]])
+    }
 
     @Test("repairs the dictionary's unvoiced reading of the entrance to the spoken rendaku form",
           arguments: [

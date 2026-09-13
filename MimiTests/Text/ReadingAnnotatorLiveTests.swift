@@ -65,6 +65,7 @@ struct ReadingAnnotatorLiveTests {
         ("一着", "icchaku", "いっちゃく"),
         ("八分", "happun", "はっぷん"),
         ("八歳", "hassai", "はっさい"),
+        ("一日", "ichinichi", "いちにち"),
         ("600回", "roppyakkai", "ろっぴゃっかい"),
         ("私", "watashi", "わたし"),
         ("お母さん", "okaasan", "おかあさん"),
