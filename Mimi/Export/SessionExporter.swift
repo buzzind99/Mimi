@@ -2,7 +2,8 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Formats session transcripts: plain text, SRT, VTT, and the authoritative
-/// JSON session file. Reads languages from fields; never assumes ja/en.
+/// JSON session file. Languages come from entry fields and session metadata;
+/// with metadata absent the JSON session defaults to ja/en.
 enum SessionExporter {
     enum Format: String, CaseIterable, Identifiable {
         case txt = "Plain text"
@@ -49,7 +50,8 @@ enum SessionExporter {
         var out = format == .vtt ? "WEBVTT\n\n" : ""
         var cueIndex = 1
         for entry in entries {
-            // EN cue line first (JP optionally as a second line).
+            // Cue body: one line per translation (append order); the JP
+            // transcript never appears in a cue.
             let translations = entry.translations
             guard !translations.isEmpty else { continue }
             let start = format == .srt
