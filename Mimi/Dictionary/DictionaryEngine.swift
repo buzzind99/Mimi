@@ -41,8 +41,9 @@ struct DictionaryToken: Codable, Equatable {
 }
 
 /// Swift wrapper around the staged dictionary runtime. Opens one
-/// process-global dictionary handle lazily on the resolved dictionary URL and
-/// never frees it during the app's lifetime (the CrispASR keep-warm stance).
+/// per-instance dictionary handle lazily on the resolved dictionary URL
+/// (`shared` is the only de-facto global) and intentionally never frees it
+/// (the CrispASR keep-warm stance).
 /// Every failure is fail-soft: `tokenize` returns nil and callers degrade to
 /// plain text rather than crash.
 ///

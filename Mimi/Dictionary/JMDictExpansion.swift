@@ -60,8 +60,8 @@ struct ExpansionCandidate: Equatable, Sendable {
 /// word the user tapped always takes the display result and a longer join
 /// or split hit lands in the outcome's "also:" list. Conjugated forms
 /// fall back to their lemma (base form) when the surface itself isn't a
-/// headword. The joins follow in longest-first order for taps whose own
-/// text isn't a dictionary headword, and the kanji-substring splits trail
+/// headword. The joins always follow in longest-first order, and the
+/// kanji-substring splits trail
 /// them, longest substring first — the tapped surface's splits before the
 /// joined text's — as the deep fallback.
 ///
