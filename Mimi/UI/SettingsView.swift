@@ -57,6 +57,21 @@ struct SettingsView: View {
             keySaveFailed = false
             model.translationProviderDidChange()
         }
+        // The Settings scene keeps its window — and this view's @State —
+        // cached after close, so transient card state survives a reopen and
+        // the key card would come back stuck on the last-clicked pending
+        // provider. Becoming key is the reopen signal (the window auto-closes
+        // on resign-key, so it never regains key while open); reset so the
+        // card reflects the active provider again.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard let window = note.object as? NSWindow,
+                  SettingsWindowController.isSettingsWindow(window)
+            else { return }
+            pendingProvider = nil
+            verifyingProvider = nil
+            keyDraft = ""
+            keySaveFailed = false
+        }
     }
 
     // MARK: - Header
