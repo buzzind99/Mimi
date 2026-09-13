@@ -4,11 +4,11 @@
 #   scripts/test.sh <extra xcodebuild args...>
 #
 # xcodegen generate → xcodebuild test (output captured to build/xcodebuild.log)
-# → xcresulttool test summary (+ xccov JSON when coverage is on) → compact
-# summary: test pass/fail (failing test names + messages), overall %, failing
-# gates, uncovered lines in failed folders only, wall time (total + coverage
-# parse + coverage write; xcodebuild reports its own duration).
-# Full detail: build/xcodebuild.log, build/test-results.json, build/cov.json,
+# → xcresulttool test summary (+ per-line xccov export when coverage is on) →
+# compact summary: test pass/fail (failing test names + messages), overall %,
+# failing gates, uncovered lines in failed folders only, wall time (total +
+# coverage parse + coverage write; xcodebuild reports its own duration).
+# Full detail: build/xcodebuild.log, build/test-results.json,
 # build/lcov.info, build/cov-html/index.html.
 # Exits non-zero if tests fail, the result bundle is missing, or a coverage
 # gate fails.
@@ -64,9 +64,6 @@ fi
 
 t_cov=$(python3 -c 'import time; print(time.time())')
 echo "==> parsing results & writing coverage"
-if [[ "$FAST" -eq 0 ]]; then
-  xcrun xccov view --report --json "$RESULT_BUNDLE" > build/cov.json
-fi
 if ! xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" \
     > build/test-results.json 2>/dev/null; then
   echo "warning: could not read test summary from result bundle" >&2
@@ -84,11 +81,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 fast = os.environ.get("FAST") == "1"
 
-report = None
-if not fast:
-    with open("build/cov.json") as f:
-        report = json.load(f)
-
 build_status = int(os.environ.get("XCODEBUILD_STATUS") or 0)
 try:
     with open("build/test-results.json") as f:
@@ -96,6 +88,8 @@ try:
 except (OSError, ValueError):
     tests = None
 failures = (tests or {}).get("testFailures") or []
+
+t_parse = time.time()
 
 prefixes = [
     ("State/",       "Mimi/State/"),
@@ -107,53 +101,25 @@ prefixes = [
     ("Model/",       "Mimi/Model/"),
     ("ASR/",         "Mimi/ASR/"),
     ("Audio/",       "Mimi/Audio/"),
+    ("FFI/",         "Mimi/FFI/"),
+    ("Security/",    "Mimi/Security/"),
     ("App/",         "Mimi/App/"),
     ("UI/",          "Mimi/UI/"),
 ]
 
-agg = {label: [0, 0] for label, _ in prefixes}
-overall = [0, 0]
-for target in (report or {}).get("targets", []):
-    for f in target.get("files", []):
-        path = f.get("path", "")
-        if "/Mimi/" not in path or "/MimiTests/" in path:
-            continue
-        covered = f.get("coveredLines", 0)
-        lines = f.get("executableLines", 0)
-        overall[0] += lines
-        overall[1] += covered
-        for label, prefix in prefixes:
-            if prefix in path:
-                agg[label][0] += lines
-                agg[label][1] += covered
-                break
-
 floors = {
-    "State/":       95.2,
+    "State/":       98.5,
     "Export/":     100.0,
-    "Dictionary/":  98.0,
-    "Text/":        98.0,
-    "Session/":     96.9,
-    "Translation/": 96.5,
-    "Model/":       89.9,
-    "ASR/":         93.9,
-    "Audio/":       77.6,
+    "Dictionary/":  99.2,
+    "Text/":        99.3,
+    "Session/":     97.9,
+    "Translation/": 98.0,
+    "Model/":       96.9,
+    "ASR/":         97.7,
+    "Audio/":       80.9,
+    "FFI/":        100.0,
+    "Security/":    95.6,
 }
-failed_gates = []
-passed = 0
-total_lines, covered_lines = overall
-overall_pct = (covered_lines / total_lines * 100) if total_lines else float("nan")
-if not fast:
-    for label, _ in prefixes:
-        floor = floors.get(label)
-        if floor is None:
-            continue
-        total, covered = agg[label]
-        pct = (covered / total * 100) if total else float("nan")
-        if pct >= floor:
-            passed += 1
-        else:
-            failed_gates.append((label, pct, floor))
 
 if failures:
     print("\nfailing tests:")
@@ -174,20 +140,11 @@ if tests:
 else:
     print(f"tests: unknown ({'FAIL' if build_status else 'no summary'})")
 if fast:
-    print("coverage: skipped (--fast)")
-else:
-    print(f"coverage: {overall_pct:.1f}% ({covered_lines}/{total_lines} lines) "
-          f"· gates {passed}/{len(floors)} PASS")
-    for label, pct, floor in failed_gates:
-        print(f"  ✗ {label:<14}{pct:>6.1f}% < {floor:g}%")
-
-t_parse = time.time()
-if fast:
     records = []
 else:
-    # Per-line data: build/lcov.info + uncovered report; full detail in
-    # artifacts. Per-file xccov calls run concurrently — each one re-opens
-    # the result bundle archive.
+    # Per-line data: summary, gates, build/lcov.info + uncovered report; full
+    # detail in artifacts. Per-file xccov calls run concurrently — each one
+    # re-opens the result bundle archive.
     xccov = subprocess.run(["xcrun", "--find", "xccov"],
                            capture_output=True, text=True, check=True).stdout.strip()
 
@@ -209,6 +166,43 @@ else:
     ]
     with ThreadPoolExecutor(max_workers=min(8, len(paths) or 1)) as pool:
         records = list(pool.map(read_file_cov, paths))
+
+agg = {label: [0, 0] for label, _ in prefixes}
+overall = [0, 0]
+for rel, da in records:
+    lines = len(da)
+    covered = sum(1 for _, c in da if c)
+    overall[0] += lines
+    overall[1] += covered
+    for label, prefix in prefixes:
+        if prefix in rel:
+            agg[label][0] += lines
+            agg[label][1] += covered
+            break
+
+failed_gates = []
+passed = 0
+total_lines, covered_lines = overall
+overall_pct = (covered_lines / total_lines * 100) if total_lines else float("nan")
+if not fast:
+    for label, _ in prefixes:
+        floor = floors.get(label)
+        if floor is None:
+            continue
+        total, covered = agg[label]
+        pct = (covered / total * 100) if total else float("nan")
+        if pct >= floor:
+            passed += 1
+        else:
+            failed_gates.append((label, pct, floor))
+
+if fast:
+    print("coverage: skipped (--fast)")
+else:
+    print(f"coverage: {overall_pct:.1f}% ({covered_lines}/{total_lines} lines) "
+          f"· gates {passed}/{len(floors)} PASS")
+    for label, pct, floor in failed_gates:
+        print(f"  ✗ {label:<14}{pct:>6.1f}% < {floor:g}%")
 
 with open("build/lcov.info", "w") as f:
     for rel, da in records:
