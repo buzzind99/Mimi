@@ -383,6 +383,7 @@ extension CrispASREngine {
         } else {
             utterance = []
             utteranceStartSample = 0
+            utteranceHasLoudAudio = false
         }
         resetEndpointStateLocked()
         trimWindowLocked(throughSample: end)
