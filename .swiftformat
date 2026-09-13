@@ -1,7 +1,9 @@
 # SwiftFormat configuration — matches Mimi's existing style.
 # Run `swiftformat --lint .` (or scripts/lint.sh) in CI / before commit.
 
---swiftversion 5.0
+--swiftversion 6.0
+
+--exclude build,vendor,Mock
 
 --indent 4
 --maxwidth none
