@@ -24,8 +24,9 @@ final class ASRModelSettings {
             .flatMap(ASRModelChoice.init(rawValue:)) ?? .lite
     }
 
-    /// Persists the selection. Callers gate on availability (downloaded +
-    /// verified) and the session phase before invoking this.
+    /// Persists the selection. The Settings path gates on availability
+    /// (downloaded + verified) and the session phase; onboarding selects
+    /// the download target up front (no model needs to exist yet).
     func select(_ choice: ASRModelChoice) {
         selected = choice
     }

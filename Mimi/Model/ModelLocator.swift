@@ -20,8 +20,8 @@ enum ModelLocator {
         modelsDirectory.appendingPathComponent(choice.ggufFileName)
     }
 
-    /// Development checkout candidate: scripts/build_runtime.sh puts the dev
-    /// model in <repo>/models/; Xcode runs the app with that as working
+    /// Development checkout candidate: the dev GGUF is downloaded manually
+    /// into <repo>/models/; Xcode runs the app with that as working
     /// directory. Debug-only so release never depends on the cwd.
     static func devCheckoutURL(for choice: ASRModelChoice) -> URL? {
         #if DEBUG
