@@ -73,7 +73,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
     var onIOError: ((CaptureError) -> Void)?
 
     private let outputQueue = DispatchQueue(
-        label: "dev.mimi.capture.sck", qos: .userInteractive
+        label: "mimi.capture.sck", qos: .userInteractive
     )
     /// Guards `isRunning` and the chunk accumulator. Sample callbacks run on
     /// `outputQueue`, but `stop()` can be called from any thread — the lock is

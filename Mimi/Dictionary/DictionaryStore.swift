@@ -173,7 +173,7 @@ final class DictionaryStore: @unchecked Sendable {
         var jmDict: Phase = .idle
     }
 
-    private let queue = DispatchQueue(label: "dev.mimi.DictionaryStore", qos: .utility)
+    private let queue = DispatchQueue(label: "mimi.DictionaryStore", qos: .utility)
     private let bundledSource: URL?
     private let bundledJMDictSource: URL?
     private let destinationDirectory: URL

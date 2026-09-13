@@ -155,7 +155,7 @@ struct SystemAudioCaptureTeardownTests {
     func streamStoppedWhileRunning() throws {
         let capture = makeCapture(running: true)
         let streamError = NSError(
-            domain: "dev.mimi.tests", code: 42,
+            domain: "mimi.tests", code: 42,
             userInfo: [NSLocalizedDescriptionKey: "stream died"]
         )
 
@@ -177,7 +177,7 @@ struct SystemAudioCaptureTeardownTests {
     )
     func streamStoppedClearsAccumulator() throws {
         let capture = makeCapture(running: true)
-        let streamError = NSError(domain: "dev.mimi.tests", code: 9)
+        let streamError = NSError(domain: "mimi.tests", code: 9)
 
         // A full chunk pre-death: pins that session-relative offsets
         // intentionally continue across the death (`startSample` does not
@@ -200,7 +200,7 @@ struct SystemAudioCaptureTeardownTests {
     @Test("a stream-stopped event while not running is a no-op")
     func streamStoppedWhenNotRunning() {
         let capture = makeCapture(running: false)
-        let streamError = NSError(domain: "dev.mimi.tests", code: 7)
+        let streamError = NSError(domain: "mimi.tests", code: 7)
 
         capture.handleStreamStopped(streamError)
 

@@ -195,8 +195,8 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// Serializes `prepare` so a background warm-up and a session start can
     /// never both open a C session (the second opener would leak the first).
     let prepareLock = NSLock()
-    let decodeQueue = DispatchQueue(label: "dev.mimi.asr.decode", qos: .userInitiated)
-    let vadQueue = DispatchQueue(label: "dev.mimi.asr.vad", qos: .userInitiated)
+    let decodeQueue = DispatchQueue(label: "mimi.asr.decode", qos: .userInitiated)
+    let vadQueue = DispatchQueue(label: "mimi.asr.vad", qos: .userInitiated)
     /// Signaled after every decode or VAD completion so `finish` can wait
     /// out in-flight work. Never waited on by the job paths themselves.
     let jobFinished = DispatchSemaphore(value: 0)

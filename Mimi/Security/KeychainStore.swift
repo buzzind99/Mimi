@@ -28,7 +28,7 @@ protocol SecureKeyStoring: Sendable {
 /// the pasteboard, or export files.
 struct KeychainStore: SecureKeyStoring {
     /// Service name for the production app's translation keys.
-    static let defaultService = "dev.mimi.app.translation"
+    static let defaultService = "mimi.app.translation"
 
     private let service: String
 

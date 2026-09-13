@@ -16,7 +16,7 @@ struct KeychainStoreTests {
     /// Store scoped to a fresh service name; `deleteAll` removes everything
     /// the test created (call from `defer`).
     private func makeStore() -> (store: KeychainStore, cleanup: () -> Void) {
-        let service = "dev.mimi.app.tests.\(UUID().uuidString)"
+        let service = "mimi.app.tests.\(UUID().uuidString)"
         let store = KeychainStore(service: service)
         return (store, { store.deleteKey(for: providerID) })
     }
