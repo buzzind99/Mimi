@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The connection pill in the status-bar footer, derived purely from the
-/// translation status × active engine × fallback latch. The HUD stays clean —
-/// the pill lives in the main window footer only.
+/// Pure translation-status presentation mapping — a `Tone` plus the engine
+/// label — derived from status × active engine × fallback latch. The
+/// sidebar's ENGINES translation row consumes `map`'s tone for its status
+/// dot (via `SidebarStatus.DotTone`); unit tests pin the mapping.
 struct TranslationPill: Equatable {
     enum Tone: Equatable {
         case green, yellow, red, neutral

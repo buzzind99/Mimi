@@ -175,12 +175,14 @@ enum Theme {
     // MARK: Gradients
 
     enum Gradients {
-        /// Brand mark circle (`#FF6E9C → #B36BFF`, corner to corner).
+        /// Brand mark circle (`accentPink → brandViolet`, corner to corner;
+        /// flat coral on light, pink → violet on dark).
         static let brand = LinearGradient(
             colors: [Theme.accentPink, Theme.brandViolet],
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
-        /// Translation row's 3pt capsule bar (`#5EEAD4 → #38BDF8`, top→bottom).
+        /// Translation row's 3pt capsule bar (`meterTeal → meterBlue`,
+        /// top→bottom).
         static let translationBar = LinearGradient(
             colors: [Color(light: 0x0D9488, dark: 0x5EEAD4), Color(light: 0x0284C7, dark: 0x38BDF8)],
             startPoint: .top, endPoint: .bottom
@@ -191,12 +193,13 @@ enum Theme {
             colors: [Color(light: 0xFF6B5E, dark: 0xFF6E9C), Color(light: 0xE0483C, dark: 0xE05585)],
             startPoint: .leading, endPoint: .trailing
         )
-        /// "Start session" capsule (`#2DD4BF → #38BDF8`, leading→trailing).
+        /// "Start session" capsule, leading→trailing (light
+        /// `#0D9488 → #0284C7`, dark `#2DD4BF → #38BDF8`).
         static let start = LinearGradient(
             colors: [Color(light: 0x0D9488, dark: 0x2DD4BF), Color(light: 0x0284C7, dark: 0x38BDF8)],
             startPoint: .leading, endPoint: .trailing
         )
-        /// Audio meter bars (`#5EEAD4 → #38BDF8`, top→bottom).
+        /// Audio meter bars (`meterTeal → meterBlue`, top→bottom).
         static let audioMeter = LinearGradient(
             colors: [Theme.meterTeal, Theme.meterBlue], startPoint: .top, endPoint: .bottom
         )

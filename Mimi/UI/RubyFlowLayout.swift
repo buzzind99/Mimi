@@ -1,13 +1,5 @@
 import SwiftUI
 
-/// Wrapping flow layout: places children left-to-right, breaking onto a new
-/// line when the next child would exceed the available width. Child sizes are
-/// measured once per content change (keyed by `fingerprint`) and line breaks
-/// are packed per proposal width, so the repeated layout passes List's
-/// virtualized rows trigger (scroll materialization, insertion springs,
-/// re-anchor chases) don't re-measure every child each time. The fingerprint
-/// also guards row recycling: a reused layout instance re-measures when its
-/// content changes.
 /// Pure placement pass for `FlowLayout`: packs children left-to-right,
 /// wrapping to a new line when the next child would exceed the available
 /// width. Children flagged in `wraps` re-wrap internally (they were
@@ -63,7 +55,12 @@ struct RubyFlowPacking {
 
 /// The `Layout` conformance wrapping `RubyFlowPacking`: caches ideal child
 /// sizes keyed by `fingerprint`, re-measures children wider than the line so
-/// they wrap internally, and places per the packer's placements.
+/// they wrap internally, and places per the packer's placements. Child sizes
+/// are measured once per content change and line breaks are packed per
+/// proposal width, so the repeated layout passes List's virtualized rows
+/// trigger (scroll materialization, insertion springs, re-anchor chases)
+/// don't re-measure every child each time. The fingerprint also guards row
+/// recycling: a reused layout instance re-measures when its content changes.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 4
     var lineSpacing: CGFloat = 1

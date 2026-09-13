@@ -17,8 +17,8 @@ struct TranslationSessionHost: View {
 }
 
 /// Root view: onboarding until the model resolves, then the main shell —
-/// shell — sidebar | 1pt divider | transcript pane with the live strip and
-/// the toast stack overlaid top-trailing.
+/// sidebar | 1pt divider | transcript pane with the live strip, the toast
+/// stack overlaid top-trailing, and the notice pill overlaid top.
 struct ContentView: View {
     var model: AppModel
     var live: LivePartialState

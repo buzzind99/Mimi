@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Floating HUD content: active JP partial/final on top, EN translation
-/// below. Hosted by `HUDHostingView` inside `HUDPanel` (HUDWindow.swift).
+/// Floating HUD content: the in-flight JP partial on top, the displayed
+/// translated entry (JP + EN) below. Hosted by `HUDHostingView` inside
+/// `HUDPanel` (HUDWindow.swift).
 struct HUDView: View {
     var model: AppModel
     var live: LivePartialState

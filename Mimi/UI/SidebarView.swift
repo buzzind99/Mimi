@@ -1,9 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Main sidebar: brand header, session capsule, reading-aid picker,
-/// engines/audio/session cards, and the toolbar row. Fixed 282pt, themed by
-/// `Theme`; the transcript pane supplies the 1pt divider.
+/// Main sidebar: brand header, session capsule, annotation and cursor-mode
+/// pickers, engine/audio cards (the dictionary card in dictionary mode), the
+/// session card, and the toolbar row. Fixed 282pt, themed by `Theme`; the
+/// transcript pane supplies the 1pt divider.
 struct SidebarView: View {
     @Bindable var model: AppModel
     @AppStorage(ReadingAnnotation.storageKey) private var readingAnnotation = ReadingAnnotation.romaji

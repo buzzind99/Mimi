@@ -7,7 +7,7 @@ import SwiftUI
 struct LiveStripView: View {
     var live: LivePartialState
     /// Invoked with the clicked surface text when cursor mode is `.copy`;
-    /// the owner (ContentView) supplies the pasteboard + toast path.
+    /// the owner (ContentView) supplies the pasteboard + notice-pill path.
     var onCopy: ((String) -> Void)?
     /// Invoked with the tapped word when cursor mode is `.dictionary`;
     /// nil keeps `.dictionary` on the legacy rendering path.

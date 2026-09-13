@@ -26,7 +26,7 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// annotation line above the surface (the visible furigana in furigana
     /// mode, invisible in romaji/none). The surface then starts at the same
     /// vertical position in None, Romaji, and Furigana modes, so mode toggles
-    /// never shift the kanji. Off by default; `TranscriptRow` relies on it.
+    /// never shift the kanji. Off by default; the HUD's live partial opts in.
     var reservesAnnotationLine = false
     /// Whether render-time segment resolutions go through the annotator's
     /// cache. Hosts rendering a live partial — a growing 6–10 Hz revision of
