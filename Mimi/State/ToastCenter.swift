@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Toast keys wired by `AppModel` (one per error surface).
+/// Toast keys, one per error surface.
 enum ToastKey {
     static let translationRetry = "translation.retry"
     static let translationFallback = "translation.fallback"
@@ -22,14 +22,13 @@ enum ToastKey {
 @MainActor
 final class ToastCenter {
     /// The three toast classes: transient warnings auto-dismiss after 3 s
-    /// (delay is per-center); persistent cards stay until their condition
-    /// clears and carry the fix action (red cards are always actionable).
+    /// (delay is per-center); persistent cards stay until dismissed — by
+    /// their condition clearing, a fix action, or session teardown.
     enum Style: Equatable, Sendable {
         case yellowAuto
         case yellowPersistent
         case redPersistent
 
-        /// Transient cards auto-dismiss after the delay; persistent ones stay.
         var autoDismisses: Bool {
             switch self {
             case .yellowAuto: true

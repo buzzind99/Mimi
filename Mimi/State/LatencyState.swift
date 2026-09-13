@@ -1,8 +1,8 @@
 import Foundation
 
-/// High-frequency latency estimate, updated per 160 ms audio chunk. Observed
-/// only by the status bar — latency updates never re-render the transcript
-/// history or the HUD.
+/// High-frequency latency estimate, updated on the 60 ms poll tick that also
+/// drains the audio meter. Observed only by the sidebar SESSION card —
+/// latency updates never re-render the transcript history or the HUD.
 @Observable
 @MainActor
 final class LatencyState {

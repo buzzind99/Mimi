@@ -13,8 +13,7 @@ final class AudioLevelState {
     /// Full-scale floor: RMS at or below this level maps to 0.
     static let floorDB: Double = -60
 
-    /// Ring backing store: fixed-size, written at `writeIndex`. `levels`
-    /// reads it in ring order so the meter always sees oldest → newest.
+    /// Ring backing store: fixed-size, written at `writeIndex`.
     private var storage: [Double] = Array(repeating: 0, count: AudioLevelState.slotCount)
     /// Next slot to overwrite; wraps at `slotCount`.
     private var writeIndex = 0

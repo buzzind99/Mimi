@@ -46,10 +46,9 @@ final class AppModel {
     /// entry. Pinning an older entry means new translations never move the
     /// view; nil tracks the newest.
     var hudPinnedIndex: Int?
-    /// True while a session start is blocked on the first-launch dictionary
-    /// build (see `ensureDictionaryReady`) so the status bar can show
-    /// "Building dictionary…" instead of "Starting…". Mutated only by the
-    /// preparation surface in `AppModelDictionary.swift`.
+    /// True while a session start is blocked on a missing dictionary build
+    /// (see `ensureDictionaryReady`). Mutated only by the preparation
+    /// surface in `AppModelDictionary.swift`.
     var isPreparingDictionary = false
     /// True while model discovery (resolve + SHA-256 verify) is in flight —
     /// at launch and on a Settings re-check. Start is gated on it: the
@@ -63,12 +62,13 @@ final class AppModel {
     /// The pinned sidebar DICTIONARY card content: the last lookup of the
     /// session — found or not-found — with the paged entry index.
     /// Persists after the popover dismisses; cleared on session clear.
-    /// Setter stays in `AppModelLookup.swift` (lookup lifecycle only).
+    /// Mutated by the lookup lifecycle in `AppModelLookup.swift` and the
+    /// session-begin reset below.
     var pinnedLookup: PinnedLookup?
     /// Staleness token for in-flight lookups: each new tap invalidates the
     /// previous one, so a slow lookup that lands after a newer tap (or a
-    /// session clear) never presents stale state. Mutated only by the
-    /// lookup lifecycle in `AppModelLookup.swift`.
+    /// session clear) never presents stale state. Mutated by the lookup
+    /// lifecycle in `AppModelLookup.swift` and the session-begin bump below.
     var lookupGeneration = 0
     /// The JMDict lookup engine behind dictionary taps; injectable so tests
     /// drive a fixture database (the default resolves the prepared store).
@@ -99,7 +99,7 @@ final class AppModel {
     let translationQueue = TranslationQueue()
     /// Non-secret translation provider settings (selected provider, hasKey
     /// flags, OpenRouter model, test results). Keys stay in `SecureKeyStoring`
-    /// and are read only when an engine is constructed.
+    /// and are read on demand (engine construction, connection tests).
     let translationSettings: TranslationSettings
     /// Non-secret ASR model selection (Lite default, Full opt-in); persisted
     /// across launches. Switching applies at the next session start.
@@ -294,7 +294,7 @@ final class AppModel {
 
     // MARK: - Model / app discovery
 
-    /// Re-checks both model locations and moves `idle`↔`needsModel` by the
+    /// Re-checks both model choices and moves `idle`↔`needsModel` by the
     /// active choice's result. The resolve (existence + SHA-256 verify,
     /// hashing up to ~1.2 GB) runs off-main and the result is hopped back
     /// here; `isCheckingModel` gates Start while the check is in flight.

@@ -69,7 +69,7 @@ struct SelectedLookup: Equatable, Identifiable, Sendable {
 extension SelectedLookup {
     /// The popover item a given surface presents — only the surface whose
     /// anchor matches `source` shows the popover; every other surface sees
-    /// nothing. Pure for tests.
+    /// nothing. Pure helper.
     func popoverItem(for source: Source) -> SelectedLookup? {
         self.source == source ? self : nil
     }
