@@ -9,17 +9,21 @@ import Testing
 /// idempotency, and `finish`'s sessionless drain (no in-flight jobs →
 /// immediate empty drain).
 ///
-/// Excluded (see the exclusions inventory): the decode/VAD/session internals
-/// — real transcription, endpointing, and the drain's in-flight waits need a
-/// bound native dylib + GGUF model + Metal pipeline. Tests that exercise the
-/// engine shell cancel (`try Test.cancel`) when the dylib can't bind; the
-/// bind-failure test cancels on the inverse condition.
+/// Excluded: the decode/VAD/session internals — real transcription,
+/// endpointing, and the drain's in-flight waits need a bound native dylib +
+/// GGUF model + Metal pipeline (the fake-library suite covers them without
+/// the hardware). Tests that exercise the engine shell cancel
+/// (`try Test.cancel`) when the dylib can't bind; the bind-failure test
+/// cancels on the inverse condition.
 @Suite("CrispASREngine")
 struct CrispASREngineTests {
 
     // MARK: - Fixtures
 
-    /// Exists only to prove the model-file guard fires before any C call.
+    /// Missing file used by the prepare tests: pins the thrown
+    /// `.modelNotFound` case (path + description). That the guard fires
+    /// before any C call is a property only a fake library could prove —
+    /// the fake-library suite covers the C-facing `prepare` paths.
     private static let missingModelURL = URL(fileURLWithPath: "/tmp/mimi-crisp-missing.gguf")
 
     private let engine: CrispASREngine?
@@ -102,7 +106,7 @@ struct CrispASREngineTests {
 
         engine.push([Float](repeating: 0.01, count: 2560))
 
-        #expect(engine.processedSamples == 0, "push without a session must not count samples")
+        #expect(engine.pushedSamples == 0, "push without a session must not count samples")
         #expect(engine.poll() == nil)
     }
 
@@ -139,6 +143,9 @@ struct CrispASREngineTests {
 
         #expect(engine.poll() == nil)
         #expect(engine.processedSamples == 0)
+
+        engine.push([Float](repeating: 0.01, count: 2560))
+        #expect(engine.pushedSamples == 0, "push after close stays ignored (finishing latched)")
     }
 
     // MARK: - fallbackBackend (detector-less name guess)

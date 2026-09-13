@@ -72,6 +72,10 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     /// single direct C call on the session, and aborting mid-call would leave
     /// the C library using a session this side has already torn down.)
     static let drainTimeout: TimeInterval = 30
+    /// Per-instance drain budget — defaults to the static budget above.
+    /// Injectable so tests can exercise the bounded wait against a held job
+    /// without waiting out the full 30 s.
+    var drainTimeout = CrispASREngine.drainTimeout
 
     // FireRedVAD (via the dispatcher-backed crispasr_vad_slices ABI; the
     // model is process-cached in the C library after the first call).

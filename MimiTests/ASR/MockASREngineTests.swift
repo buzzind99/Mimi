@@ -63,6 +63,14 @@ struct MockASREngineTests {
         #expect(engine.processedSamples == 0)
     }
 
+    @Test("pushedSamples tracks pushed audio")
+    func pushedSamplesTrackPushedAudio() {
+        pushSpeech()
+        pushSilence()
+
+        #expect(engine.pushedSamples == 2000)
+    }
+
     @Test("push accumulates silence and speech samples")
     func pushAccumulatesSamples() {
         pushSilence(500)
@@ -137,6 +145,7 @@ struct MockASREngineTests {
         #expect(final.lang == "ja")
         #expect(final.startSample == 0)
         #expect(final.endSample == engine.processedSamples)
+        #expect(final.endSample == 6000, "6 chunks × 1000 samples")
     }
 
     @Test("the second sentence lands within the random cadence window")
@@ -156,6 +165,7 @@ struct MockASREngineTests {
         #expect(second.text == "これから配信を始めます、よろしくお願いします。")
         #expect(second.startSample == first.endSample)
         #expect(second.endSample == engine.processedSamples)
+        #expect(second.endSample == 24000, "6 + 18 chunks × 1000 samples")
     }
 
     // MARK: - poll FIFO + nil-when-empty

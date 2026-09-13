@@ -4,11 +4,12 @@ import Testing
 
 /// Tests the full `CrispASREngine` state machine over a scripted fake
 /// library (`CrispASRLibraryAPI` injection): push → VAD span → endpoint
-/// final, the zero-span speechless discard, VAD failure degradation and
+/// final, `.partial` draft events, the zero-span speechless discard and its
+/// cursor reset, the nil-VAD-reply skip, VAD failure degradation and
 /// throttling, decode-failure throttling (×1 then every 32nd), partial
 /// cadence + zero-padding below the 2 s conv floor, stale-generation drops,
-/// the forced-final cap (loud vs silent), `finish()`'s flush decode + drain,
-/// and the post-final window trim.
+/// and the post-final window trim. Session lifecycle (`prepare`/`close`/
+/// `finish`) lives in `CrispASREngineLifecycleTests`.
 ///
 /// Runs on every machine — no dlopen, no model, no Metal: the fake bypasses
 /// the library seam and the vad/decode queues are per-engine instance state,
@@ -51,17 +52,22 @@ struct CrispASREngineLibraryTests {
     }
 
     /// Drains `poll()` until a final appears (bounded); returns it, or nil
-    /// on timeout.
+    /// on timeout. Asserts the wait succeeded and that no non-final event
+    /// (a spurious `.partial`) preceded the final.
     private func pollFinal(_ engine: CrispASREngine) async -> ASREvent? {
         var final: ASREvent?
-        await pollUntilOffMain {
+        var strays: [ASREvent] = []
+        let found = await pollUntilOffMain {
             guard let event = engine.poll() else { return false }
             if case .final = event {
                 final = event
                 return true
             }
+            strays.append(event)
             return false
         }
+        #expect(found, "a final arrived before the timeout")
+        #expect(strays.isEmpty, "no event may precede the final, got \(strays)")
         return final
     }
 
@@ -86,7 +92,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await pollUntilOffMain { library.transcribeCalls.count == 1 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "window partial decoded")
         engine.push([Float](repeating: 0, count: 20000)) // 1.25 s clears the 1 s confirmed-silence endpoint
 
         let final = await pollFinal(engine)
@@ -106,11 +112,14 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await pollUntilOffMain { library.transcribeCalls.count == 1 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "window partial decoded")
         engine.push([Float](repeating: 0, count: 20000)) // 1.25 s clears the 1 s confirmed-silence endpoint
 
-        await pollUntilOffMain { library.transcribeCalls.count == 2 }
-        await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 2 }, "endpoint final decoded")
+        #expect(
+            await pollUntilOffMain { self.state(engine) { engine.utteranceGeneration } == 2 },
+            "the tag-only final closed out the utterance — the finalized span is trimmed, the trailing silence seeds the next utterance"
+        )
         #expect(engine.poll() == nil, "a `<sil>`-only decode must not become a final")
     }
 
@@ -122,7 +131,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await pollUntilOffMain { library.transcribeCalls.count == 1 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "window partial decoded")
         engine.push([Float](repeating: 0, count: 20000))
 
         let final = await pollFinal(engine)
@@ -136,10 +145,11 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push([Float](repeating: 0.1, count: 48000)) // 3 s, past the discard floor
-        await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } } // discard observed
+        #expect(await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } }, "discard observed")
+        #expect(state(engine) { engine.vadAnalyzedThroughSample } == 0, "the discard resets the analysis cursor")
 
         engine.push(loudSecond)
-        await pollUntilOffMain { library.vadCalls.count == 2 }
+        #expect(await pollUntilOffMain { library.vadCalls.count == 2 }, "the next utterance's VAD pass ran")
 
         #expect(
             library.vadCalls[1].count == 16000,
@@ -162,11 +172,11 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push([Float](repeating: 0.1, count: 2 * CrispASREngine.sampleRate))
-        await pollUntilOffMain { library.transcribeCalls.count == 1 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "first partial decoded")
         engine.push([Float](repeating: 0, count: 20000))
-        await pollUntilOffMain { library.transcribeCalls.count == 2 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 2 }, "endpoint final decoded")
         engine.push(loudSecond) // speech resumes on the trimmed window
-        await pollUntilOffMain { library.transcribeCalls.count == 3 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 3 }, "post-final partial decoded")
 
         #expect(library.transcribeCalls.map(\.pcmCount) == [
             32000, // first partial: the 2 s window at the conv floor
@@ -188,7 +198,7 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(loudSecond) // VAD #1 → immediate degrade
-        await pollUntilOffMain { !errors.all.isEmpty }
+        #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
         #expect(errors.all == ["VAD failed (-3) — falling back to cap-only finalization"])
         #expect(state(engine) { engine.vadEnabled } == false)
 
@@ -208,12 +218,36 @@ struct CrispASREngineLibraryTests {
 
         for failure in 1 ... 3 {
             engine.push(loudSecond)
-            await pollUntilOffMain { self.state(engine) { engine.consecutiveVADFailures } == failure }
+            #expect(
+                await pollUntilOffMain { self.state(engine) { engine.consecutiveVADFailures } == failure },
+                "VAD failure #\(failure) counted"
+            )
         }
 
         #expect(state(engine) { engine.vadEnabled } == false)
         #expect(errors.all == ["VAD failed (-1) — falling back to cap-only finalization"])
         #expect(library.transcribeCalls.isEmpty)
+    }
+
+    @Test("a nil VAD dispatcher reply is skipped without counting a failure")
+    func nilVADReplySkippedWithoutFailure() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.unavailable]
+        let engine = try makePreparedEngine(library)
+
+        engine.push(loudSecond)
+        #expect(
+            await pollUntilOffMain {
+                !library.vadCalls.isEmpty && self.state(engine) { engine.vadInFlight } == false
+            },
+            "the nil reply was delivered and the VAD pass ran to completion"
+        )
+
+        #expect(state(engine) { engine.consecutiveVADFailures } == 0)
+        #expect(state(engine) { engine.vadInFlight } == false)
+        #expect(state(engine) { engine.utteranceGeneration } == 1, "no discard, no final")
+        #expect(library.transcribeCalls.isEmpty, "no endpoint was scheduled")
+        #expect(engine.poll() == nil)
     }
 
     @Test("the forced-final cap discards a silent degraded utterance without decoding")
@@ -225,10 +259,10 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(silentSecond) // VAD #1 → degrade; utterance stays silent
-        await pollUntilOffMain { !errors.all.isEmpty }
+        #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
 
         engine.push([Float](repeating: 0, count: 12 * CrispASREngine.sampleRate)) // silent cap
-        await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } }
+        #expect(await pollUntilOffMain { self.state(engine) { engine.utterance.isEmpty } }, "the silent cap discarded the utterance")
 
         #expect(library.transcribeCalls.isEmpty, "the RMS backstop must block the cap decode")
         #expect(engine.poll() == nil)
@@ -247,13 +281,13 @@ struct CrispASREngineLibraryTests {
         engine.onEngineError = { errors.record($0) }
 
         engine.push(silentSecond) // VAD #1 → degrade (no decode: silent, short)
-        await pollUntilOffMain { !errors.all.isEmpty }
+        #expect(await pollUntilOffMain { !errors.all.isEmpty }, "the VAD degrade was reported")
 
         let cap = CrispASREngine.utteranceCapSamples
         for push in 0 ..< 32 {
             engine.push([Float](repeating: 0.1, count: cap))
             let expected = library.transcribeCalls.count + 1
-            await pollUntilOffMain { library.transcribeCalls.count >= expected }
+            #expect(await pollUntilOffMain { library.transcribeCalls.count >= expected }, "cap decode #\(push + 1) decoded")
             #expect(library.transcribeCalls.count == push + 1)
         }
 
@@ -279,7 +313,7 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond)
-        await pollUntilOffMain { library.transcribeCalls.count == 1 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "the first partial decoded")
 
         #expect(library.transcribeCalls[0].pcmCount == 2 * CrispASREngine.sampleRate)
         #expect(Array(library.transcribeCalls[0].pcm.prefix(16000)) == loudSecond)
@@ -289,12 +323,42 @@ struct CrispASREngineLibraryTests {
         )
 
         engine.push([Float](repeating: 0.1, count: 8000)) // 0.5 s more speech
-        await pollUntilOffMain { self.state(engine) { engine.vadAnalyzedThroughSample } == 24000 }
+        #expect(
+            await pollUntilOffMain { self.state(engine) { engine.vadAnalyzedThroughSample } == 24000 },
+            "the second VAD pass analyzed the longer utterance"
+        )
         #expect(library.transcribeCalls.count == 1, "0.5 s of confirmed new speech is below the cadence")
 
         engine.push([Float](repeating: 0.1, count: 8000)) // crosses 1 s since the last decode
-        await pollUntilOffMain { library.transcribeCalls.count == 2 }
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 2 }, "the second partial decoded")
         #expect(library.transcribeCalls[1].pcmCount == 32000, "a 2 s window needs no padding")
+    }
+
+    @Test("a step-spaced window decode with text posts a .partial event")
+    func windowDecodeWithTextPostsPartial() async throws {
+        let library = FakeCrispASRLibrary()
+        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])]
+        library.transcribeReplies = ["ドラフト。"]
+        let engine = try makePreparedEngine(library)
+
+        engine.push(loudSecond)
+        #expect(await pollUntilOffMain { library.transcribeCalls.count == 1 }, "partial decode ran")
+
+        var draft: ASREvent?
+        #expect(
+            await pollUntilOffMain {
+                guard let event = engine.poll() else { return false }
+                draft = event
+                return true
+            },
+            "the window decode posted a .partial event"
+        )
+        guard case let .partial(text)? = draft else {
+            Issue.record("expected .partial, got \(String(describing: draft))")
+            return
+        }
+        #expect(text == "ドラフト。")
+        #expect(engine.poll() == nil, "the partial must be the only event")
     }
 
     @Test("a VAD result for a closed generation is dropped")
@@ -307,186 +371,24 @@ struct CrispASREngineLibraryTests {
         let engine = try makePreparedEngine(library)
 
         engine.push(loudSecond) // VAD #1 dispatched, held inside the fake
-        await pollUntilOffMain { library.vadCalls.count == 1 && library.vadEntered }
+        #expect(await pollUntilOffMain { library.vadCalls.count == 1 && library.vadEntered }, "VAD #1 dispatched and held inside the fake")
 
         engine.push([Float](repeating: 0.1, count: 12 * CrispASREngine.sampleRate)) // cap final decode
         // The fake blocks before recording the call, so only entry is
         // observable while held — waiting on the count here would always
         // burn the full timeout.
-        await pollUntilOffMain { library.transcribeEntered }
+        #expect(await pollUntilOffMain { library.transcribeEntered }, "the cap decode entered the fake")
 
         library.transcribeHoldSemaphore?.signal() // the decode closes generation 1
-        await pollUntilOffMain { self.state(engine) { engine.utteranceGeneration } == 2 }
+        #expect(await pollUntilOffMain { self.state(engine) { engine.utteranceGeneration } == 2 }, "the decode closed generation 1")
 
         library.vadHoldSemaphore?.signal() // VAD #1 resumes into a stale generation
-        await pollUntilOffMain { library.vadFreeCount == 1 }
+        #expect(await pollUntilOffMain { library.vadFreeCount == 1 }, "the stale VAD result was freed")
 
         #expect(state(engine) { engine.vadAnalyzedThroughSample } == 0)
         #expect(state(engine) { engine.utteranceHasSpeech } == false)
         #expect(state(engine) { engine.vadLastSpeechEndSample } == nil)
         #expect(state(engine) { engine.utterance.isEmpty })
         requireFinal(await pollFinal(engine), text: "ファイナル。", start: 0, end: 208_000)
-    }
-
-    // MARK: - finish()
-
-    @Test("finish flush-decodes a speechful open utterance and drains the final")
-    func finishFlushesSpeechfulUtterance() async throws {
-        let library = FakeCrispASRLibrary()
-        library.vadReplies = [.spans([(start: 0.0, end: 1.0)])]
-        library.transcribeReplies = ["", "フラッシュ。"] // window partial, flush decode
-        let engine = try makePreparedEngine(library)
-
-        engine.push(loudSecond)
-        await pollUntilOffMain { library.transcribeCalls.count == 1 } // speech confirmed
-
-        let drained = engine.finish()
-
-        #expect(drained.count == 1)
-        requireFinal(drained.first, text: "フラッシュ。", start: 0, end: 16000)
-        #expect(library.transcribeCalls.count == 2)
-        let flush = library.transcribeCalls[1]
-        #expect(flush.pcmCount == 2 * CrispASREngine.sampleRate)
-        #expect(flush.pcm[16000...].allSatisfy { $0 == 0 }, "the flush pads the 1 s utterance")
-        #expect(engine.poll() == nil, "finish drains the inbox")
-    }
-
-    @Test("finish skips the flush decode for a speechless utterance")
-    func finishSkipsSpeechlessFlush() async throws {
-        let library = FakeCrispASRLibrary()
-        library.vadReplies = [.failure(-3)]
-        let engine = try makePreparedEngine(library)
-        let errors = ErrorRecorder()
-        engine.onEngineError = { errors.record($0) }
-
-        engine.push(silentSecond) // VAD #1 → degrade; utterance silent and short
-        await pollUntilOffMain { !errors.all.isEmpty }
-
-        let drained = engine.finish()
-
-        #expect(drained.isEmpty)
-        #expect(
-            library.transcribeCalls.isEmpty,
-            "the RMS backstop must keep known-silent audio out of the flush decode"
-        )
-    }
-}
-
-/// Thread-safe sink for `onEngineError` (called from the engine's job
-/// queues, not the test thread).
-private final class ErrorRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var messages: [String] = []
-
-    func record(_ message: String) {
-        lock.withLock { messages.append(message) }
-    }
-
-    var all: [String] {
-        lock.withLock { messages }
-    }
-}
-
-/// Scripted `CrispASRLibraryAPI` double. Ordered replies repeat their
-/// last element; optional gates pin async interleavings (a VAD result
-/// held inside the fake while a decode closes its generation).
-private final class FakeCrispASRLibrary: CrispASRLibraryAPI, @unchecked Sendable {
-    enum VADReply {
-        case spans([(start: Float, end: Float)])
-        case speechless
-        case failure(Int32)
-    }
-
-    struct TranscribeCall {
-        let pcmCount: Int
-        let pcm: [Float]
-        let languageCode: String
-    }
-
-    private let lock = NSLock()
-
-    var vadModelPathValue: String? = "/tmp/fake-firered-vad.gguf"
-    var vadReplies: [VADReply] = [.speechless]
-    var transcribeReplies: [String?] = [""]
-    var recordTranscribePcm = true
-    /// Set → `vadSlices` marks the call entered and blocks until released.
-    var vadHoldSemaphore: DispatchSemaphore?
-    /// Set → `transcribeText` marks the call entered and blocks until released.
-    var transcribeHoldSemaphore: DispatchSemaphore?
-
-    private(set) var vadCalls: [[Float]] = []
-    private(set) var vadEntered = false
-    private(set) var transcribeCalls: [TranscribeCall] = []
-    private(set) var transcribeEntered = false
-    private(set) var vadFreeCount = 0
-    private(set) var gpuBackends: [String] = []
-    private(set) var openSessionCount = 0
-    private(set) var closeSessionCount = 0
-
-    var vadModelPath: String? {
-        vadModelPathValue
-    }
-
-    func setGpuBackend(_ name: String) {
-        lock.withLock { gpuBackends.append(name) }
-    }
-
-    func openSession(modelPath: String, backend: String) -> OpaquePointer? {
-        lock.withLock { openSessionCount += 1 }
-        return OpaquePointer(bitPattern: 0x1A55_1E55)
-    }
-
-    func closeSession(_ session: OpaquePointer?) {
-        lock.withLock { closeSessionCount += 1 }
-    }
-
-    func transcribeText(
-        session: OpaquePointer?, pcm: borrowing Span<Float>, languageCode: String
-    ) -> String? {
-        let pcmCopy = pcm.withUnsafeBufferPointer { Array($0) }
-        if let hold = transcribeHoldSemaphore {
-            lock.withLock { transcribeEntered = true }
-            hold.wait()
-        }
-        lock.withLock {
-            transcribeCalls.append(TranscribeCall(
-                pcmCount: pcmCopy.count,
-                pcm: recordTranscribePcm ? pcmCopy : [],
-                languageCode: languageCode
-            ))
-        }
-        let index = min(transcribeCalls.count - 1, transcribeReplies.count - 1)
-        return transcribeReplies[index]
-    }
-
-    func vadSlices(
-        modelPath: String,
-        pcm: borrowing Span<Float>,
-        parameters: CrispASRVADParameters
-    ) -> (count: Int32, spans: UnsafeMutablePointer<Float>?)? {
-        lock.withLock { vadCalls.append(pcm.withUnsafeBufferPointer { Array($0) }) }
-        if let hold = vadHoldSemaphore {
-            lock.withLock { vadEntered = true }
-            hold.wait()
-        }
-        let reply = vadReplies[min(vadCalls.count - 1, vadReplies.count - 1)]
-        switch reply {
-        case let .failure(code):
-            return (code, nil)
-        case .speechless:
-            return (0, nil)
-        case let .spans(pairs):
-            let spans = UnsafeMutablePointer<Float>.allocate(capacity: pairs.count * 2)
-            for (index, pair) in pairs.enumerated() {
-                spans[2 * index] = pair.start
-                spans[2 * index + 1] = pair.end
-            }
-            return (Int32(pairs.count), spans)
-        }
-    }
-
-    func vadFree(_ spans: UnsafeMutablePointer<Float>?) {
-        spans?.deallocate()
-        lock.withLock { vadFreeCount += 1 }
     }
 }

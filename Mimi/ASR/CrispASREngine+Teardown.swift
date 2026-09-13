@@ -18,7 +18,7 @@ extension CrispASREngine {
         // the remaining budget, so a hung decode/VAD call (its flag never
         // clears) delays teardown by at most `drainTimeout` instead of
         // re-arming a fresh 30 s wait forever.
-        let deadline = ContinuousClock.now + Duration.seconds(Self.drainTimeout)
+        let deadline = ContinuousClock.now + Duration.seconds(drainTimeout)
         while true {
             lock.lock()
             let inFlight = decodeInFlight || vadInFlight

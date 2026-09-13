@@ -11,7 +11,10 @@ import Testing
 ///
 /// The suite is serialized: the factory's warm engine is a process global,
 /// so its tests must not race each other. No other suite drives the real
-/// factory — the session tests inject their own engine factories.
+/// factory — the session tests inject their own engine factories. Quit-time
+/// tests inject a no-op/recording `shutdownRuntime`: freeing the
+/// process-global VAD cache while the parallel live suite uses it is exactly
+/// the cross-suite race retirement must not cause.
 @Suite("ASREngineFactory", .serialized)
 struct ASREngineFactoryTests {
 
@@ -119,6 +122,28 @@ struct ASREngineFactoryTests {
         )
     }
 
+    @Test("a native engine whose construction fails falls back to the mock")
+    func nativeConstructionFailureFallsBackToMock() {
+        let engine = ASREngineFactory.makeEngine(
+            modelURL: uniqueModelURL(),
+            allowMock: true,
+            makeNative: { _ in throw ASREngineError.runtimeNotFound("injected") }
+        )
+
+        #expect(engine is MockASREngine)
+    }
+
+    @Test("a native engine whose construction fails without mocks returns nil")
+    func nativeConstructionFailureWithoutMockReturnsNil() {
+        let engine = ASREngineFactory.makeEngine(
+            modelURL: uniqueModelURL(),
+            allowMock: false,
+            makeNative: { _ in throw ASREngineError.runtimeNotFound("injected") }
+        )
+
+        #expect(engine == nil)
+    }
+
     // MARK: - retireWarmEngine (quit-time teardown)
 
     @Test(
@@ -126,11 +151,11 @@ struct ASREngineFactoryTests {
         .enabled(if: TestEnvironment.nativeASRDylibAvailable)
     )
     func retireWarmEngineForcesFreshEngine() {
-        defer { ASREngineFactory.retireWarmEngine() }
+        defer { ASREngineFactory.retireWarmEngine(shutdownRuntime: {}) }
         let url = uniqueModelURL()
 
         let warm = ASREngineFactory.makeEngine(modelURL: url, allowMock: true)
-        ASREngineFactory.retireWarmEngine()
+        ASREngineFactory.retireWarmEngine(shutdownRuntime: {})
 
         #expect(
             ASREngineFactory.makeEngine(modelURL: url, allowMock: true) == nil,
@@ -149,8 +174,8 @@ struct ASREngineFactoryTests {
         .enabled(if: TestEnvironment.nativeASRDylibAvailable)
     )
     func retireWarmEngineWithEmptyCacheIsNoOp() {
-        defer { ASREngineFactory.retireWarmEngine() }
-        ASREngineFactory.retireWarmEngine()
+        defer { ASREngineFactory.retireWarmEngine(shutdownRuntime: {}) }
+        ASREngineFactory.retireWarmEngine(shutdownRuntime: {})
         ASREngineFactory.rearmWarmCacheForTesting()
 
         let engine = ASREngineFactory.makeEngine(modelURL: uniqueModelURL(), allowMock: true)
@@ -163,7 +188,7 @@ struct ASREngineFactoryTests {
         .enabled(if: TestEnvironment.nativeASRDylibAvailable)
     )
     func retireWarmEngineShutsDownRuntimeCaches() throws {
-        defer { ASREngineFactory.retireWarmEngine() }
+        defer { ASREngineFactory.retireWarmEngine(shutdownRuntime: {}) }
         let url = uniqueModelURL()
 
         #expect(ASREngineFactory.makeEngine(modelURL: url, allowMock: true) != nil)
@@ -173,7 +198,14 @@ struct ASREngineFactoryTests {
             "the pinned runtime must expose the cached-model free (crispasr_shutdown or crispasr_vad_free_cache)"
         )
 
-        ASREngineFactory.retireWarmEngine()
-        ASREngineFactory.retireWarmEngine() // empty cache → no C call, must stay safe
+        // The shutdown itself is injected (a recording no-op): calling the
+        // real one here would free the process-global VAD cache out from
+        // under the parallel live suite.
+        var shutdownCalls = 0
+        ASREngineFactory.retireWarmEngine { shutdownCalls += 1 }
+        #expect(shutdownCalls == 1, "a cached native engine triggers exactly one runtime shutdown")
+
+        ASREngineFactory.retireWarmEngine { shutdownCalls += 1 } // empty cache → no call
+        #expect(shutdownCalls == 1, "an empty cache must not call the runtime shutdown")
     }
 }

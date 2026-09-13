@@ -135,10 +135,16 @@ struct CrispASREngineLiveTests {
             pushed += chunk
         }
 
-        await pollUntilOffMain(timeout: 30) { engine.processedSamples >= cap }
+        #expect(
+            await pollUntilOffMain(timeout: 30) { engine.processedSamples >= cap },
+            "the cap final must decode the whole utterance"
+        )
 
         #expect(engine.processedSamples == cap, "the cap final must decode the whole utterance")
         let drained = engine.finish()
+        // Output quality is not pinned: the cap final only reaches the inbox
+        // when the model produced text on the synthesized audio. When events
+        // drain at all, they must be finals only.
         for event in drained {
             guard case .final = event else {
                 Issue.record("finish must drain only finals, got \(event)")

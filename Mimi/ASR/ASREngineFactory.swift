@@ -20,7 +20,13 @@ enum ASREngineFactory {
     /// warm-up runs off the main actor.
     private static let warm = Mutex(WarmState())
 
-    static func makeEngine(modelURL: URL?, allowMock: Bool) -> ASREngine? {
+    /// `makeNative` is injectable so tests can force the native-construction
+    /// failure path without dlopen state; the default builds the real engine.
+    static func makeEngine(
+        modelURL: URL?,
+        allowMock: Bool,
+        makeNative: (URL) throws -> CrispASREngine? = { try CrispASREngine(modelPath: $0) }
+    ) -> ASREngine? {
         if let modelURL {
             return warm.withLock { state in
                 // Retired (app quitting): a warm-up racing the quit teardown
@@ -35,7 +41,7 @@ enum ASREngineFactory {
                     state.engine = nil
                     state.path = nil
                 }
-                if let engine = try? CrispASREngine(modelPath: modelURL) {
+                if let engine = try? makeNative(modelURL) {
                     state.engine = engine
                     state.path = modelURL.path
                     return engine
@@ -60,7 +66,11 @@ enum ASREngineFactory {
     /// the symbol. Retirement latches for the rest of the process: a warm-up
     /// that was in flight when the quit began cannot re-cache an engine
     /// behind it.
-    static func retireWarmEngine() {
+    ///
+    /// `shutdownRuntime` is injectable so tests can retire a cached native
+    /// engine without freeing the process-global VAD cache under the
+    /// parallel live suites; the default performs the real shutdown.
+    static func retireWarmEngine(shutdownRuntime: (() -> Void)? = nil) {
         var hadNativeEngine = false
         warm.withLock { state in
             hadNativeEngine = state.engine != nil
@@ -70,7 +80,11 @@ enum ASREngineFactory {
             state.retired = true
         }
         if hadNativeEngine {
-            (try? CrispASRLibrary.open())?.shutdown()
+            if let shutdownRuntime {
+                shutdownRuntime()
+            } else {
+                (try? CrispASRLibrary.open())?.shutdown()
+            }
         }
     }
 
