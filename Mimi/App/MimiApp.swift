@@ -18,6 +18,7 @@ struct MimiApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
+        .defaultSize(width: 700, height: 880)
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Copy Transcript") {

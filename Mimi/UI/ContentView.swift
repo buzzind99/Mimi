@@ -36,10 +36,18 @@ struct ContentView: View {
         }
         .preferredColorScheme($appearance.resolvedColorScheme)
         .background(TranslationSessionHost(model: model))
-        .frame(minWidth: 860, minHeight: 600)
+        .frame(minWidth: isOnboarding ? 800 : 1080, minHeight: isOnboarding ? 720 : 800)
+        .onboardingWindowFootprint(isOnboarding)
         .onAppear {
             Task { await model.refreshModelAvailability() }
         }
+    }
+
+    /// Onboarding owns the window until a model resolves; the conditional
+    /// min size and the footprint modifier above give that span a compact
+    /// welcome window instead of the main shell's footprint.
+    private var isOnboarding: Bool {
+        model.phase == .needsModel
     }
 
     /// Whether the live strip owns the app's single dictionary

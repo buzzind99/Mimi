@@ -1,14 +1,13 @@
 import SwiftUI
 
 /// Onboarding: explains screen-recording permission + system audio capture,
-/// lets the user pick the ASR model (Lite pre-selected, Full opt-in), and
-/// runs the download for the chosen model (progress / resume / retry). A
-/// manually dropped-in GGUF is picked up automatically by
-/// `ModelLocator.resolve(for:)`.
+/// then lets the user pick + download the ASR model with the same cards as
+/// Settings (`SettingsModelRow`: per-choice download with progress / resume
+/// / retry; a completed download auto-selects its model, which resolves
+/// `phase` out of `.needsModel` and advances to the main shell). A manually
+/// dropped-in GGUF is picked up by `ModelLocator.resolve(for:)` on the next
+/// availability refresh.
 struct OnboardingView: View {
-    /// Corner radius shared with the settings cards.
-    private let cardShape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-
     var model: AppModel
     @State private var downloader: ModelDownloader
 
@@ -35,9 +34,9 @@ struct OnboardingView: View {
 
             permissionCard
 
-            modelChoiceCards
+            modelCard
 
-            modelSection
+            settingsSwapHint
 
             Spacer(minLength: 0)
         }
@@ -60,6 +59,10 @@ struct OnboardingView: View {
             downloader = ModelDownloader(choice: choice)
             Task { await model.refreshModelAvailability() }
         }
+    }
+
+    private var selectedChoice: ASRModelChoice {
+        model.asrModelSettings.selected
     }
 
     /// Brand mark matching the sidebar header: gradient circle with the 耳
@@ -86,7 +89,10 @@ struct OnboardingView: View {
                     .foregroundStyle(Theme.accentPink)
             }
             Label {
-                Text("The speech model (\(selectedChoice.approximateSize)) downloads once from Hugging Face and is stored in Application Support.")
+                Text(
+                    "A speech model downloads once from Hugging Face and is stored in Application "
+                        + "Support. Pick a card below — Lite is the smaller default."
+                )
             } icon: {
                 Image(systemName: "arrow.down.circle")
                     .foregroundStyle(Theme.accentPink)
@@ -99,132 +105,29 @@ struct OnboardingView: View {
         .cardSurface()
     }
 
-    private var selectedChoice: ASRModelChoice {
-        model.asrModelSettings.selected
-    }
-
-    /// Two description cards (Lite pre-selected): picking one chooses *what
-    /// to download* and persists the target choice; the `selectedChoice`
-    /// change handles resetting the downloader.
-    private var modelChoiceCards: some View {
-        HStack(spacing: 12) {
-            ForEach(ASRModelChoice.allCases) { choice in
-                let isSelected = choice == selectedChoice
-                Button {
-                    guard !isSelected else { return }
-                    model.asrModelSettings.select(choice)
-                } label: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 6) {
-                            Text(choice.displayName)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.primaryText)
-                            if isSelected {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(Theme.accentPink)
-                            }
-                        }
-                        Text("\(choice.approximateSize) · \(choice.blurb)")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.secondaryText)
-                            .multilineTextAlignment(.leading)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: 250, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .hoverHighlight(
-                    cardShape, isEnabled: true,
-                    tint: Theme.accentPink, opacity: isSelected ? 0.08 : 0.05
-                )
-                .cardSurface(
-                    fill: isSelected ? Theme.accentPink.opacity(0.1) : Theme.cardFill,
-                    stroke: isSelected ? Theme.accentPink : Theme.cardStroke
-                )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var modelSection: some View {
-        switch downloader.state {
-        case .idle, .failed:
-            VStack(spacing: 10) {
-                if model.modelAvailability[selectedChoice] == nil {
-                    downloadButton
-                }
-                if case let .failed(message) = downloader.state {
-                    Text(message)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.toastRedIcon)
-                        .frame(maxWidth: 480)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Retry") { downloader.start() }
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.accentPink)
-                        .buttonStyle(.plain)
-                    Text(
-                        "Offline? Download the GGUF on another machine and drop it into "
-                            + "~/Library/Application Support/Mimi/models/ — Mimi picks it up automatically."
-                    )
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.gutterText)
-                    .frame(maxWidth: 480)
-                    .multilineTextAlignment(.center)
+    /// The onboarding model card: one card per choice sharing the selection-
+    /// following `downloader` (see `OnboardingModelRow`), in the same
+    /// container as `SettingsView.modelCard`. Fixed at the permission card's
+    /// width so a wider window stretches the surrounding layout, not the
+    /// picker.
+    private var modelCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            KickerLabel("SPEECH MODEL", color: Palette.label)
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(ASRModelChoice.allCases) { choice in
+                    OnboardingModelRow(choice: choice, model: model, downloader: downloader)
                 }
             }
-        case let .downloading(_, bytes, total):
-            VStack(spacing: 8) {
-                ModelDownloadProgressView(
-                    bytes: bytes, total: total,
-                    tint: Theme.accentPink,
-                    font: .system(size: 11).monospacedDigit(),
-                    textColor: Theme.secondaryText,
-                    alignment: .center,
-                    spacing: 8,
-                    prefix: "Downloading \(selectedChoice.displayName) model… "
-                )
-                Button("Cancel") { downloader.cancel() }
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.accentPink)
-                    .buttonStyle(.plain)
-            }
-            .frame(maxWidth: 420)
-        case .done:
-            Label("\(selectedChoice.displayName) model ready", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.dotGreen)
         }
-
-        if let resolved = model.modelURL {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.dotGreen)
-                Text(resolved.path)
-                    .font(.system(size: 10).monospaced())
-                    .foregroundStyle(Theme.gutterText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
+        .padding(16)
+        .frame(width: 520)
+        .cardSurface(shadow: Palette.cardShadow)
     }
 
-    /// Capsule download button matching the sidebar's session capsule
-    /// (start-session gradient, white label).
-    private var downloadButton: some View {
-        Button {
-            downloader.start()
-        } label: {
-            Text("Download \(selectedChoice.displayName) speech model")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 9)
-                .background(Capsule().fill(Theme.Gradients.start))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
+    private var settingsSwapHint: some View {
+        Text("You can swap the model later in Settings.")
+            .font(.system(size: 10))
+            .foregroundStyle(Theme.gutterText)
+            .multilineTextAlignment(.center)
     }
 }
