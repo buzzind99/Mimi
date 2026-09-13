@@ -135,7 +135,9 @@ extension DictionaryStoreTests {
     @Test("coalesces concurrent JMDict callers into one decompression")
     func jmDictConcurrentCallersCoalesce() async throws {
         fakePrepareCopySource = smokeDatabase
-        fakePrepareDelayMs = 300
+        // Short but guaranteed to overlap: late callers line up behind the
+        // in-flight decompression and observe the done phase.
+        fakePrepareDelayMs = 50
         let store = makeStore()
 
         async let first = store.prepareJMDict()

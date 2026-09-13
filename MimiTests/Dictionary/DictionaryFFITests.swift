@@ -64,10 +64,23 @@ struct DictionaryFFITests {
         #expect(ffi == nil)
     }
 
-    @Test("binds all symbols from the real runtime", .enabled(if: DictionaryFFI.load() != nil))
+    @Test(
+        "binds all symbols from the real runtime",
+        .enabled(if: realDylibIsStaged)
+    )
     func realRuntimeBindsAllSymbols() throws {
         let ffi = try #require(DictionaryFFI.load())
 
         #expect(ffi.open("") == nil)
     }
 }
+
+/// Whether the staged `libdictionary.dylib` exists at any candidate path —
+/// a presence gate that cannot mask a `load()` regression: with the file
+/// staged, the test above fails instead of silently disabling itself.
+private let realDylibIsStaged: Bool = {
+    let fm = FileManager.default
+    return DylibLoader.candidates(named: "libdictionary.dylib").contains { candidate in
+        candidate.map { fm.fileExists(atPath: $0) } ?? false
+    }
+}()

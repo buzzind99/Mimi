@@ -296,14 +296,16 @@ final class DictionaryStoreTests {
         #expect(url == DictionaryStore.defaultDictionaryURL)
     }
 
-    @Test("falls back to the dev-checkout copy when only it exists")
-    func devCheckoutFallback() {
-        let modelsExist: (URL) -> Bool = { $0.pathComponents.contains("models") }
+    #if DEBUG
+        @Test("falls back to the dev-checkout copy when only it exists")
+        func devCheckoutFallback() {
+            let modelsExist: (URL) -> Bool = { $0.pathComponents.contains("models") }
 
-        let url = DictionaryStore.resolve(environment: [:], fileExists: modelsExist)
+            let url = DictionaryStore.resolve(environment: [:], fileExists: modelsExist)
 
-        #expect(url?.lastPathComponent == DictionaryStore.dictionaryFileName)
-    }
+            #expect(url?.lastPathComponent == DictionaryStore.dictionaryFileName)
+        }
+    #endif
 
     @Test("returns nil when nothing exists")
     func nothingResolves() {
@@ -344,8 +346,12 @@ final class DictionaryStoreTests {
         func debugBundledSourceFallback() {
             let source = DictionaryStore.defaultBundledSource
 
-            // Debug checkouts always have a fallback (bundle or script-fetched copy).
-            #expect(source != nil)
+            // The test host ships no bundled system.dic.zst, so a debug
+            // checkout must resolve the script-fetched copy under local/.
+            #expect(
+                source?.path
+                    .hasSuffix("local/dictionaries/ipadic-mecab-2_7_0/system.dic.zst") == true
+            )
         }
     #endif
 
@@ -389,7 +395,9 @@ final class DictionaryStoreTests {
 
     @Test("coalesces concurrent callers into one decompression")
     func concurrentCallersCoalesce() async throws {
-        fakePrepareDelayMs = 300
+        // Short but guaranteed to overlap: late callers line up behind the
+        // in-flight decompression and observe the done phase.
+        fakePrepareDelayMs = 50
         let store = makeStore()
 
         // Call `store.prepare()` directly (not via `self.prepare`) so the

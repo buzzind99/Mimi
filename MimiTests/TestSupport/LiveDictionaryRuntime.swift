@@ -14,7 +14,11 @@ import Foundation
 enum LiveDictionaryRuntime {
     static let engine: DictionaryEngine? = {
         guard let ffi = DictionaryFFI.load() else { return nil }
-        if let resolved = DictionaryStore.resolve() {
+        // The resolve consults the live process env (MIMI_DICT); hold the
+        // shared env lock so a parallel env-mutating test can't swap in a
+        // placeholder override file mid-resolve.
+        let resolved = dictionaryEnvLock.withLock { DictionaryStore.resolve() }
+        if let resolved {
             return DictionaryEngine(ffi: ffi, resolveDictionary: { resolved })
         }
         let repoRoot = URL(fileURLWithPath: #filePath)
