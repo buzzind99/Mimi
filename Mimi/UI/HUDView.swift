@@ -69,8 +69,9 @@ struct HUDView: View {
                 RubyTextView(
                     text: live.partial,
                     annotation: readingAnnotation,
-                    surfaceFont: .system(size: 15 * uiScale.factor),
-                    annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
+                    surfaceFont: .system(size: 22 * uiScale.factor, weight: .medium),
+                    annotationFont: .system(size: 13 * uiScale.factor, design: .monospaced),
+                    furiganaFont: .system(size: 15 * uiScale.factor, design: .monospaced),
                     annotationColor: Theme.hudAnnotation,
                     reservesAnnotationLine: true,
                     // Growing partial revisions never repeat — don't churn
@@ -157,6 +158,7 @@ struct HUDView: View {
             annotation: readingAnnotation,
             surfaceFont: .system(size: 14 * uiScale.factor),
             annotationFont: .system(size: 11 * uiScale.factor, design: .monospaced),
+            furiganaFont: .system(size: 11 * uiScale.factor, design: .monospaced),
             annotationColor: Theme.hudAnnotation,
             cursorMode: cursorMode,
             onCopy: { model.copySnippet($0) }

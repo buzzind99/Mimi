@@ -34,7 +34,7 @@ final class HUDWindowController {
 
     private func makePanel() -> HUDPanel {
         let panel = HUDPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 180),
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 240),
             styleMask: [.borderless, .resizable, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -72,7 +72,7 @@ final class HUDWindowController {
 /// interactive). Click-through is enforced by `HUDHostingView.hitTest`,
 /// not by `ignoresMouseEvents`, so the padlock stays clickable.
 final class HUDPanel: NSPanel, ObservableObject {
-    @Published var locked = true {
+    @Published var locked = false {
         didSet {
             guard oldValue != locked, let content = contentView as? HUDHostingView else { return }
             content.needsLayout = true
