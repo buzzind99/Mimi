@@ -307,8 +307,6 @@ final class DictionaryStore: @unchecked Sendable {
         try await asyncFromCompletion { self.prepareJMDict(completion: $0) }
     }
 
-    /// Bridges a completion-based prepare into async: resumes the awaiting
-    /// context with the completion's result.
     private func asyncFromCompletion(
         _ start: (@escaping @Sendable (Result<URL, Error>) -> Void) -> Void
     ) async throws -> URL {

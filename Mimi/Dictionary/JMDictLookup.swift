@@ -2,8 +2,8 @@ import Foundation
 
 /// Read-only lookup engine over the prepared JMDict SQLite database
 /// (`jmdict-<tag>.sqlite`). Uses the system SQLite through `SQLiteDatabase` —
-/// no new dependency — and every query is an exact `headwords.text = ?`
-/// hit on the build's B-tree index.
+/// no new dependency — and every candidate resolves through an exact
+/// `headwords.text = ?` hit on the build's B-tree index.
 ///
 /// Sendable by locking contract (same stance as `DictionaryEngine`): the
 /// only mutable state is the lazily opened database, guarded by `lock`, and

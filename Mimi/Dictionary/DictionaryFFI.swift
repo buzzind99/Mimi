@@ -4,9 +4,9 @@ import Foundation
 /// with dlopen/dlsym — the same integration pattern as `CrispASREngine`. The
 /// runtime exports exactly five generic `dictionary_*` symbols; the string
 /// literals below must match that ABI exactly. The C surface is owned by our
-/// own FFI crate (vendored under `vendor/`, pinned in
-/// `scripts/build_dictionary.sh`), so the engine behind the dylib can be
-/// swapped without touching this file.
+/// own FFI crate (`ffi/vibrato-ffi`, wrapping the vibrato engine vendored
+/// under `vendor/` at the ref pinned in `scripts/build_dictionary.sh`), so
+/// the engine behind the dylib can be swapped without touching this file.
 ///
 /// All loading is injectable (`load(openLibrary:symbol:)`) so tests can drive
 /// every failure path without the dylib. Fail-soft: `load` returns nil when
@@ -31,7 +31,8 @@ struct DictionaryFFI {
     let tokenizeJSON: FnTokenizeJSON
     /// Free a string returned by `tokenizeJSON` (null is a no-op).
     let freeString: FnFreeString
-    /// Decompress a bundled `system.dic.zst` into a dictionary file.
+    /// Decompress a zstd artifact to the destination path — both staged
+    /// artifacts (`system.dic.zst`, `jmdict-<tag>.sqlite.zst`) go through it.
     /// Returns 0 on success, 1 on failure.
     let prepare: FnPrepare
 

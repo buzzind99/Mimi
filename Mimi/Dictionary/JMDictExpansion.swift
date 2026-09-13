@@ -52,9 +52,9 @@ struct ExpansionCandidate: Equatable, Sendable {
 /// tapped surface's contiguous kanji runs into substring candidates
 /// (映画 → 映, 画) for compounds the tokenizer kept whole. The split then
 /// runs once more over the joined expansion text as the deepest fallback,
-/// emitting the substrings that cross a member boundary (風呂+敷 → 呂敷)
-/// — a join that spans a real compound's edge can still resolve its
-/// inner word.
+/// emitting the substrings that straddle the tapped surface's trailing
+/// edge (風呂+敷 → 呂敷) — a join that spans a real compound's edge can
+/// still resolve its inner word.
 ///
 /// The tapped segment's own candidates lead — surface, then lemma — so the
 /// word the user tapped always takes the display result and a longer join
@@ -95,7 +95,7 @@ enum JMDictExpansion {
     private static let particleOverrides: Set<String> = ["は", "へ", "を"]
 
     /// The え-row kana a potential tail ends on, mapped onto its う-row
-    /// counterpart (作れる → 作, 書ける → く).
+    /// counterpart (作れる: れ → る; 書ける: け → く).
     private static let potentialTailShift: [Character: Character] = [
         "え": "う", "け": "く", "げ": "ぐ", "せ": "す", "ぜ": "ず",
         "て": "つ", "で": "づ", "ね": "ぬ", "へ": "ふ", "べ": "ぶ",
