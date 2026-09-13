@@ -164,7 +164,6 @@ struct RubyTextView: View, @preconcurrency Equatable {
                 .onHover { hovering = $0 }
                 .pointerStyle(action == nil ? nil : .link)
                 .onTapGesture { action?() }
-                .animation(.easeOut(duration: 0.12), value: hovering)
         }
     }
 
