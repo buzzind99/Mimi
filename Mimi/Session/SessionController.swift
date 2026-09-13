@@ -99,7 +99,7 @@ final class SessionController {
         #if DEBUG
             print("[warmup] preparing ASR engine in background")
         #endif
-        let makeEngine = self.makeEngine
+        let makeEngine = makeEngine
         Task.detached(priority: .utility) {
             if let engine = makeEngine(url, false) {
                 try? engine.prepare()
@@ -169,7 +169,7 @@ final class SessionController {
         let capture = makeCapture()
         capture.onChunk = { [weak self] chunk in
             guard let self else { return }
-            self.handleCaptureChunk(chunk, engine: engine)
+            handleCaptureChunk(chunk, engine: engine)
         }
         capture.onIOError = { [weak self] error in
             Task { @MainActor in self?.onCaptureError?(error.localizedDescription) }

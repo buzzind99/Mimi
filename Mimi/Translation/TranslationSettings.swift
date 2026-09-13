@@ -274,16 +274,15 @@ final class TranslationSettings {
         attachedProvider: TranslationProvider? = nil
     ) -> String {
         let provider = attachedProvider ?? selectedProvider
-        var label: String
-        switch provider {
+        var label: String = switch provider {
         case .apple:
-            label = "Apple (on-device)"
+            "Apple (on-device)"
         case .google:
-            label = "Google Translate"
+            "Google Translate"
         case .deepl:
-            label = deeplIsFreeTier ? "DeepL (Free)" : "DeepL (Pro)"
+            deeplIsFreeTier ? "DeepL (Free)" : "DeepL (Pro)"
         case .openrouter:
-            label = openRouterModel.isEmpty ? "OpenRouter" : "OpenRouter · \(openRouterModel)"
+            openRouterModel.isEmpty ? "OpenRouter" : "OpenRouter · \(openRouterModel)"
         }
         if fallbackActive, provider.isExternal {
             label += " — fallback active"

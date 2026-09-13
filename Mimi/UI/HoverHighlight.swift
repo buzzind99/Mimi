@@ -22,8 +22,8 @@ struct HoverHighlight<S: Shape>: ViewModifier {
 }
 
 extension View {
-    func hoverHighlight<S: Shape>(
-        _ shape: S, isEnabled: Bool = true, tint: Color = Theme.primaryText,
+    func hoverHighlight(
+        _ shape: some Shape, isEnabled: Bool = true, tint: Color = Theme.primaryText,
         opacity: Double = 0.07
     ) -> some View {
         modifier(HoverHighlight(shape: shape, isEnabled: isEnabled, tint: tint, opacity: opacity))

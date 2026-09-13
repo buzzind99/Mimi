@@ -163,11 +163,10 @@ enum KanaRomaji {
         let normalized = kana.precomposedStringWithCanonicalMapping
         let chars = Array(normalized)
         guard let first = chars.first else { return false }
-        var mora: String?
-        if chars.count > 1, let digraph = digraphs[String(chars[0 ... 1])] {
-            mora = digraph
+        var mora: String? = if chars.count > 1, let digraph = digraphs[String(chars[0 ... 1])] {
+            digraph
         } else {
-            mora = singles[String(first)]
+            singles[String(first)]
         }
         guard let mapped = mora, let onset = mapped.first,
               !"aiueo".contains(onset) else { return false }

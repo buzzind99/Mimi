@@ -73,9 +73,8 @@ enum SampleBufferSynthesis {
         let blockBuffer = try makeBlockBuffer(payload)
 
         var sampleBuffer: CMSampleBuffer?
-        let status: OSStatus
-        if dataReady {
-            status = CMSampleBufferCreateReady(
+        let status: OSStatus = if dataReady {
+            CMSampleBufferCreateReady(
                 allocator: kCFAllocatorDefault,
                 dataBuffer: blockBuffer,
                 formatDescription: formatDescription,
@@ -87,7 +86,7 @@ enum SampleBufferSynthesis {
                 sampleBufferOut: &sampleBuffer
             )
         } else {
-            status = CMSampleBufferCreate(
+            CMSampleBufferCreate(
                 allocator: kCFAllocatorDefault,
                 dataBuffer: blockBuffer,
                 dataReady: false,

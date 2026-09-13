@@ -235,9 +235,9 @@ private final class ManualScheduler: @unchecked Sendable {
         lock.unlock()
         return { [weak self] in
             guard let self else { return }
-            self.lock.lock()
+            lock.lock()
             token.cancelled = true
-            self.lock.unlock()
+            lock.unlock()
         }
     }
 

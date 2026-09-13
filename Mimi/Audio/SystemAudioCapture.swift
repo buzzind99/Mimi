@@ -21,14 +21,14 @@ enum CaptureError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionDenied:
-            return "Screen Recording access is required to capture system audio. Grant it "
+            "Screen Recording access is required to capture system audio. Grant it "
                 + "in System Settings → Privacy & Security → Screen Recording, then restart Mimi."
         case .noDisplayFound:
-            return "No display available to attach the audio stream to."
+            "No display available to attach the audio stream to."
         case let .streamSetupFailed(detail):
-            return "Failed to start system audio capture: \(detail)"
+            "Failed to start system audio capture: \(detail)"
         case .formatUnavailable:
-            return "Could not process the captured audio format."
+            "Could not process the captured audio format."
         }
     }
 }
@@ -171,7 +171,7 @@ final class SystemAudioCapture: NSObject, AudioCapturing, @unchecked Sendable,
         }
         guard wasRunning else { return }
 
-        let stream = self.stream
+        let stream = stream
         self.stream = nil
         Task {
             try? await stream?.stopCapture()

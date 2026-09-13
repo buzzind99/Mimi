@@ -42,7 +42,7 @@ struct SystemAudioCaptureTests {
 
     private func makeCapture(running: Bool) -> SystemAudioCapture {
         let capture = SystemAudioCapture()
-        let recorder = self.recorder
+        let recorder = recorder
         capture.onChunk = { recorder.record($0) }
         capture.onIOError = { recorder.record($0) }
         if running {

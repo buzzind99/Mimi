@@ -295,9 +295,9 @@ extension ReadingAnnotator {
         kana: String, counter: String
     ) -> String? {
         switch counter {
-        case "月": return monthReadings[kana]
-        case "時": return hourReadings[kana]
-        default: return nil
+        case "月": monthReadings[kana]
+        case "時": hourReadings[kana]
+        default: nil
         }
     }
 

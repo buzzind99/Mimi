@@ -171,7 +171,7 @@ final class CrispASRLibrary {
             candidates.append(FileManager.default.currentDirectoryPath
                 + "/local/frameworks/crispasr/\(vadModelFile)")
         #endif
-        for path in candidates.compactMap({ $0 })
+        for path in candidates.compactMap(\.self)
             where FileManager.default.fileExists(atPath: path)
         {
             return path

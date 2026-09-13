@@ -288,17 +288,16 @@ enum JMDictExpansion {
         // the segments degrades the anchor to the start, and the adjacency
         // scan below then fails closed — joins stop, single candidates stay.
         let body = segments.map(\.surface).joined()
-        let base: Int
-        if let range = sentenceText.firstRange(of: body) {
-            base = sentenceText.distance(from: sentenceText.startIndex, to: range.lowerBound)
+        let base: Int = if let range = sentenceText.firstRange(of: body) {
+            sentenceText.distance(from: sentenceText.startIndex, to: range.lowerBound)
         } else {
-            base = 0
+            0
         }
         var cursor = base + segments[...index].reduce(0) { $0 + $1.surface.count }
 
         for position in segments.indices.dropFirst(index + 1) {
             let surface = segments[position].surface
-            if surface.allSatisfy({ $0.isWhitespace }) {
+            if surface.allSatisfy(\.isWhitespace) {
                 continue
             }
             if ReadingAnnotator.isNumeralRun(surface)

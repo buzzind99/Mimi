@@ -45,7 +45,7 @@ struct TranslationQueueFallbackTests {
             lock.withLock { batches.append(texts) }
             var output: [String] = []
             for text in texts {
-                try output.append(await transform(text))
+                try await output.append(transform(text))
             }
             return output
         }

@@ -317,7 +317,7 @@ final class AppModel {
                     group.addTask { (choice, resolve(choice)) }
                 }
                 var availability: [ASRModelChoice: URL] = [:]
-                for await(choice, url) in group {
+                for await (choice, url) in group {
                     availability[choice] = url
                 }
                 return availability

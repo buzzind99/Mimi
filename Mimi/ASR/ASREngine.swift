@@ -34,11 +34,11 @@ enum ASREngineError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case let .runtimeNotFound(detail):
-            return "ASR runtime not found (\(detail)). Build it with scripts/build_runtime.sh, or drop the GGUF into the models folder to use the mock."
+            "ASR runtime not found (\(detail)). Build it with scripts/build_runtime.sh, or drop the GGUF into the models folder to use the mock."
         case let .modelNotFound(path):
-            return "ASR model not found at \(path)."
+            "ASR model not found at \(path)."
         case let .createFailed(detail):
-            return "Failed to create ASR recognizer: \(detail)"
+            "Failed to create ASR recognizer: \(detail)"
         }
     }
 }

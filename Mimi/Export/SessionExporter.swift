@@ -17,10 +17,10 @@ enum SessionExporter {
 
         var fileExtension: String {
             switch self {
-            case .txt: return "txt"
-            case .srt: return "srt"
-            case .vtt: return "vtt"
-            case .json: return "json"
+            case .txt: "txt"
+            case .srt: "srt"
+            case .vtt: "vtt"
+            case .json: "json"
             }
         }
 

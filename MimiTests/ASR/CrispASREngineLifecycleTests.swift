@@ -222,7 +222,7 @@ struct CrispASREngineLifecycleTests {
 
         let task = Task.detached { engine.finish() }
         #expect(
-            await pollUntilOffMain { self.state(engine) { engine.finishing } },
+            await pollUntilOffMain { state(engine) { engine.finishing } },
             "finish entered the drain while the decode is in flight"
         )
 
@@ -232,9 +232,9 @@ struct CrispASREngineLifecycleTests {
         #expect(
             drained.contains {
                 if case .final = $0 {
-                    return true
+                    true
                 } else {
-                    return false
+                    false
                 }
             },
             "the held final survives the drain"

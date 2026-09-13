@@ -221,11 +221,10 @@ final class JMDictLookup: @unchecked Sendable {
                     let matchesSurface = (entry.keb ?? entry.reb).map {
                         ReadingAlignment.foldedKana($0) == surface
                     } ?? false
-                    let matchesReading: Bool
-                    if let expected, let reb = entry.reb {
-                        matchesReading = ReadingAlignment.foldedKana(reb) == expected
+                    let matchesReading: Bool = if let expected, let reb = entry.reb {
+                        ReadingAlignment.foldedKana(reb) == expected
                     } else {
-                        matchesReading = false
+                        false
                     }
                     return RankedEntry(
                         surface: matchesSurface, reading: matchesReading, entry: entry
@@ -293,7 +292,7 @@ final class JMDictLookup: @unchecked Sendable {
         let reb = entryStatement.optionalText(1)
         let common = entryStatement.bool(2)
 
-        let senses = try self.senses(entSeq: entSeq, candidate: candidate, db: db)
+        let senses = try senses(entSeq: entSeq, candidate: candidate, db: db)
         if senses.isEmpty {
             return nil
         }

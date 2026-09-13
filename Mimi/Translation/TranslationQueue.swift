@@ -240,7 +240,7 @@ final class TranslationQueue {
     private func translateBatch(
         _ batch: [Sentence], using engine: any TranslationEngine
     ) async throws -> [(Sentence, SentenceTranslation)] {
-        let translations = try await engine.translate(batch.map { $0.text })
+        let translations = try await engine.translate(batch.map(\.text))
         return zip(batch, translations).map { sentence, text in
             (sentence, SentenceTranslation(lang: "en", text: text))
         }
@@ -260,19 +260,19 @@ final class TranslationQueue {
     private static func describe(_ error: TranslationEngineError) -> String {
         switch error {
         case .invalidKey:
-            return "Invalid API key. Check the key in Settings, then retry."
+            "Invalid API key. Check the key in Settings, then retry."
         case .quotaExceeded:
-            return "The provider's API quota is exhausted. Retry later or switch provider."
+            "The provider's API quota is exhausted. Retry later or switch provider."
         case .rateLimited:
-            return "The provider is rate limiting requests. Retry shortly."
+            "The provider is rate limiting requests. Retry shortly."
         case let .serverError(code):
-            return "Provider server error (\(code)). Retry shortly."
+            "Provider server error (\(code)). Retry shortly."
         case let .badResponse(detail):
-            return "The provider returned an unexpected response: \(detail)"
+            "The provider returned an unexpected response: \(detail)"
         case .network:
-            return "Network error reaching the provider. Check the connection, then retry."
+            "Network error reaching the provider. Check the connection, then retry."
         case .cancelled:
-            return "Translation was cancelled."
+            "Translation was cancelled."
         }
     }
 
@@ -309,11 +309,11 @@ final class TranslationQueue {
     ) -> TranslationFailureSeverity {
         switch TransientRetryLadder.engineError(of: error) {
         case .invalidKey, .quotaExceeded:
-            return .permanent
+            .permanent
         case .badResponse:
-            return engine.transientBadResponse ? .transient : .permanent
+            engine.transientBadResponse ? .transient : .permanent
         case .rateLimited, .serverError, .network, .cancelled:
-            return .transient
+            .transient
         }
     }
 }

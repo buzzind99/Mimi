@@ -30,7 +30,7 @@ enum LookupContent: Equatable, Sendable {
     /// The display result followed by the demoted fallback hits — the full
     /// result set a fallback-pill re-selection filters against.
     var allResults: [LookupResult] {
-        ([displayResult] + fallbackResults).compactMap { $0 }
+        ([displayResult] + fallbackResults).compactMap(\.self)
     }
 }
 

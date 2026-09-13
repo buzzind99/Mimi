@@ -147,7 +147,7 @@ final class ReadingAnnotator: @unchecked Sendable {
                 // rides along in the pending run ("2 人" still fuses —
                 // ASR output spaces out words); any other uncovered span
                 // (三、四本) flushes it, then emits the span as a plain run.
-                if pending != nil, span.unicodeScalars.allSatisfy({ $0.properties.isWhitespace }) {
+                if pending != nil, span.unicodeScalars.allSatisfy(\.properties.isWhitespace) {
                     pending?.gap = span
                     cursor = token.start
                 } else {
@@ -272,7 +272,7 @@ final class ReadingAnnotator: @unchecked Sendable {
                 gap = String(String.UnicodeScalarView(scalars[low ..< high]))
             }
             guard next.start >= previousEnd,
-                  gap.unicodeScalars.allSatisfy({ $0.properties.isWhitespace }),
+                  gap.unicodeScalars.allSatisfy(\.properties.isWhitespace),
                   let nextReading = next.reading ?? Self.selfReading(nextSurface),
                   !Self.isNumeralRun(nextSurface),
                   Self.particleRomaji[nextSurface] == nil,

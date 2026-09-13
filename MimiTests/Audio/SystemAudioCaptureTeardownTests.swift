@@ -36,7 +36,7 @@ struct SystemAudioCaptureTeardownTests {
 
     private func makeCapture(running: Bool) -> SystemAudioCapture {
         let capture = SystemAudioCapture()
-        let recorder = self.recorder
+        let recorder = recorder
         capture.onChunk = { recorder.record($0) }
         capture.onIOError = { recorder.record($0) }
         if running {
@@ -51,7 +51,7 @@ struct SystemAudioCaptureTeardownTests {
     func stopFencesInFlightCallback() throws {
         let capture = makeCapture(running: true)
         let buffer = try SampleBufferSynthesis.make(frames: 2 * 2560)
-        let recorder = self.recorder
+        let recorder = recorder
 
         // Raw Thread + semaphore handoff instead of a `confirmation()`:
         // a confirmation cannot block the pipeline mid-callback, and

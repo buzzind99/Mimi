@@ -143,7 +143,7 @@ extension DictionaryStoreTests {
         async let first = store.prepareJMDict()
         async let second = store.prepareJMDict()
         async let third = store.prepareJMDict()
-        let results = try await(first, second, third)
+        let results = try await (first, second, third)
 
         #expect(results.0 == results.1 && results.1 == results.2)
         #expect(fakePrepareCalls == 1, "all callers must share the single decompression")

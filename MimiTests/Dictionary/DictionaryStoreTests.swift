@@ -405,7 +405,7 @@ final class DictionaryStoreTests {
         async let first = store.prepare()
         async let second = store.prepare()
         async let third = store.prepare()
-        let results = try await(first, second, third)
+        let results = try await (first, second, third)
 
         #expect(results.0 == results.1 && results.1 == results.2)
         #expect(fakePrepareCalls == 1, "all callers must share the single decompression")

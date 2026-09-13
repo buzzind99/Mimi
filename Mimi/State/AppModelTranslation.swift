@@ -113,13 +113,12 @@ extension AppModel {
         }
         // The guard narrowed the domain to the external providers; Apple is
         // served by the `.translationTask` host in `activateTranslation`.
-        var engine: any TranslationEngine
-        if provider == .google {
-            engine = GoogleTranslateEngine(apiKey: key, transport: translationTransport)
+        var engine: any TranslationEngine = if provider == .google {
+            GoogleTranslateEngine(apiKey: key, transport: translationTransport)
         } else if provider == .deepl {
-            engine = DeepLEngine(apiKey: key, transport: translationTransport)
+            DeepLEngine(apiKey: key, transport: translationTransport)
         } else {
-            engine = OpenRouterEngine(
+            OpenRouterEngine(
                 apiKey: key,
                 model: translationSettings.openRouterModel,
                 transport: translationTransport

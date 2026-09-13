@@ -26,7 +26,7 @@ final class HUDWindowController {
             panel?.orderOut(nil)
             return
         }
-        let panel: HUDPanel = self.panel ?? makePanel()
+        let panel: HUDPanel = panel ?? makePanel()
         panel.orderFrontRegardless()
     }
 

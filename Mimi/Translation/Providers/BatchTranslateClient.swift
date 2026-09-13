@@ -25,8 +25,8 @@ struct BatchTranslateClient: Sendable {
     /// One batch request: JSON POST with the engine's auth headers, run
     /// through the transient-retry ladder; transport failures map into the
     /// engine taxonomy.
-    func send<Body: Encodable & Sendable>(
-        _ body: Body,
+    func send(
+        _ body: some Encodable & Sendable,
         classify: @escaping @Sendable (_ status: Int, _ body: Data) -> TranslationEngineError?,
         onRetry: (@Sendable (RetryProgress) -> Void)? = nil
     ) async throws -> Data {

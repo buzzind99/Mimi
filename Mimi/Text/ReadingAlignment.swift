@@ -134,9 +134,9 @@ enum ReadingAlignment {
         return chunks
     }
 
-    private static func consumesKanaOnly<C: Collection>(
-        _ scalars: C
-    ) -> Bool where C.Element == Unicode.Scalar {
+    private static func consumesKanaOnly(
+        _ scalars: some Collection<Unicode.Scalar>
+    ) -> Bool {
         scalars.allSatisfy(KanaClassification.isKana)
     }
 

@@ -11,11 +11,11 @@ enum JMDictLookupError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .databaseMissing:
-            return "JMDict database not found; the dictionary may still be preparing."
+            "JMDict database not found; the dictionary may still be preparing."
         case .databaseClosed:
-            return "JMDict database has been closed."
+            "JMDict database has been closed."
         case let .sqliteError(code, message):
-            return "JMDict database error \(code): \(message)."
+            "JMDict database error \(code): \(message)."
         }
     }
 }

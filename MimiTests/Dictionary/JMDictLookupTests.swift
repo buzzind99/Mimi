@@ -67,7 +67,7 @@ final class JMDictLookupTests {
         let result = try #require(try engine.lookup(LookupCandidate(text: "あめ")))
 
         let entry = try #require(result.entries.first { $0.entSeq == 1_153_520 })
-        #expect(entry.senses.map { $0.glosses.first } == ["(hard) candy", "rice-sugar", "amber"])
+        #expect(entry.senses.map(\.glosses.first) == ["(hard) candy", "rice-sugar", "amber"])
         #expect(entry.senses[2].misc == "abbr")
         #expect(entry.senses[1].pos == "n")
     }
@@ -91,7 +91,7 @@ final class JMDictLookupTests {
         let entry = try #require(result.entries.first)
         #expect(entry.entSeq == 1_000_320)
         #expect(entry.senses.count == 2)
-        #expect(entry.senses.map { $0.glosses.first } == ["there", "that far"])
+        #expect(entry.senses.map(\.glosses.first) == ["there", "that far"])
     }
 
     @Test("keeps the kana-restricted sense for a reading inside the restriction")

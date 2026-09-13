@@ -59,7 +59,7 @@ struct OpenRouterEngine: TranslationEngine {
         var results: [String] = []
         results.reserveCapacity(texts.count)
         for text in texts {
-            try results.append(await client.complete(
+            try await results.append(client.complete(
                 Self.messages(for: text),
                 decode: { data in try Self.parse(ChatCompletionsClient.content(of: data)) },
                 onRetry: onRetry

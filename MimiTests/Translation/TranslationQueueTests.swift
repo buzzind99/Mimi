@@ -253,8 +253,8 @@ struct TranslationQueueTests {
             await pollUntil(timeout: resultTimeout) { sink.results.count == 2 }
         }
 
-        #expect(sink.results.map { $0.index } == [0, 2])
-        #expect(engine.recordedBatches.map { $0.count } == [2], "empties never split the batch")
+        #expect(sink.results.map(\.index) == [0, 2])
+        #expect(engine.recordedBatches.map(\.count) == [2], "empties never split the batch")
     }
 
     // MARK: - run(with:) batch sizing
@@ -283,8 +283,8 @@ struct TranslationQueueTests {
             await pollUntil(timeout: resultTimeout) { sink.results.count == 3 }
         }
 
-        #expect(engine.recordedBatches.map { $0.count } == [2, 1])
-        #expect(sink.results.map { $0.index } == [0, 1, 2], "FIFO order preserved across batches")
+        #expect(engine.recordedBatches.map(\.count) == [2, 1])
+        #expect(sink.results.map(\.index) == [0, 1, 2], "FIFO order preserved across batches")
     }
 
     // MARK: - run(with:) cancellation

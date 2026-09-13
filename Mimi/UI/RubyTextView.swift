@@ -97,14 +97,13 @@ struct RubyTextView: View, @preconcurrency Equatable {
     ) -> [SegmentedUnit] {
         segments.map { segment in
             let surface = segment.surface
-            let inert = surface.allSatisfy { $0.isWhitespace }
+            let inert = surface.allSatisfy(\.isWhitespace)
                 || !surface.contains(where: { $0.isLetter || $0.isNumber })
             guard !inert else { return .inert(surface: surface) }
-            let note: String?
-            switch annotation {
-            case .none: note = nil
-            case .furigana: note = segment.furigana
-            case .romaji: note = segment.romaji
+            let note: String? = switch annotation {
+            case .none: nil
+            case .furigana: segment.furigana
+            case .romaji: segment.romaji
             }
             return .word(surface: surface, note: note == surface ? nil : note)
         }
@@ -186,7 +185,7 @@ struct RubyTextView: View, @preconcurrency Equatable {
     /// the tapped word's payload.
     private func lookupAction(at index: Int) -> (() -> Void)? {
         guard let onLookup else { return nil }
-        let text = self.text
+        let text = text
         return {
             guard let token = Self.lookupToken(
                 at: index, text: text, segments: ReadingAnnotator.segments(for: text)

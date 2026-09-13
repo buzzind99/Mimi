@@ -16,9 +16,9 @@ enum TranslationConnectionTester {
     ) async -> Result<Void, TranslationEngineError> {
         switch provider {
         case .apple:
-            return .success(())
+            .success(())
         case .google:
-            return await translateProbe(
+            await translateProbe(
                 GoogleTranslateEngine(
                     apiKey: key,
                     transport: transport,
@@ -26,7 +26,7 @@ enum TranslationConnectionTester {
                 )
             )
         case .deepl:
-            return await translateProbe(
+            await translateProbe(
                 DeepLEngine(
                     apiKey: key,
                     transport: transport,
@@ -34,7 +34,7 @@ enum TranslationConnectionTester {
                 )
             )
         case .openrouter:
-            return await keyProbe(key, transport: transport)
+            await keyProbe(key, transport: transport)
         }
     }
 

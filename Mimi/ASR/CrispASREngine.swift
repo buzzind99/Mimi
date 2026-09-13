@@ -136,9 +136,9 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
              0x3041 ... 0x309F, // hiragana
              0x30A1 ... 0x30FF, // katakana incl. ー
              0x3400 ... 0x4DBF, 0x4E00 ... 0x9FFF: // kanji
-            return true
+            true
         default:
-            return false
+            false
         }
     }
 

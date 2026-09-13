@@ -24,15 +24,15 @@ final class DictionaryStore: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .libraryUnavailable:
-                return "Dictionary runtime library not found; text renders unannotated."
+                "Dictionary runtime library not found; text renders unannotated."
             case .bundledDictionaryMissing:
-                return "Bundled system.dic.zst not found in the app bundle."
+                "Bundled system.dic.zst not found in the app bundle."
             case .bundledJMDictMissing:
-                return "Bundled \(JMDictPin.bundledFileName) not found in the app bundle."
+                "Bundled \(JMDictPin.bundledFileName) not found in the app bundle."
             case let .prepareFailed(returnCode):
-                return "Dictionary decompression failed (return code \(returnCode))."
+                "Dictionary decompression failed (return code \(returnCode))."
             case let .smokeTestFailed(reason):
-                return "Dictionary failed its smoke query: \(reason)."
+                "Dictionary failed its smoke query: \(reason)."
             }
         }
     }
@@ -224,29 +224,29 @@ final class DictionaryStore: @unchecked Sendable {
 
         var destinationFileName: String {
             switch self {
-            case .tokenizer: return DictionaryStore.dictionaryFileName
-            case .jmDict: return JMDictPin.preparedFileName
+            case .tokenizer: DictionaryStore.dictionaryFileName
+            case .jmDict: JMDictPin.preparedFileName
             }
         }
 
         var missingSourceError: DictionaryStoreError {
             switch self {
-            case .tokenizer: return .bundledDictionaryMissing
-            case .jmDict: return .bundledJMDictMissing
+            case .tokenizer: .bundledDictionaryMissing
+            case .jmDict: .bundledJMDictMissing
             }
         }
 
         var phaseKeyPath: ReferenceWritableKeyPath<DictionaryStore, Phase> {
             switch self {
-            case .tokenizer: return \.phases.ipadic
-            case .jmDict: return \.phases.jmDict
+            case .tokenizer: \.phases.ipadic
+            case .jmDict: \.phases.jmDict
             }
         }
 
         var sourceKeyPath: KeyPath<DictionaryStore, URL?> {
             switch self {
-            case .tokenizer: return \.bundledSource
-            case .jmDict: return \.bundledJMDictSource
+            case .tokenizer: \.bundledSource
+            case .jmDict: \.bundledJMDictSource
             }
         }
     }

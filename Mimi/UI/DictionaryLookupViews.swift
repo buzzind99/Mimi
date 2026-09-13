@@ -240,7 +240,7 @@ struct DictionaryEntryContentView: View {
             displayOrigin.flatMap(DictionaryContent.joinedMatchBadge(for:)),
             entry.common ? "COMMON" : nil,
             DictionaryContent.jlptBadge(entry.jlpt)
-        ].compactMap { $0 }
+        ].compactMap(\.self)
         if !badges.isEmpty {
             HStack(spacing: 6) {
                 ForEach(badges, id: \.self) { badge in

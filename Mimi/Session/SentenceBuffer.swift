@@ -31,11 +31,11 @@ final class SentenceBuffer {
                  0x30A0 ... 0x30FF, // katakana (incl. long-vowel mark ー)
                  0x4E00 ... 0x9FFF, // CJK unified ideographs
                  0x30 ... 0x39: // ASCII digits
-                return true
+                true
             case 0x41 ... 0x5A, 0x61 ... 0x7A: // Latin letters
-                return true
+                true
             default:
-                return false
+                false
             }
         }
     }
