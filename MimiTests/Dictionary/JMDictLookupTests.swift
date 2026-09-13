@@ -191,10 +191,14 @@ final class JMDictLookupTests {
         #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
     }
 
-    @Test("with a reading the surface match still leads, then reading-match ranks")
+    @Test("with a reading, a surface-writing match still outranks a reading-only match")
     func readingRefinesBelowSurface() throws {
+        // さき names the 先/前 entry's reading, but its stored keb is 先
+        // (kanji-first insertion), so it can only reading-match; the
+        // 前-writing entry (まえ, a reading mismatch) must still lead on its
+        // surface match alone.
         let result = try #require(try engine.lookup(
-            LookupCandidate(text: "前", reading: "まえ")
+            LookupCandidate(text: "前", reading: "さき")
         ))
 
         #expect(result.entries.map(\.entSeq) == [9_990_060, 9_990_050])
@@ -562,5 +566,18 @@ struct JMDictLookupLiveTests {
         let reading = try #require(try engine.reading(forWriting: "圧"))
 
         #expect(reading == "あつ")
+    }
+}
+
+// MARK: - Typed error mapping
+
+extension JMDictLookupTests {
+    @Test("maps SQLite errors onto the typed lookup errors")
+    func sqliteErrorMapping() {
+        #expect(JMDictLookupError(SQLiteDatabase.Error.unavailable) == .databaseMissing)
+        #expect(
+            JMDictLookupError(SQLiteDatabase.Error.sqlite(code: 11, message: "corrupt"))
+                == .sqliteError(code: 11, message: "corrupt")
+        )
     }
 }

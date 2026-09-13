@@ -74,6 +74,26 @@ final class JMDictReadingFallbackTests {
         }
     }
 
+    @Test("reading throws a typed sqlite error for a corrupt database")
+    func corruptDatabaseThrowsTypedSqliteError() throws {
+        let corrupt = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimi-jmdict-reading-corrupt-\(UUID().uuidString).sqlite")
+        try Data("definitely not a sqlite database".utf8).write(to: corrupt)
+        defer { try? FileManager.default.removeItem(at: corrupt) }
+        let sut = JMDictLookup(resolveDatabase: { corrupt })
+
+        let thrown = try #require(
+            #expect(throws: JMDictLookupError.self) {
+                try sut.reading(forWriting: "食べる")
+            }
+        )
+
+        guard case .sqliteError = thrown else {
+            Issue.record("expected .sqliteError, got \(thrown)")
+            return
+        }
+    }
+
     /// Minimal database (the full fixture is unnecessary): a kanji-written
     /// entry whose entry reading is katakana, the shape the hiragana folding
     /// exists for (JMDict stores gairaigo entry readings in katakana).

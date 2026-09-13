@@ -68,7 +68,6 @@ final class JMDictExpansionCandidateTests {
             sentenceText: "あいうえ"
         )
 
-        #expect(candidates.count <= JMDictExpansion.maxCandidates)
         #expect(candidates.map(\.candidate.text) == ["あ", "あいう", "あい"])
     }
 
@@ -162,6 +161,20 @@ final class JMDictExpansionCandidateTests {
         )
 
         #expect(candidates.map(\.candidate.text) == ["お"])
+    }
+
+    @Test("a join member past the sentence end stops expansion")
+    func whitespaceRunPastSentenceEndStopsExpansion() {
+        // The sentence text ends right after the tapped surface, so the
+        // anchor degrades to the start; the scan for い crosses the trailing
+        // full-width space and runs off the end without matching.
+        let candidates = JMDictExpansion.candidates(
+            segments: segments(("あ", nil), ("い", nil)),
+            tappedAt: 0,
+            sentenceText: "あ\u{3000}"
+        )
+
+        #expect(candidates.map(\.candidate.text) == ["あ"])
     }
 
     // MARK: Kanji splits
