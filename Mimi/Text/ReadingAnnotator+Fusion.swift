@@ -227,8 +227,10 @@ extension ReadingAnnotator {
     }
 
     /// Whether a counter reading can take a sokuon: its first mora must
-    /// start with a geminable consonant (k/s/t rows; the は/ば rows realize
-    /// as the p-series, the ち row as "cch" — `KanaRomaji` derives both).
+    /// start with a geminable consonant (k/s/t rows; the ち row geminates
+    /// as "cch…", the は row arrives at `KanaRomaji` pre-voiced to the
+    /// p-series — `postSokuonVoicing`). ば行 never reaches here:
+    /// `voicedOnsetException` rejects it first.
     private static let geminableOnsets =
         "かきくけこさしすせそたちつてとはひふへほばびぶべぼぱぴぷぺぽ"
 
@@ -257,7 +259,8 @@ extension ReadingAnnotator {
     /// Irregular calendar-day readings keyed by the raw digit run, consulted
     /// before resolution: covers Arabic runs the digit table can't resolve
     /// (14日, 24日). 1日 through 10日 (ついたち…とおか) plus 14日/20日/24日;
-    /// other runs read regularly through plain fusion (15日 → じゅうごにち).
+    /// other runs (15日) miss the digit table too and stay unannotated, 日
+    /// emitting separately.
     private static let digitDateReadings: [String: String] = [
         "1": "ついたち", "2": "ふつか", "3": "みっか", "4": "よっか", "5": "いつか",
         "6": "むいか", "7": "なのか", "8": "ようか", "9": "ここのか", "10": "とおか",

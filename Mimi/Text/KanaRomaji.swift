@@ -4,8 +4,9 @@ import Foundation
 /// unambiguous direction (kana readings carry no segmentation ambiguity,
 /// unlike the reverse). Emits the exact style the annotation suite pins:
 /// wapuro long vowels ("tou", "juu", "koohii" via ー), Hepburn consonants
-/// ("sha", "chi", "tsu"), geminated sokuons ("ikkai"; っ + ち-row as "cch…";
-/// っ + は/ば-row realized as the p-series) and moraic ん as "n" except
+/// ("sha", "chi", "tsu"), geminated sokuons ("ikkai"; the next mora's
+/// onset doubles: っ + ち-row as "cch…", っ + ぱ-row as "pp…") and moraic
+/// ん as "n" except
 /// before a vowel/y-row ("man'in"). Returns nil when any character is
 /// unmappable (kanji, Latin, digits, symbols), so callers fall back to the
 /// surface.

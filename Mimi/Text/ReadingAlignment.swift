@@ -9,8 +9,9 @@ import Foundation
 /// that doesn't walk its surface.
 enum ReadingAlignment {
     /// One aligned chunk: the surface run and the kana reading it. Kanji
-    /// chunks may carry an empty kana run when the reading's split across
-    /// consecutive kanji is unknowable (時々 → 時々/ときどき).
+    /// chunks may carry an empty kana run when no reading is attributable
+    /// to them; kanji all the way to the surface's end come back as one
+    /// chunk carrying the whole reading (時々/ときどき).
     struct Run: Equatable {
         let surface: String
         let kana: String
@@ -112,9 +113,8 @@ enum ReadingAlignment {
 
     /// Fuses the chunk under construction into the walk result built for
     /// the remainder: the recursion completes right-to-left, so an incoming
-    /// same-kind chunk merges into `rest`'s head (a `matched` chunk —
-    /// surface kana mapping to their own kana — never merges with a
-    /// `consumed` chunk — kanji taking the reading between anchors).
+    /// same-kind chunk merges into `rest`'s head — matched and consumed
+    /// kinds never mix (see `Chunk`).
     private static func prepend(
         surface: Unicode.Scalar, kana: some Sequence<Unicode.Scalar>,
         matched: Bool, onto rest: [Chunk]

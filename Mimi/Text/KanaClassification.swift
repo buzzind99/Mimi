@@ -1,5 +1,5 @@
-/// Scalar-level kana/kanji classification shared by the reading annotator and
-/// the surface↔reading alignment.
+/// Scalar-level kana/kanji classification shared by the reading annotator,
+/// the surface↔reading alignment, and the tap lookup.
 enum KanaClassification {
     /// Hiragana and katakana, including the long-vowel mark and small kana.
     static func isKana(_ scalar: Unicode.Scalar) -> Bool {

@@ -11,8 +11,9 @@ final class ReadingSegment {
     var romaji: String?
     var furigana: String?
     /// The token's dictionary base form (言った → 言う), or nil for
-    /// numerals, plain runs, and entry-less tokens — the dictionary
-    /// lookup's preferred query key, with surface/reading as fallbacks.
+    /// numerals, plain runs, and entry-less tokens — the tap lookup's
+    /// fallback query after the surface, catching conjugated forms whose
+    /// surface isn't a headword (the furigana reading ranks the hits).
     var lemma: String?
     /// The token's coarse part of speech (名詞, 動詞, …), or nil when the
     /// lexicon row has none.
