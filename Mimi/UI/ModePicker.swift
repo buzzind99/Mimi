@@ -42,7 +42,7 @@ struct ModePicker<M: Equatable & Identifiable>: View {
                 Text(text)
                     .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
             }
-            .foregroundStyle(isSelected ? Theme.primaryText : unselectedColor)
+            .foregroundStyle(isSelected ? Color.white : unselectedColor)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 5)
             .background {
