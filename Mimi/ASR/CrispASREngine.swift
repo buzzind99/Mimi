@@ -39,8 +39,9 @@ import Foundation
 final class CrispASREngine: ASREngine, @unchecked Sendable {
     let isMock = false
 
-    /// Called on an arbitrary thread when a decode fails. Throttled by the
-    /// engine to the first failure and then once every 32 consecutive ones.
+    /// Called on an arbitrary thread when a decode fails or the VAD degrades
+    /// to cap-only finalization. Throttled by the engine to the first failure
+    /// and then once every 32 consecutive ones.
     var onEngineError: ((String) -> Void)?
 
     private let modelPath: String
@@ -77,7 +78,7 @@ final class CrispASREngine: ASREngine, @unchecked Sendable {
     static let vadCheckIntervalSamples = 500 * sampleRate / 1000
     static let vadThreshold: Float = 0.7
     static let vadMinSpeechMS = 160
-    /// Must equal `endpointSamples` — see the comment there.
+    /// Kept below `endpointSamples` — see the comment there.
     static let vadMinSilenceMS = 800
     static let vadPadMS = 30
     /// Don't discard a short speechless buffer on a single VAD pass — onsets
