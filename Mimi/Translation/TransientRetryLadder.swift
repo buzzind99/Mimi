@@ -86,8 +86,8 @@ struct TransientRetryLadder: Sendable {
     }
 }
 
-/// Short user-facing copy for engine errors — used by the Settings Test
-/// button now and mapped into `TranslationStatus`.
+/// Short user-facing copy for engine errors — the Settings Test button
+/// records it as the persisted `ConnectionTestResult.failure` detail.
 extension TranslationEngineError {
     var statusMessage: String {
         switch self {

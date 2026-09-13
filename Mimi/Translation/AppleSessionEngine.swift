@@ -3,8 +3,7 @@ import Translation
 
 /// `TranslationEngine` adapter around the on-device `TranslationSession`
 /// SwiftUI hands out via `.translationTask`. Batches through
-/// `translations(from:)`, which amortizes the model round-trip across the
-/// batch exactly as the queue has always batched on-device work.
+/// `translations(from:)` so one model round-trip serves the whole batch.
 ///
 /// `@unchecked Sendable`: the `Translation` framework does not mark
 /// `TranslationSession` Sendable, but the session handed out by

@@ -259,8 +259,9 @@ final class TranslationSettings {
     /// label prefers the attached provider (`attachedProvider`) over the
     /// picker so it never names an engine that isn't actually running; nil
     /// (nothing external attached, or no session yet) falls back to the
-    /// picker selection. Driven by published state (`fallbackActive`,
-    /// `activeExternalProvider`), never re-derived from the picker alone.
+    /// picker selection. Driven by published state
+    /// (`translationFallbackActive`, `activeExternalProvider`), never
+    /// re-derived from the picker alone.
     func activeEngineDescription(
         fallbackActive: Bool,
         attachedProvider: TranslationProvider? = nil

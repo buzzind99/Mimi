@@ -174,9 +174,8 @@ final class TranslationQueue {
     /// never enters `pending` (or the session round-trip).
     ///
     /// Empty/whitespace sentences are dropped here: they have nothing
-    /// to translate, so sending them to a provider wastes a round-trip and
-    /// can trip batch-shape validation (OpenRouter's strict JSON-array
-    /// contract in particular). They keep their transcript row untranslated.
+    /// to translate, so sending them to a provider wastes a round-trip.
+    /// They keep their transcript row untranslated.
     func enqueue(_ sentence: Sentence) {
         guard !sentence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
