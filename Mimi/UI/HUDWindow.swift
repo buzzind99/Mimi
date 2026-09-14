@@ -74,7 +74,19 @@ final class HUDWindowController {
 final class HUDPanel: NSPanel, ObservableObject {
     @Published var locked = false {
         didSet {
-            guard oldValue != locked, let content = contentView as? HUDHostingView else { return }
+            guard oldValue != locked else { return }
+            // Movability is gated on the window itself: AppKit consults the
+            // deepest hit-tested view (SwiftUI internals in the padlock
+            // region, which report movable=YES) for background-drag moves,
+            // so the HUDHostingView override alone can't suppress them.
+            isMovable = !locked
+            isMovableByWindowBackground = !locked
+            if locked {
+                styleMask.remove(.resizable)
+            } else {
+                styleMask.insert(.resizable)
+            }
+            guard let content = contentView as? HUDHostingView else { return }
             content.needsLayout = true
             content.refitHeight()
         }
